@@ -1,6 +1,6 @@
-import type { FS } from '../fs/fs';
-import type { Record } from '../record';
-import type { Sink } from './sink';
+import type { FS } from '../../fs/fs';
+import type { Record } from '../../record';
+import type { Sink } from '../types';
 
 export function cp(fs: FS, dest: string): Sink<Record, void> {
 	return async (input) => {

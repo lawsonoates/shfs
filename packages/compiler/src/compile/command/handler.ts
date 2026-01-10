@@ -1,10 +1,11 @@
 import type { ShellCommand } from '../../ast';
 import type { StepIR } from '../../ir';
-import { compileCat } from './cat';
-import { compileCp } from './cp';
-import { compileLs } from './ls';
-import { compilePwd } from './pwd';
-import { compileTail } from './tail';
+import { compileCat } from './cat/cat';
+import { compileCp } from './cp/cp';
+import { compileLs } from './ls/ls';
+import { compilePwd } from './pwd/pwd';
+import { compileRm } from './rm/rm';
+import { compileTail } from './tail/tail';
 
 export type Handler = (cmd: ShellCommand) => StepIR;
 
@@ -14,6 +15,7 @@ export namespace CommandHandler {
 		cp: compileCp,
 		ls: compileLs,
 		pwd: compilePwd,
+		rm: compileRm,
 		tail: compileTail,
 	};
 

@@ -40,6 +40,13 @@ export class MemoryFS implements FS {
 		this.files.set(path, content);
 	}
 
+	async delete(path: string): Promise<void> {
+		if (!this.files.has(path)) {
+			throw new Error(`File not found: ${path}`);
+		}
+		this.files.delete(path);
+	}
+
 	async *list(glob: string): Stream<string> {
 		const pattern = glob
 			.replace(/\*\*/g, '.*')

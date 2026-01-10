@@ -1,8 +1,8 @@
-import type { FS } from '../fs/fs';
-import type { Record } from '../record';
-import type { Transducer } from './transducer';
+import type { FS } from '../../fs/fs';
+import type { FileRecord, LineRecord } from '../../record';
+import type { Transducer } from '../types';
 
-export function cat(fs: FS): Transducer<{ path: string }, Record> {
+export function cat(fs: FS): Transducer<FileRecord, LineRecord> {
 	return async function* (input) {
 		for await (const file of input) {
 			let lineNum = 1;

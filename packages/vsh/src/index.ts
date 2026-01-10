@@ -31,3 +31,10 @@ console.log(output4);
 const output5 = await $.query`cat backup.txt`.text();
 console.log('\nContents of backup.txt (first 5 lines):');
 console.log(output5.split('\n').slice(0, 5).join('\n'));
+
+// Test rm: delete backup.txt
+console.log('\nDeleting backup.txt...');
+await $.query`rm backup.txt`.raw();
+const output6 = await $.query`ls *`.text();
+console.log('After rm backup.txt:');
+console.log(output6);

@@ -1,4 +1,4 @@
-import type { Transducer } from './transducer';
+import type { Transducer } from '../types';
 
 export function tail<T>(n: number): Transducer<T, T> {
 	return async function* (input) {

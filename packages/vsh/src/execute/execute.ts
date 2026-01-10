@@ -1,14 +1,15 @@
 import type { PipelineIR } from '@vsh/compiler/ir';
+import * as R from 'remeda';
 
 import type { FS } from '../fs/fs';
-import { cat } from '../operators/cat';
-import { cp } from '../operators/cp';
-import { ls } from '../operators/ls';
-import { pwd } from '../operators/pwd';
-import { tail } from '../operators/tail';
+import { cat } from '../operator/cat/cat';
+import { cp } from '../operator/cp/cp';
+import { ls } from '../operator/ls/ls';
+import { pwd } from '../operator/pwd/pwd';
+import { rm } from '../operator/rm/rm';
+import { tail } from '../operator/tail/tail';
 import type { Record } from '../record';
 import type { Stream } from '../stream';
-import { pipe } from './pipe';
 import { files } from './producers';
 
 export type ExecuteResult =
@@ -32,21 +33,61 @@ export function execute(ir: PipelineIR, fs: FS): ExecuteResult {
 		case 'cat':
 			return {
 				kind: 'stream',
-				stream: pipe(files(fs, step.args.files.join(' ')), cat(fs)),
+				stream: R.pipe(files(fs, ...step.args.files)(), cat(fs)),
 			};
 		case 'cp':
 			return {
 				kind: 'sink',
-				promise: pipe(ls(fs, step.args.src), cp(fs, step.args.dest)),
+				promise: R.pipe(
+					(async function* () {
+						for (const src of step.args.srcs) {
+							yield* files(fs, src)();
+						}
+					})(),
+					cp(fs, step.args.dest),
+				),
 			};
 		case 'ls':
-			return { kind: 'stream', stream: pipe(ls(fs, step.args.path)) };
+			return {
+				kind: 'stream',
+				stream: R.pipe(
+					(async function* () {
+						for (const path of step.args.paths) {
+							yield* ls(fs, path)();
+						}
+					})(),
+				),
+			};
 		case 'pwd':
-			return { kind: 'stream', stream: pipe(pwd(fs)) };
+			return { kind: 'stream', stream: R.pipe(pwd(fs)()) };
+		case 'rm':
+			return {
+				kind: 'sink',
+				promise: R.pipe(
+					(async function* () {
+						for (const path of step.args.paths) {
+							yield* files(fs, path)();
+						}
+					})(),
+					rm(fs),
+				),
+			};
 		case 'tail':
 			return {
 				kind: 'stream',
-				stream: pipe(files(fs, sourceGlob), cat(fs), tail(step.args.n)),
+				stream: R.pipe(
+					(async function* () {
+						if (step.args.files.length === 0) {
+							yield* files(fs, sourceGlob)();
+						} else {
+							for (const file of step.args.files) {
+								yield* files(fs, file)();
+							}
+						}
+					})(),
+					cat(fs),
+					tail(step.args.n),
+				),
 			};
 	}
 }

@@ -1,6 +1,6 @@
-import type { FS } from '../fs/fs';
-import type { Record } from '../record';
-import type { Producer } from './producer';
+import type { FS } from '../../fs/fs';
+import type { Record } from '../../record';
+import type { Producer } from '../types';
 
 export function ls(fs: FS, path: string): Producer<Record> {
 	return async function* () {

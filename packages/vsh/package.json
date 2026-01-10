@@ -1,7 +1,7 @@
 {
 	"dependencies": {
 		"@vsh/compiler": "workspace:*",
-		"effect": "^3.19.14"
+		"remeda": "^2.33.1"
 	},
 	"devDependencies": {
 		"@tsconfig/bun": "catalog:",
