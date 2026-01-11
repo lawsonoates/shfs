@@ -15,8 +15,10 @@ bun install vsh
 ## Usage
 
 ```typescript
-import { $ } from 'vsh';
+import { Shell } from 'vsh';
 
-const content await $`tail -n 10 logs.txt`.text();
+const { $ } = new Shell();
+
+const content = await $`tail -n 10 logs.txt`.text();
 console.log(content);
 ```

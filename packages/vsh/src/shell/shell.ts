@@ -16,14 +16,22 @@ async function collectRecords(result: ExecuteResult): Promise<Record[]> {
 	return collect<Record>()(result.stream);
 }
 
-export class ShellClient {
+export class Shell {
 	private fs: FS;
 
 	constructor(fs: FS) {
 		this.fs = fs;
 	}
 
-	query(strings: TemplateStringsArray, ...exprs: unknown[]) {
+	$(strings: TemplateStringsArray, ...exprs: unknown[]) {
+		return this._exec(strings, ...exprs);
+	}
+
+	exec(strings: TemplateStringsArray, ...exprs: unknown[]) {
+		return this._exec(strings, ...exprs);
+	}
+
+	private _exec(strings: TemplateStringsArray, ...exprs: unknown[]) {
 		const source = String.raw(strings, ...exprs);
 		const fs = this.fs;
 

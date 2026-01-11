@@ -1,0 +1,18 @@
+{
+	"dependencies": {
+		"@openrouter/ai-sdk-provider": "^1.5.4",
+		"@vsh/vsh": "workspace:*",
+		"ai": "^6.0.27",
+		"zod": "^4.3.5"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	},
+	"module": "index.ts",
+	"name": "agent",
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"private": true,
+	"type": "module"
+}

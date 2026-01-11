@@ -8,7 +8,7 @@
 		"@types/bun": "catalog:"
 	},
 	"exports": {
-		"./*": "./src/*.ts"
+		"./*": "./src/index.ts"
 	},
 	"name": "@vsh/vsh",
 	"peerDependencies": {
