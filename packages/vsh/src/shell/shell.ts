@@ -23,9 +23,9 @@ export class Shell {
 		this.fs = fs;
 	}
 
-	$(strings: TemplateStringsArray, ...exprs: unknown[]) {
+	$ = (strings: TemplateStringsArray, ...exprs: unknown[]) => {
 		return this._exec(strings, ...exprs);
-	}
+	};
 
 	exec(strings: TemplateStringsArray, ...exprs: unknown[]) {
 		return this._exec(strings, ...exprs);

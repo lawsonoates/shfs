@@ -1,0 +1,16 @@
+{
+  "name": "turso-agent-fs",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "vsh": "workspace:*",
+    "agentfs-sdk": "^0.5.3"
+  }
+}
