@@ -10,10 +10,10 @@ import { lazy } from '../util/lazy';
 
 async function collectRecords(result: ExecuteResult): Promise<Record[]> {
 	if (result.kind === 'sink') {
-		await result.promise;
+		await result.value;
 		return [];
 	}
-	return collect<Record>()(result.stream);
+	return collect<Record>()(result.value);
 }
 
 export class Shell {
@@ -62,10 +62,10 @@ export class Shell {
 			async stdout(): Promise<void> {
 				const result = execute(ir(), fs);
 				if (result.kind === 'sink') {
-					await result.promise;
+					await result.value;
 					return;
 				}
-				for await (const r of result.stream) {
+				for await (const r of result.value) {
 					if (r.kind === 'line') {
 						process.stdout.write(`${r.text}\n`);
 					}

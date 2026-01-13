@@ -4,10 +4,14 @@
     "@types/bun": "catalog:"
   },
   "exports": {
+    ".": "./src/index.ts",
     "./ast": "./src/ast.ts",
     "./compile": "./src/compile/compile.ts",
+    "./compile-v2": "./src/compile/compile-v2.ts",
     "./ir": "./src/ir.ts",
-    "./parser": "./src/parser.ts"
+    "./parser": "./src/parser.ts",
+    "./parser-v2": "./src/parser/parser.ts",
+    "./lexer": "./src/lexer/scanner.ts"
   },
   "name": "@vsh/compiler",
   "peerDependencies": {

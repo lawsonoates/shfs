@@ -12,8 +12,8 @@ import type { Stream } from '../stream';
 import { files } from './producers';
 
 export type ExecuteResult =
-	| { kind: 'stream'; stream: Stream<Record> }
-	| { kind: 'sink'; promise: Promise<void> };
+	| { kind: 'stream'; value: Stream<Record> }
+	| { kind: 'sink'; value: Promise<void> };
 
 /**
  * Execute compiles a PipelineIR into an executable result.
@@ -24,7 +24,7 @@ export function execute(ir: PipelineIR, fs: FS): ExecuteResult {
 	if (!step) {
 		return {
 			kind: 'stream',
-			stream: (async function* () {
+			value: (async function* () {
 				// Empty stream - no steps to execute
 			})(),
 		};
@@ -34,12 +34,12 @@ export function execute(ir: PipelineIR, fs: FS): ExecuteResult {
 		case 'cat':
 			return {
 				kind: 'stream',
-				stream: pipe(files(...step.args.files), cat(fs)),
+				value: pipe(files(...step.args.files), cat(fs)),
 			};
 		case 'cp':
 			return {
 				kind: 'sink',
-				promise: Promise.all(
+				value: Promise.all(
 					map(step.args.srcs, (src) =>
 						cp(fs)({
 							src,
@@ -52,15 +52,7 @@ export function execute(ir: PipelineIR, fs: FS): ExecuteResult {
 		case 'ls':
 			return {
 				kind: 'stream',
-				// stream: (async function* () {
-				// 	for (const path of step.args.paths) {
-				// 		yield* ls(fs, path);
-				// 	}
-				// })(),
-				// stream: Promise.all(
-				// 	map(step.args.paths, (path) => ls(fs, path))
-				// ).then(),
-				stream: (async function* () {
+				value: (async function* () {
 					const results = await Promise.all(
 						map(step.args.paths, (path) => ls(fs, path))
 					).then();
@@ -73,7 +65,7 @@ export function execute(ir: PipelineIR, fs: FS): ExecuteResult {
 		case 'rm':
 			return {
 				kind: 'sink',
-				promise: Promise.all(
+				value: Promise.all(
 					map(step.args.paths, (path) =>
 						rm(fs)({ path, recursive: step.args.recursive })
 					)
@@ -82,7 +74,7 @@ export function execute(ir: PipelineIR, fs: FS): ExecuteResult {
 		case 'tail':
 			return {
 				kind: 'stream',
-				stream: (async function* () {
+				value: (async function* () {
 					const results = await Promise.all(
 						map(step.args.files, (file) =>
 							pipe(files(file), cat(fs), tail(step.args.n))
@@ -92,17 +84,11 @@ export function execute(ir: PipelineIR, fs: FS): ExecuteResult {
 						yield* lines;
 					}
 				})(),
-
-				// stream: Promise.all(
-				// 	map(step.args.files, (file) =>
-				// 		pipe(files(file), cat(fs), tail(step.args.n))
-				// 	)
-				// ),
 			};
 		case 'mkdir':
 			return {
 				kind: 'sink',
-				promise: Promise.all(
+				value: Promise.all(
 					map(step.args.paths, (path) =>
 						mkdir(fs)({ path, recursive: step.args.recursive })
 					)
