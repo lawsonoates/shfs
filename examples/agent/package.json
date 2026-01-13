@@ -2,7 +2,7 @@
 	"dependencies": {
 		"@openrouter/ai-sdk-provider": "^1.5.4",
 		"ai": "^6.0.27",
-		"vsh": "workspace:*",
+		"shfs": "workspace:*",
 		"zod": "^4.3.5"
 	},
 	"devDependencies": {

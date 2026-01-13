@@ -1,4 +1,4 @@
-# vsh
+# shfs
 
 To install dependencies:
 

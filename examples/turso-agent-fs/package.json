@@ -10,7 +10,7 @@
 		"typescript": "^5"
 	},
 	"dependencies": {
-		"vsh": "workspace:*",
+		"shfs": "workspace:*",
 		"agentfs-sdk": "^0.5.3"
 	}
 }

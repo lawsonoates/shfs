@@ -1,4 +1,4 @@
-import { Shell } from 'vsh';
+import { Shell } from 'shfs';
 import { TursoAgentFS } from './fs';
 
 const fs = await TursoAgentFS.create('my-agent');

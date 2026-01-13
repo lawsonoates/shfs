@@ -1,7 +1,7 @@
 import { openrouter } from '@openrouter/ai-sdk-provider';
-import { Shell } from '@vsh/vsh';
-import { MemoryFS } from '@vsh/vsh/fs';
 import { generateText, stepCountIs, tool } from 'ai';
+import { Shell } from 'shfs';
+import { MemoryFS } from 'shfs/fs';
 import { z } from 'zod';
 
 const fs = new MemoryFS();

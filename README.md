@@ -1,29 +1,29 @@
-**Note**: agents were used extensively to develop vsh.
+**Note**: agents were used extensively to develop shfs.
 
-# vsh
+# shfs
 
-vsh (virtual shell) is a simulated [fish shell](https://github.com/fish-shell/fish-shell) (subset) environment for executing filesystem-related commands.
+shfs (shell filesystem) is a simulated [fish shell](https://github.com/fish-shell/fish-shell) (subset) environment for executing filesystem-related commands.
 
-vsh is inspired by Bun's `$` shell api and provides a pluggable filesystem interface allowing custom storage.
+shfs is inspired by Bun's `$` shell api and provides a pluggable filesystem interface allowing custom storage.
 
-vsh is designed to be used by agents needing a filesystem without having to spin up a sandbox.
+shfs is designed to be used by agents needing a filesystem without having to spin up a sandbox.
 
 - Why fish? it's simple.
-- Why a subset of fish? vsh is only for simulating a filesystem, only a subset is really needed.
+- Why a subset of fish? shfs is only for simulating a filesystem, only a subset is really needed.
 
 The subset includes the commands listed in [Supported Commands](#supported-commands) section and has a simplified grammar (no variables, no functions, no heredocs). More details available in the [Grammar](#grammar) section and the [Lexer Specification](packages/compiler/src/lexer/lexer-spec.md).
 
 ## Installation
 
 ```bash
-bun add vsh
+bun add shfs
 ```
 
 ## Usage
 
 ```typescript
-import { Shell } from 'vsh';
-import { MemoryFS } from 'vsh/fs';
+import { Shell } from 'shfs';
+import { MemoryFS } from 'shfs/fs';
 
 const fs = new MemoryFS();
 fs.setFile('hello.txt', 'hello world');
@@ -47,7 +47,7 @@ console.log(content);
 
 ## Agents
 
-vsh is designed to be a tool used by agents to enable the benefits of a filesystem like progressive disclosure.
+shfs is designed to be a tool used by agents to enable the benefits of a filesystem like progressive disclosure.
 
 [Agent Tool Prompt](docs/agent-tool-prompt.md) is a prompt that can be used as a tool description for an agent.
 

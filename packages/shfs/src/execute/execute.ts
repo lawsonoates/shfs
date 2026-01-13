@@ -2,7 +2,7 @@ import {
 	expandedWordToString,
 	extractPathsFromExpandedWords,
 	type PipelineIR,
-} from '@vsh/compiler';
+} from '@shfs/compiler';
 import { map, pipe } from 'remeda';
 import type { FS } from '../fs/fs';
 import { cat } from '../operator/cat/cat';

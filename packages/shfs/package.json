@@ -7,7 +7,7 @@
 	"devDependencies": {
 		"@tsconfig/bun": "catalog:",
 		"@types/bun": "catalog:",
-		"@vsh/compiler": "workspace:*",
+		"@shfs/compiler": "workspace:*",
 		"typescript": "^5.0.0",
 		"tsdown": "catalog:"
 	},
@@ -24,7 +24,7 @@
 	"files": [
 		"dist"
 	],
-	"homepage": "https://github.com/lawsonoates/vsh#readme",
+	"homepage": "https://github.com/lawsonoates/shfs#readme",
 	"keywords": [
 		"bash",
 		"shell",
@@ -35,13 +35,13 @@
 	"license": "MIT",
 	"main": "./dist/index.mjs",
 	"module": "./dist/index.mjs",
-	"name": "shellfs",
+	"name": "shfs",
 	"peerDependencies": {
 		"typescript": "^5"
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/lawsonoates/vsh"
+		"url": "https://github.com/lawsonoates/shfs"
 	},
 	"scripts": {
 		"build": "tsdown",

@@ -9,7 +9,7 @@
 		"build": "tsdown",
 		"prepublishOnly": "bun run build"
 	},
-	"name": "@vsh/compiler",
+	"name": "@shfs/compiler",
 	"peerDependencies": {
 		"typescript": "^5"
 	},

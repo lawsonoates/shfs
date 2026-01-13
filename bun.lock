@@ -3,15 +3,12 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "vsh",
+      "name": "shfs",
       "devDependencies": {
         "@biomejs/biome": "2.3.11",
         "@tsconfig/bun": "catalog:",
         "@types/bun": "catalog:",
         "ultracite": "7.0.11",
-      },
-      "peerDependencies": {
-        "typescript": "^5",
       },
     },
     "examples/agent": {
@@ -19,7 +16,7 @@
       "dependencies": {
         "@openrouter/ai-sdk-provider": "^1.5.4",
         "ai": "^6.0.27",
-        "vsh": "workspace:*",
+        "shfs": "workspace:*",
         "zod": "^4.3.5",
       },
       "devDependencies": {
@@ -33,7 +30,7 @@
       "name": "turso-agent-fs",
       "dependencies": {
         "agentfs-sdk": "^0.5.3",
-        "vsh": "workspace:*",
+        "shfs": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -43,7 +40,7 @@
       },
     },
     "packages/compiler": {
-      "name": "@vsh/compiler",
+      "name": "@shfs/compiler",
       "devDependencies": {
         "@tsconfig/bun": "catalog:",
         "@types/bun": "catalog:",
@@ -54,13 +51,14 @@
         "typescript": "^5",
       },
     },
-    "packages/vsh": {
-      "name": "vsh",
+    "packages/shfs": {
+      "name": "shfs",
+      "version": "0.1.0",
       "dependencies": {
-        "@vsh/compiler": "workspace:*",
         "remeda": "^2.33.1",
       },
       "devDependencies": {
+        "@shfs/compiler": "workspace:*",
         "@tsconfig/bun": "catalog:",
         "@types/bun": "catalog:",
         "tsdown": "catalog:",
@@ -173,6 +171,8 @@
 
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.0-beta.59", "", {}, "sha512-aoh6LAJRyhtazs98ydgpNOYstxUlsOV1KJXcpf/0c0vFcUA8uyd/hwKRhqE/AAPNqAho9RliGsvitCoOzREoVA=="],
 
+    "@shfs/compiler": ["@shfs/compiler@workspace:packages/compiler"],
+
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
     "@trpc/server": ["@trpc/server@11.8.1", "", { "peerDependencies": { "typescript": ">=5.7.2" } }, "sha512-P4rzZRpEL7zDFgjxK65IdyH0e41FMFfTkQkuq0BA5tKcr7E6v9/v38DEklCpoDN6sPiB1Sigy/PUEzHENhswDA=="],
@@ -198,8 +198,6 @@
     "@types/node": ["@types/node@25.0.3", "", { "dependencies": { "undici-types": "~7.16.0" } }, "sha512-W609buLVRVmeW693xKfzHeIV6nJGGz98uCPfeXI1ELMLXVeKYZ9m15fAMSaUPBHYLGFsVRcMmSCksQOrZV9BYA=="],
 
     "@vercel/oidc": ["@vercel/oidc@3.1.0", "", {}, "sha512-Fw28YZpRnA3cAHHDlkt7xQHiJ0fcL+NRcIqsocZQUSmbzeIKRpwttJjik5ZGanXP+vlA4SbTg+AbA3bP363l+w=="],
-
-    "@vsh/compiler": ["@vsh/compiler@workspace:packages/compiler"],
 
     "agent": ["agent@workspace:examples/agent"],
 
@@ -291,6 +289,8 @@
 
     "semver": ["semver@7.7.3", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-SdsKMrI9TdgjdweUSR9MweHA4EJ8YxHn8DFaDisvhVlUOe4BF1tLD7GAj0lIqWVl+dPb/rExr0Btby5loQm20Q=="],
 
+    "shfs": ["shfs@workspace:packages/shfs"],
+
     "sisteransi": ["sisteransi@1.0.5", "", {}, "sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg=="],
 
     "tinyexec": ["tinyexec@1.0.2", "", {}, "sha512-W/KYk+NFhkmsYpuHq5JykngiOCnxeVL8v8dFnqxSD8qEEdRfXk1SDM6JzNqcERbcGYj9tMrDQBYV9cjgnunFIg=="],
@@ -316,8 +316,6 @@
     "undici-types": ["undici-types@7.16.0", "", {}, "sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw=="],
 
     "unrun": ["unrun@0.2.24", "", { "dependencies": { "rolldown": "1.0.0-beta.59" }, "peerDependencies": { "synckit": "^0.11.11" }, "optionalPeers": ["synckit"], "bin": { "unrun": "dist/cli.mjs" } }, "sha512-xa4/O5q2jmI6EqxweJ+sOy5cyORZWcsgmi8pmABVSUyg24Fh44qJrneUHavZEMsbJbghHYWKSraFy5hDCb/m4w=="],
-
-    "vsh": ["vsh@workspace:packages/vsh"],
 
     "zod": ["zod@4.3.5", "", {}, "sha512-k7Nwx6vuWx1IJ9Bjuf4Zt1PEllcwe7cls3VNzm4CQ1/hgtFUK2bRNG3rvnpPUhFjmqJKAKtjV576KnUkHocg/g=="],
   }

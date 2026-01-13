@@ -1,5 +1,5 @@
 import { AgentFS } from 'agentfs-sdk';
-import type { FS } from 'vsh/fs';
+import type { FS } from 'shfs/fs';
 
 export class TursoAgentFS implements FS {
 	private readonly agent: AgentFS;
