@@ -1,5 +1,10 @@
 import { LexerState, StateContext } from './context';
-import { OPERATORS, SINGLE_CHAR_OPS, WORD_BOUNDARY_CHARS } from './operators';
+import {
+	OPERATORS,
+	SINGLE_CHAR_OPS,
+	SPECIAL_CHARS,
+	WORD_BOUNDARY_CHARS,
+} from './operators';
 import type { SourcePosition } from './position';
 import { type SourceReader, StringSourceReader } from './source-reader';
 import {
@@ -504,8 +509,7 @@ export class Scanner {
 	}
 
 	private isSpecialChar(c: string): boolean {
-		// Simplified for fish subset - no $, {, }, ~
-		return ' \t\n|<>()"\'\\*?[#'.includes(c);
+		return SPECIAL_CHARS.has(c);
 	}
 
 	private isWordBoundary(c: string): boolean {

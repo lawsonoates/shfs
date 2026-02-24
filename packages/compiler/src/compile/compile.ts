@@ -1,12 +1,12 @@
 /**
  * AST-based compiler for the Fish subset parser.
  *
- * This compiler traverses the AST and produces a PipelineIR
+ * This compiler traverses the AST and produces script-level IR
  * with enhanced word expansion information.
  *
  * Key differences from the old compile.ts:
  * - Accepts Program from the new parser (not ShellAST)
- * - Produces PipelineIR with ExpandedWord types
+ * - Produces ScriptIR/PipelineIR with ExpandedWord types
  * - Preserves word structure for runtime expansion
  */
 
@@ -17,6 +17,8 @@ import {
 	literal,
 	type PipelineIR,
 	type RedirectionIR,
+	type ScriptIR,
+	type ScriptStatementIR,
 	type SimpleCommandIR,
 	type SourceIR,
 	type StepIR,
@@ -29,18 +31,19 @@ import type {
 	Program,
 	Redirection,
 	SimpleCommand,
+	Statement,
 	Word,
 	WordPart,
 } from '../parser/ast';
 import { CommandHandler } from './command/handler';
 
 /**
- * Compile a Program AST to a PipelineIR.
+ * Compile a Program AST to a ScriptIR.
  *
  * @param program The parsed Program AST
- * @returns The compiled PipelineIR
+ * @returns The compiled ScriptIR
  */
-export function compile(program: Program): PipelineIR {
+export function compile(program: Program): ScriptIR {
 	const compiler = new ProgramCompiler();
 	return compiler.compileProgram(program);
 }
@@ -54,10 +57,24 @@ export function compile(program: Program): PipelineIR {
  */
 class ProgramCompiler {
 	/**
-	 * Compile a Program to a PipelineIR.
+	 * Compile a Program to a ScriptIR.
 	 */
-	compileProgram(node: Program): PipelineIR {
-		return this.compilePipeline(node.pipeline);
+	compileProgram(node: Program): ScriptIR {
+		return {
+			statements: node.statements.map((statement) =>
+				this.compileStatement(statement)
+			),
+		};
+	}
+
+	/**
+	 * Compile a script statement to ScriptStatementIR.
+	 */
+	compileStatement(node: Statement): ScriptStatementIR {
+		return {
+			chainMode: node.chainMode,
+			pipeline: this.compilePipeline(node.pipeline),
+		};
 	}
 
 	/**
@@ -264,8 +281,14 @@ class ProgramCompiler {
 	 * Used for storing command substitution content.
 	 */
 	private serializeProgram(program: Program): string {
-		// Simple serialization: just get the command names and args
-		const commands = program.pipeline.commands.map((cmd) => {
+		const statements = program.statements.map((statement) =>
+			this.serializePipeline(statement.pipeline)
+		);
+		return statements.join('; ');
+	}
+
+	private serializePipeline(pipeline: Pipeline): string {
+		const commands = pipeline.commands.map((cmd) => {
 			const name = cmd.name.literalValue ?? '?';
 			const args = cmd.args
 				.map((arg) => arg.literalValue ?? '?')

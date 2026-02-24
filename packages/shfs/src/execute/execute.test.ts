@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { literal, type PipelineIR } from '@shfs/compiler';
+import { literal, type PipelineIR, type ScriptIR } from '@shfs/compiler';
 
 import { collect } from '../consumer/consumer';
 import { MemoryFS } from '../fs/memory';
@@ -311,7 +311,7 @@ test('wires mv force flag through execute', async () => {
 	expect(textDecoder.decode(await fs.readFile('/dest.txt'))).toBe(
 		'new content'
 	);
-	expect(await fs.readFile('/source.txt')).rejects.toThrow('File not found');
+	await expect(fs.readFile('/source.txt')).rejects.toThrow('File not found');
 });
 
 test('wires rm force flag through execute', async () => {
@@ -634,4 +634,154 @@ test('cd throws when target is a file', async () => {
 			'cd: not a directory: /file.txt'
 		);
 	}
+});
+
+test('executes script statements in deterministic order', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace', true);
+	const context = { cwd: '/' };
+
+	const script: ScriptIR = {
+		statements: [
+			{
+				chainMode: 'always',
+				pipeline: {
+					firstCommand: {
+						name: literal('cd'),
+						args: [literal('/workspace')],
+						redirections: [],
+					},
+					source: { kind: 'fs', glob: '/workspace' },
+					steps: [
+						{
+							cmd: 'cd',
+							args: { path: literal('/workspace') },
+						},
+					],
+				},
+			},
+			{
+				chainMode: 'always',
+				pipeline: {
+					firstCommand: {
+						name: literal('pwd'),
+						args: [],
+						redirections: [],
+					},
+					source: { kind: 'fs', glob: '**/*' },
+					steps: [
+						{
+							cmd: 'pwd',
+							args: {},
+						},
+					],
+				},
+			},
+			{
+				chainMode: 'always',
+				pipeline: {
+					firstCommand: {
+						name: literal('cd'),
+						args: [literal('/')],
+						redirections: [],
+					},
+					source: { kind: 'fs', glob: '/' },
+					steps: [
+						{
+							cmd: 'cd',
+							args: { path: literal('/') },
+						},
+					],
+				},
+			},
+			{
+				chainMode: 'always',
+				pipeline: {
+					firstCommand: {
+						name: literal('pwd'),
+						args: [],
+						redirections: [],
+					},
+					source: { kind: 'fs', glob: '**/*' },
+					steps: [
+						{
+							cmd: 'pwd',
+							args: {},
+						},
+					],
+				},
+			},
+		],
+	};
+
+	const result = execute(script, fs, context);
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lines = records
+		.filter((record): record is LineRecord => record.kind === 'line')
+		.map((record) => record.text);
+
+	expect(lines).toEqual(['/workspace', '/']);
+	expect(context.cwd).toBe('/');
+});
+
+test('script execution reuses shared context across statements', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace/project', true);
+	const context = { cwd: '/' };
+
+	const script: ScriptIR = {
+		statements: [
+			{
+				chainMode: 'always',
+				pipeline: {
+					firstCommand: {
+						name: literal('cd'),
+						args: [literal('/workspace/project')],
+						redirections: [],
+					},
+					source: { kind: 'fs', glob: '/workspace/project' },
+					steps: [
+						{
+							cmd: 'cd',
+							args: { path: literal('/workspace/project') },
+						},
+					],
+				},
+			},
+			{
+				chainMode: 'always',
+				pipeline: {
+					firstCommand: {
+						name: literal('pwd'),
+						args: [],
+						redirections: [],
+					},
+					source: { kind: 'fs', glob: '**/*' },
+					steps: [
+						{
+							cmd: 'pwd',
+							args: {},
+						},
+					],
+				},
+			},
+		],
+	};
+
+	const result = execute(script, fs, context);
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lines = records
+		.filter((record): record is LineRecord => record.kind === 'line')
+		.map((record) => record.text);
+
+	expect(lines).toEqual(['/workspace/project']);
+	expect(context.cwd).toBe('/workspace/project');
 });

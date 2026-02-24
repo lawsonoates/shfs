@@ -136,6 +136,7 @@ export class CommandParser {
 		const kind = this.parser.currentToken.kind;
 		return (
 			kind === TokenKind.PIPE ||
+			kind === TokenKind.SEMICOLON ||
 			kind === TokenKind.NEWLINE ||
 			kind === TokenKind.EOF
 		);

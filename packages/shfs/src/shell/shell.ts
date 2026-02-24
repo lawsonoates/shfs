@@ -1,4 +1,4 @@
-import { compile, type PipelineIR, parse } from '@shfs/compiler';
+import { compile, parse, type ScriptIR } from '@shfs/compiler';
 
 import { collect } from '../consumer/consumer';
 import { type ExecuteResult, execute } from '../execute/execute';
@@ -127,7 +127,7 @@ export class Shell {
 			}
 		};
 
-		const ir = lazy<PipelineIR>(() => {
+		const ir = lazy<ScriptIR>(() => {
 			const ast = parse(source);
 			return compile(ast);
 		});

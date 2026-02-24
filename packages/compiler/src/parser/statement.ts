@@ -2,23 +2,20 @@
  * Statement parser for the Fish subset parser.
  *
  * Handles parsing of:
+ * - Script statements separated by newline or semicolon
  * - Pipelines (command | command | ...)
- *
- * Fish subset does NOT support:
- * - Multiple statements (no ; or newline-separated statements)
- * - Control flow (if, for, while, etc.)
  */
 
 import { SourceSpan } from '../lexer/position';
 import { TokenKind } from '../lexer/token';
-import { Pipeline, type SimpleCommand } from './ast';
+import { Pipeline, Program, type SimpleCommand, Statement } from './ast';
 import type { CommandParser } from './command';
 import type { Parser } from './parser';
 
 /**
  * Parser for statements and pipelines.
  *
- * In the Fish subset, a program is a single pipeline.
+ * In this subset, a program is an ordered list of statements.
  */
 export class StatementParser {
 	private readonly parser: Parser;
@@ -27,6 +24,52 @@ export class StatementParser {
 	constructor(parser: Parser, commandParser: CommandParser) {
 		this.parser = parser;
 		this.commandParser = commandParser;
+	}
+
+	/**
+	 * Parse a full script program.
+	 */
+	parseScript(): Program {
+		const startPos = this.parser.currentToken.span.start;
+		const statements: Statement[] = [];
+
+		// Ignore leading separators/comments and allow empty lines.
+		this.consumeSeparatorsAndComments();
+
+		while (this.parser.currentToken.kind !== TokenKind.EOF) {
+			const statement = this.parseStatement();
+			if (!statement) {
+				this.parser.syntacticError('Expected command', 'command');
+			}
+
+			statements.push(statement);
+
+			const sawSeparator = this.consumeSeparatorsAndComments();
+			if (
+				this.parser.currentToken.kind !== TokenKind.EOF &&
+				!sawSeparator
+			) {
+				this.parser.syntacticError(
+					'Expected statement separator',
+					'newline or ;'
+				);
+			}
+		}
+
+		const endPos = this.parser.previousTokenPosition;
+		return new Program(new SourceSpan(startPos, endPos), statements);
+	}
+
+	/**
+	 * Parse a single statement.
+	 */
+	parseStatement(): Statement | null {
+		const pipeline = this.parsePipeline();
+		if (!pipeline) {
+			return null;
+		}
+
+		return new Statement(pipeline.span, pipeline, 'always');
 	}
 
 	/**
@@ -77,6 +120,31 @@ export class StatementParser {
 	private skipNewlines(): void {
 		while (this.parser.currentToken.kind === TokenKind.NEWLINE) {
 			this.parser.advance();
+		}
+	}
+
+	/**
+	 * Consume separators and comments between statements.
+	 *
+	 * @returns true if at least one statement separator was consumed.
+	 */
+	private consumeSeparatorsAndComments(): boolean {
+		let sawSeparator = false;
+		while (true) {
+			const tokenKind = this.parser.currentToken.kind;
+			if (tokenKind === TokenKind.COMMENT) {
+				this.parser.advance();
+				continue;
+			}
+			if (
+				tokenKind === TokenKind.NEWLINE ||
+				tokenKind === TokenKind.SEMICOLON
+			) {
+				sawSeparator = true;
+				this.parser.advance();
+				continue;
+			}
+			return sawSeparator;
 		}
 	}
 }

@@ -3,6 +3,7 @@ import {
 	extractPathsFromExpandedWords,
 	type PipelineIR,
 	type RedirectionIR,
+	type ScriptIR,
 	type StepIR,
 } from '@shfs/compiler';
 import type { FS } from '../fs/fs';
@@ -50,16 +51,117 @@ async function* emptyStream<T>(): Stream<T> {
 }
 
 /**
- * Execute compiles a PipelineIR into an executable result.
+ * Execute compiles ScriptIR/PipelineIR into an executable result.
  * Returns either a stream (for producers/transducers) or a promise (for sinks).
  */
 export function execute(
-	ir: PipelineIR,
+	ir: PipelineIR | ScriptIR,
 	fs: FS,
 	context: ExecuteContext = { cwd: ROOT_DIRECTORY }
 ): ExecuteResult {
 	const normalizedContext = normalizeContext(context);
+	const scriptIR = isScriptIR(ir) ? ir : toScriptIR(ir);
+	return executeScript(scriptIR, fs, normalizedContext);
+}
 
+function isScriptIR(ir: PipelineIR | ScriptIR): ir is ScriptIR {
+	return 'statements' in ir;
+}
+
+function toScriptIR(pipeline: PipelineIR): ScriptIR {
+	return {
+		statements: [
+			{
+				chainMode: 'always',
+				pipeline,
+			},
+		],
+	};
+}
+
+function isPipelineSink(pipeline: PipelineIR): boolean {
+	const finalStep = pipeline.steps.at(-1);
+	if (!finalStep) {
+		return false;
+	}
+
+	return (
+		isEffectStep(finalStep) ||
+		getRedirectPath(finalStep.redirections, 'output') !== null
+	);
+}
+
+function executeScript(
+	script: ScriptIR,
+	fs: FS,
+	context: ExecuteContext
+): ExecuteResult {
+	if (script.statements.length === 0) {
+		return {
+			kind: 'stream',
+			value: emptyStream<Record>(),
+		};
+	}
+
+	if (
+		script.statements.every((statement) =>
+			isPipelineSink(statement.pipeline)
+		)
+	) {
+		return {
+			kind: 'sink',
+			value: runScriptToCompletion(script, fs, context),
+		};
+	}
+
+	return {
+		kind: 'stream',
+		value: runScriptToStream(script, fs, context),
+	};
+}
+
+async function runScriptToCompletion(
+	script: ScriptIR,
+	fs: FS,
+	context: ExecuteContext
+): Promise<void> {
+	for (const statement of script.statements) {
+		const result = executePipeline(statement.pipeline, fs, context);
+		await drainResult(result);
+	}
+}
+
+async function* runScriptToStream(
+	script: ScriptIR,
+	fs: FS,
+	context: ExecuteContext
+): Stream<Record> {
+	for (const statement of script.statements) {
+		const result = executePipeline(statement.pipeline, fs, context);
+		if (result.kind === 'sink') {
+			await result.value;
+			continue;
+		}
+		yield* result.value;
+	}
+}
+
+async function drainResult(result: ExecuteResult): Promise<void> {
+	if (result.kind === 'sink') {
+		await result.value;
+		return;
+	}
+
+	for await (const _record of result.value) {
+		// drain stream output to complete side effects.
+	}
+}
+
+function executePipeline(
+	ir: PipelineIR,
+	fs: FS,
+	context: ExecuteContext
+): ExecuteResult {
 	if (ir.steps.length === 0) {
 		return {
 			kind: 'stream',
@@ -84,7 +186,7 @@ export function execute(
 			}
 		}
 
-		const sink = executePipelineToSink(ir.steps, fs, normalizedContext);
+		const sink = executePipelineToSink(ir.steps, fs, context);
 		return applyOutputRedirect(
 			{
 				kind: 'sink',
@@ -95,7 +197,7 @@ export function execute(
 		);
 	}
 
-	const stream = executePipelineToStream(ir.steps, fs, normalizedContext);
+	const stream = executePipelineToStream(ir.steps, fs, context);
 	return applyOutputRedirect(
 		{
 			kind: 'stream',

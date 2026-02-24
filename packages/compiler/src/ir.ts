@@ -196,6 +196,17 @@ export interface PipelineIR {
 	firstCommand?: SimpleCommandIR;
 }
 
+export type StatementChainModeIR = 'always' | 'and' | 'or';
+
+export interface ScriptStatementIR {
+	chainMode: StatementChainModeIR;
+	pipeline: PipelineIR;
+}
+
+export interface ScriptIR {
+	statements: ScriptStatementIR[];
+}
+
 // ─────────────────────────────────────────────────────────
 // Helper Functions
 // ─────────────────────────────────────────────────────────
