@@ -311,7 +311,7 @@ test('wires mv force flag through execute', async () => {
 	expect(textDecoder.decode(await fs.readFile('/dest.txt'))).toBe(
 		'new content'
 	);
-	await expect(fs.readFile('/source.txt')).rejects.toThrow('File not found');
+	expect(await fs.readFile('/source.txt')).rejects.toThrow('File not found');
 });
 
 test('wires rm force flag through execute', async () => {
