@@ -1,0 +1,106 @@
+import { beforeEach, expect, test } from 'bun:test';
+
+import { MemoryFS } from '../fs/memory';
+import { Shell } from '../shell/shell';
+
+let shell!: Shell;
+const UNSUPPORTED_TEST_ARGS_MESSAGE = 'test: unsupported arguments';
+
+beforeEach(() => {
+	shell = new Shell(new MemoryFS());
+});
+
+async function run(command: string): Promise<string> {
+	return await shell.$`${command}`.text();
+}
+
+test('test subset: supports one-operand truthiness checks', async () => {
+	expect(await run('test fish; and echo pass; or echo fail')).toBe('pass');
+	expect(await run('test ""; and echo pass; or echo fail')).toBe('fail');
+});
+
+test('test subset: exposes test result through $status as 0/1', async () => {
+	await run('test fish');
+	expect(await run('echo $status')).toBe('0');
+
+	await run('test ""');
+	expect(await run('echo $status')).toBe('1');
+});
+
+test('test subset: supports string = and != comparisons', async () => {
+	expect(await run('test alpha = alpha; and echo yes; or echo no')).toBe(
+		'yes'
+	);
+	expect(await run('test alpha = beta; and echo yes; or echo no')).toBe('no');
+	expect(await run('test alpha != beta; and echo yes; or echo no')).toBe(
+		'yes'
+	);
+	expect(await run('test alpha != alpha; and echo yes; or echo no')).toBe(
+		'no'
+	);
+});
+
+test('test subset: supports variable and command substitution in operands', async () => {
+	await run('set -g left alpha');
+	await run('set -g right alpha');
+
+	expect(
+		await run(
+			'test $left = (echo $right); and echo match; or echo mismatch'
+		)
+	).toBe('match');
+});
+
+test('test subset: test command itself emits no output', async () => {
+	expect(await run('test alpha = alpha')).toBe('');
+	expect(await run('test alpha = beta')).toBe('');
+});
+
+test('test subset: requires at least one operand', async () => {
+	await expect(run('test')).rejects.toThrow('test requires operands');
+});
+
+test('test subset: unsupported fish test operators are out of scope', async () => {
+	await expect(run('test 5 -eq 5')).rejects.toThrow(
+		UNSUPPORTED_TEST_ARGS_MESSAGE
+	);
+	await expect(run('test 2 -gt 1')).rejects.toThrow(
+		UNSUPPORTED_TEST_ARGS_MESSAGE
+	);
+	await expect(run('test -z value')).rejects.toThrow(
+		UNSUPPORTED_TEST_ARGS_MESSAGE
+	);
+	await expect(run('test -n value')).rejects.toThrow(
+		UNSUPPORTED_TEST_ARGS_MESSAGE
+	);
+	await expect(run('test -d /workspace')).rejects.toThrow(
+		UNSUPPORTED_TEST_ARGS_MESSAGE
+	);
+	await expect(run('test -x /workspace/tool')).rejects.toThrow(
+		UNSUPPORTED_TEST_ARGS_MESSAGE
+	);
+	await expect(run('test a -nt b')).rejects.toThrow(
+		UNSUPPORTED_TEST_ARGS_MESSAGE
+	);
+	await expect(run('test a -ot b')).rejects.toThrow(
+		UNSUPPORTED_TEST_ARGS_MESSAGE
+	);
+	await expect(run('test a -ef b')).rejects.toThrow(
+		UNSUPPORTED_TEST_ARGS_MESSAGE
+	);
+});
+
+test('test subset: unsupported expression arities and combiners are out of scope', async () => {
+	await expect(run('test 1 =')).rejects.toThrow(
+		UNSUPPORTED_TEST_ARGS_MESSAGE
+	);
+	await expect(run('test a = b c')).rejects.toThrow(
+		UNSUPPORTED_TEST_ARGS_MESSAGE
+	);
+	await expect(run('test a = a -a b = b')).rejects.toThrow(
+		UNSUPPORTED_TEST_ARGS_MESSAGE
+	);
+	await expect(run('test a = a -o b = c')).rejects.toThrow(
+		UNSUPPORTED_TEST_ARGS_MESSAGE
+	);
+});

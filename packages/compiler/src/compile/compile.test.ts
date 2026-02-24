@@ -57,3 +57,48 @@ test('compile sets default statement chain metadata to always', () => {
 		'always',
 	]);
 });
+
+test('compile supports command substitution in argument position', () => {
+	const ir = compile(parse('cd (echo subdir)'));
+	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+		cmd: 'cd',
+		args: {
+			path: {
+				kind: 'commandSub',
+				command: 'echo subdir',
+			},
+		},
+	});
+});
+
+test('compile preserves nested command substitution serialization', () => {
+	const ir = compile(parse('echo (echo (echo nested))'));
+	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+		cmd: 'echo',
+		args: {
+			values: [
+				{
+					kind: 'commandSub',
+					command: 'echo (echo nested)',
+				},
+			],
+		},
+	});
+});
+
+test('compile keeps variable-like args for runtime expansion', () => {
+	const ir = compile(parse('echo $status $PROJECT_ROOT'));
+	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+		cmd: 'echo',
+		args: { values: [literal('$status'), literal('$PROJECT_ROOT')] },
+	});
+});
+
+test('compile preserves and/or chain metadata', () => {
+	const ir = compile(parse('test 1 = 1; and echo pass; or echo fail'));
+	expect(ir.statements.map((statement) => statement.chainMode)).toEqual([
+		'always',
+		'and',
+		'or',
+	]);
+});

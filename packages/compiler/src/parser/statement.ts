@@ -8,7 +8,13 @@
 
 import { SourceSpan } from '../lexer/position';
 import { TokenKind } from '../lexer/token';
-import { Pipeline, Program, type SimpleCommand, Statement } from './ast';
+import {
+	Pipeline,
+	Program,
+	type SimpleCommand,
+	Statement,
+	type StatementChainMode,
+} from './ast';
 import type { CommandParser } from './command';
 import type { Parser } from './parser';
 
@@ -64,12 +70,22 @@ export class StatementParser {
 	 * Parse a single statement.
 	 */
 	parseStatement(): Statement | null {
+		let chainMode: StatementChainMode = 'always';
+		const currentToken = this.parser.currentToken;
+		if (
+			!currentToken.isQuoted &&
+			this.isChainKeyword(currentToken.spelling)
+		) {
+			chainMode = currentToken.spelling === 'and' ? 'and' : 'or';
+			this.parser.advance();
+		}
+
 		const pipeline = this.parsePipeline();
 		if (!pipeline) {
 			return null;
 		}
 
-		return new Statement(pipeline.span, pipeline, 'always');
+		return new Statement(pipeline.span, pipeline, chainMode);
 	}
 
 	/**
@@ -146,5 +162,9 @@ export class StatementParser {
 			}
 			return sawSeparator;
 		}
+	}
+
+	private isChainKeyword(spelling: string): spelling is 'and' | 'or' {
+		return spelling === 'and' || spelling === 'or';
 	}
 }

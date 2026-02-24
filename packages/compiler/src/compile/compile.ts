@@ -289,12 +289,33 @@ class ProgramCompiler {
 
 	private serializePipeline(pipeline: Pipeline): string {
 		const commands = pipeline.commands.map((cmd) => {
-			const name = cmd.name.literalValue ?? '?';
+			const name = this.serializeWord(cmd.name);
 			const args = cmd.args
-				.map((arg) => arg.literalValue ?? '?')
+				.map((arg) => this.serializeWord(arg))
 				.join(' ');
 			return args ? `${name} ${args}` : name;
 		});
 		return commands.join(' | ');
+	}
+
+	private serializeWord(word: Word): string {
+		return word.parts.map((part) => this.serializeWordPart(part)).join('');
+	}
+
+	private serializeWordPart(part: WordPart): string {
+		switch (part.kind) {
+			case 'literal':
+				return part.value;
+			case 'glob':
+				return part.pattern;
+			case 'commandSub':
+				return `(${this.serializeProgram(part.program)})`;
+			default: {
+				const _exhaustive: never = part;
+				throw new Error(
+					`Unknown word part kind: ${JSON.stringify(_exhaustive)}`
+				);
+			}
+		}
 	}
 }

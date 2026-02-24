@@ -9,13 +9,18 @@ import type { SimpleCommandIR, StepIR } from '../../ir';
 import { compileCat } from './cat/cat';
 import { compileCd } from './cd/cd';
 import { compileCp } from './cp/cp';
+import { compileEcho } from './echo/echo';
 import { compileHead } from './head/head';
 import { compileLs } from './ls/ls';
 import { compileMkdir } from './mkdir/mkdir';
 import { compileMv } from './mv/mv';
 import { compilePwd } from './pwd/pwd';
+import { compileRead } from './read/read';
 import { compileRm } from './rm/rm';
+import { compileSet } from './set/set';
+import { compileString } from './string/string';
 import { compileTail } from './tail/tail';
+import { compileTest } from './test/test';
 import { compileTouch } from './touch/touch';
 
 /**
@@ -32,13 +37,18 @@ export namespace CommandHandler {
 		cat: compileCat,
 		cd: compileCd,
 		cp: compileCp,
+		echo: compileEcho,
 		head: compileHead,
 		ls: compileLs,
 		mkdir: compileMkdir,
 		mv: compileMv,
 		pwd: compilePwd,
+		read: compileRead,
 		rm: compileRm,
+		set: compileSet,
+		string: compileString,
 		tail: compileTail,
+		test: compileTest,
 		touch: compileTouch,
 	};
 

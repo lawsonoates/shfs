@@ -149,10 +149,9 @@ export class Scanner {
 			return this.makeToken(singleOp, c0, start);
 		}
 
-		// Parentheses - command substitution
+		// Command substitution can start a word with "(".
 		if (c0 === '(') {
-			this.source.advance();
-			return this.makeToken(TokenKind.LPAREN, '(', start);
+			return this.readWord(start);
 		}
 
 		if (c0 === ')') {
@@ -235,8 +234,12 @@ export class Scanner {
 		while (!this.source.eof) {
 			const c = this.source.peek();
 
-			// Word boundaries (when not in quotes)
-			if (!this.stateCtx.inQuotes && this.isWordBoundary(c)) {
+			// Word boundaries (when not in quotes). "(" can start command substitution.
+			if (
+				!this.stateCtx.inQuotes &&
+				this.isWordBoundary(c) &&
+				c !== '('
+			) {
 				break;
 			}
 

@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test';
-import { literal, type PipelineIR, type ScriptIR } from '@shfs/compiler';
+import {
+	compile,
+	literal,
+	type PipelineIR,
+	parse,
+	type ScriptIR,
+} from '@shfs/compiler';
 
 import { collect } from '../consumer/consumer';
 import { MemoryFS } from '../fs/memory';
@@ -602,7 +608,7 @@ test('cd throws when target does not exist', async () => {
 	expect(result.kind).toBe('sink');
 	if (result.kind === 'sink') {
 		await expect(result.value).rejects.toThrow(
-			'cd: no such file or directory: /missing'
+			'cd: directory does not exist: /missing'
 		);
 	}
 });
@@ -784,4 +790,47 @@ test('script execution reuses shared context across statements', async () => {
 
 	expect(lines).toEqual(['/workspace/project']);
 	expect(context.cwd).toBe('/workspace/project');
+});
+
+test('and/or chain modes gate statements based on prior status', async () => {
+	const fs = new MemoryFS();
+	const context = { cwd: '/', status: 0 };
+	const ir = compile(parse('test 1 = 2; and echo pass; or echo fail'));
+
+	const result = execute(ir, fs, context);
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lines = records
+		.filter((record): record is LineRecord => record.kind === 'line')
+		.map((record) => record.text);
+
+	expect(lines).toEqual(['fail']);
+	expect(context.status).toBe(0);
+});
+
+test('expanded command substitution can feed path-taking commands', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace/subdir', true);
+	const context = {
+		cwd: '/workspace',
+		status: 0,
+		globalVars: new Map<string, string>([['TARGET', 'subdir']]),
+	};
+	const ir = compile(parse('cd (echo $TARGET); pwd'));
+
+	const result = execute(ir, fs, context);
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lines = records
+		.filter((record): record is LineRecord => record.kind === 'line')
+		.map((record) => record.text);
+
+	expect(lines).toEqual(['/workspace/subdir']);
+	expect(context.cwd).toBe('/workspace/subdir');
 });

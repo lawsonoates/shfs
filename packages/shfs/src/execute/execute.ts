@@ -1,11 +1,15 @@
 import {
+	compile,
+	type ExpandedWord,
 	expandedWordToString,
-	extractPathsFromExpandedWords,
 	type PipelineIR,
+	parse,
 	type RedirectionIR,
 	type ScriptIR,
+	type StatementChainModeIR,
 	type StepIR,
 } from '@shfs/compiler';
+import picomatch from 'picomatch';
 import type { FS } from '../fs/fs';
 import { cat } from '../operator/cat/cat';
 import { cp } from '../operator/cp/cp';
@@ -27,6 +31,16 @@ export type ExecuteResult =
 
 export interface ExecuteContext {
 	cwd: string;
+	status?: number;
+	globalVars?: Map<string, string>;
+	localVars?: Map<string, string>;
+}
+
+interface NormalizedExecuteContext {
+	cwd: string;
+	status: number;
+	globalVars: Map<string, string>;
+	localVars: Map<string, string>;
 }
 
 const textEncoder = new TextEncoder();
@@ -35,6 +49,9 @@ const LS_GLOB_PATTERN_REGEX = /[*?]/;
 const MULTIPLE_SLASH_REGEX = /\/+/g;
 const TRAILING_SLASH_REGEX = /\/+$/;
 const ROOT_DIRECTORY = '/';
+const VARIABLE_REFERENCE_REGEX = /\$([A-Za-z_][A-Za-z0-9_]*)/g;
+const VARIABLE_NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const UNSUPPORTED_GLOB_MESSAGE = 'unsupported wildcard pattern (glob)';
 
 type EffectStep = Extract<
 	StepIR,
@@ -91,10 +108,23 @@ function isPipelineSink(pipeline: PipelineIR): boolean {
 	);
 }
 
+function shouldExecuteStatement(
+	chainMode: StatementChainModeIR,
+	previousStatus: number
+): boolean {
+	if (chainMode === 'always') {
+		return true;
+	}
+	if (chainMode === 'and') {
+		return previousStatus === 0;
+	}
+	return previousStatus !== 0;
+}
+
 function executeScript(
 	script: ScriptIR,
 	fs: FS,
-	context: ExecuteContext
+	context: NormalizedExecuteContext
 ): ExecuteResult {
 	if (script.statements.length === 0) {
 		return {
@@ -123,26 +153,42 @@ function executeScript(
 async function runScriptToCompletion(
 	script: ScriptIR,
 	fs: FS,
-	context: ExecuteContext
+	context: NormalizedExecuteContext
 ): Promise<void> {
 	for (const statement of script.statements) {
-		const result = executePipeline(statement.pipeline, fs, context);
-		await drainResult(result);
+		if (!shouldExecuteStatement(statement.chainMode, context.status)) {
+			continue;
+		}
+		try {
+			const result = executePipeline(statement.pipeline, fs, context);
+			await drainResult(result);
+		} catch (error) {
+			context.status = 1;
+			throw error;
+		}
 	}
 }
 
 async function* runScriptToStream(
 	script: ScriptIR,
 	fs: FS,
-	context: ExecuteContext
+	context: NormalizedExecuteContext
 ): Stream<Record> {
 	for (const statement of script.statements) {
-		const result = executePipeline(statement.pipeline, fs, context);
-		if (result.kind === 'sink') {
-			await result.value;
+		if (!shouldExecuteStatement(statement.chainMode, context.status)) {
 			continue;
 		}
-		yield* result.value;
+		try {
+			const result = executePipeline(statement.pipeline, fs, context);
+			if (result.kind === 'sink') {
+				await result.value;
+				continue;
+			}
+			yield* result.value;
+		} catch (error) {
+			context.status = 1;
+			throw error;
+		}
 	}
 }
 
@@ -160,7 +206,7 @@ async function drainResult(result: ExecuteResult): Promise<void> {
 function executePipeline(
 	ir: PipelineIR,
 	fs: FS,
-	context: ExecuteContext
+	context: NormalizedExecuteContext
 ): ExecuteResult {
 	if (ir.steps.length === 0) {
 		return {
@@ -211,7 +257,7 @@ function executePipeline(
 function executePipelineToStream(
 	steps: StepIR[],
 	fs: FS,
-	context: ExecuteContext
+	context: NormalizedExecuteContext
 ): Stream<Record> {
 	return (async function* () {
 		let stream: Stream<Record> | null = null;
@@ -234,7 +280,7 @@ function executePipelineToStream(
 async function executePipelineToSink(
 	steps: StepIR[],
 	fs: FS,
-	context: ExecuteContext
+	context: NormalizedExecuteContext
 ): Promise<void> {
 	const finalStep = steps.at(-1);
 	if (!(finalStep && isEffectStep(finalStep))) {
@@ -255,49 +301,62 @@ function executeStreamStep(
 	step: StreamStep,
 	fs: FS,
 	input: Stream<Record> | null,
-	context: ExecuteContext
+	context: NormalizedExecuteContext
 ): Stream<Record> {
 	switch (step.cmd) {
 		case 'cat': {
-			const options = {
-				numberLines: step.args.numberLines,
-				numberNonBlank: step.args.numberNonBlank,
-				showAll: step.args.showAll,
-				showEnds: step.args.showEnds,
-				showNonprinting: step.args.showNonprinting,
-				showTabs: step.args.showTabs,
-				squeezeBlank: step.args.squeezeBlank,
-			};
-			const inputPath = getRedirectPath(step.redirections, 'input');
-			const filePaths = withInputRedirect(
-				extractPathsFromExpandedWords(step.args.files),
-				inputPath
-			);
-			if (filePaths.length > 0) {
-				return cat(fs, options)(files(...filePaths));
-			}
-			if (input) {
-				return cat(fs, options)(input);
-			}
-			return emptyStream<Record>();
+			return (async function* (): Stream<Record> {
+				const options = {
+					numberLines: step.args.numberLines,
+					numberNonBlank: step.args.numberNonBlank,
+					showAll: step.args.showAll,
+					showEnds: step.args.showEnds,
+					showNonprinting: step.args.showNonprinting,
+					showTabs: step.args.showTabs,
+					squeezeBlank: step.args.squeezeBlank,
+				};
+				const inputPath = getRedirectPath(step.redirections, 'input');
+				const filePaths = withInputRedirect(
+					await evaluateExpandedWords(step.args.files, fs, context),
+					inputPath
+				);
+				if (filePaths.length > 0) {
+					yield* cat(fs, options)(files(...filePaths));
+					context.status = 0;
+					return;
+				}
+				if (input) {
+					yield* cat(fs, options)(input);
+				}
+				context.status = 0;
+			})();
 		}
 		case 'head': {
-			const inputPath = getRedirectPath(step.redirections, 'input');
-			const filePaths = withInputRedirect(
-				extractPathsFromExpandedWords(step.args.files),
-				inputPath
-			);
-			if (filePaths.length > 0) {
-				return headWithN(fs, step.args.n)(files(...filePaths));
-			}
-			if (!input) {
-				return emptyStream<Record>();
-			}
-			return headLines(step.args.n)(toLineStream(fs, input));
+			return (async function* (): Stream<Record> {
+				const inputPath = getRedirectPath(step.redirections, 'input');
+				const filePaths = withInputRedirect(
+					await evaluateExpandedWords(step.args.files, fs, context),
+					inputPath
+				);
+				if (filePaths.length > 0) {
+					yield* headWithN(fs, step.args.n)(files(...filePaths));
+					context.status = 0;
+					return;
+				}
+				if (input) {
+					yield* headLines(step.args.n)(toLineStream(fs, input));
+				}
+				context.status = 0;
+			})();
 		}
 		case 'ls': {
-			const paths = extractPathsFromExpandedWords(step.args.paths);
 			return (async function* () {
+				assertNoUnsupportedGlobs('ls', step.args.paths);
+				const paths = await evaluateExpandedWords(
+					step.args.paths,
+					fs,
+					context
+				);
 				for (const inputPath of paths) {
 					const resolvedPath = await resolveLsPath(
 						fs,
@@ -318,28 +377,113 @@ function executeStreamStep(
 						yield fileRecord;
 					}
 				}
+				context.status = 0;
 			})();
 		}
 		case 'tail': {
-			const inputPath = getRedirectPath(step.redirections, 'input');
-			const filePaths = withInputRedirect(
-				extractPathsFromExpandedWords(step.args.files),
-				inputPath
-			);
-			if (filePaths.length > 0) {
-				return (async function* () {
+			return (async function* () {
+				const inputPath = getRedirectPath(step.redirections, 'input');
+				const filePaths = withInputRedirect(
+					await evaluateExpandedWords(step.args.files, fs, context),
+					inputPath
+				);
+				if (filePaths.length > 0) {
 					for (const filePath of filePaths) {
 						yield* tail(step.args.n)(cat(fs)(files(filePath)));
 					}
-				})();
-			}
-			if (!input) {
-				return emptyStream<Record>();
-			}
-			return tail(step.args.n)(toLineStream(fs, input));
+					context.status = 0;
+					return;
+				}
+				if (input) {
+					yield* tail(step.args.n)(toLineStream(fs, input));
+				}
+				context.status = 0;
+			})();
 		}
 		case 'pwd': {
-			return pwd(context.cwd);
+			return (async function* (): Stream<Record> {
+				yield* pwd(context.cwd);
+				context.status = 0;
+			})();
+		}
+		case 'echo': {
+			return (async function* (): Stream<Record> {
+				const values = await evaluateExpandedWords(
+					step.args.values,
+					fs,
+					context
+				);
+				yield {
+					kind: 'line',
+					text: values.join(' '),
+				} as const;
+				context.status = 0;
+			})();
+		}
+		case 'set': {
+			return (async function* (): Stream<Record> {
+				const name = await evaluateExpandedWord(
+					step.args.name,
+					fs,
+					context
+				);
+				if (!VARIABLE_NAME_REGEX.test(name)) {
+					throw new Error(`set: invalid variable name: ${name}`);
+				}
+				const values = await evaluateExpandedWords(
+					step.args.values,
+					fs,
+					context
+				);
+				const value = values.join(' ');
+				if (step.args.scope === 'global') {
+					context.globalVars.set(name, value);
+				} else {
+					context.localVars.set(name, value);
+				}
+				context.status = 0;
+				yield* emptyStream<Record>();
+			})();
+		}
+		case 'test': {
+			return (async function* (): Stream<Record> {
+				const operands = await evaluateExpandedWords(
+					step.args.operands,
+					fs,
+					context
+				);
+				context.status = evaluateTestStatus(operands);
+				yield* emptyStream<Record>();
+			})();
+		}
+		case 'read': {
+			return (async function* (): Stream<Record> {
+				const name = await evaluateExpandedWord(
+					step.args.name,
+					fs,
+					context
+				);
+				if (!VARIABLE_NAME_REGEX.test(name)) {
+					throw new Error(`read: invalid variable name: ${name}`);
+				}
+				if (!input) {
+					context.status = 1;
+					yield* emptyStream<Record>();
+					return;
+				}
+				const value = await readFromStream(fs, input);
+				if (value === null) {
+					context.status = 1;
+					yield* emptyStream<Record>();
+					return;
+				}
+				context.localVars.set(name, value);
+				context.status = 0;
+				yield* emptyStream<Record>();
+			})();
+		}
+		case 'string': {
+			return executeStringStep(step, fs, context);
 		}
 		default: {
 			const _exhaustive: never = step;
@@ -380,9 +524,12 @@ function normalizeCwd(cwd: string): string {
 	return trimmed === '' ? ROOT_DIRECTORY : trimmed;
 }
 
-function normalizeContext(context: ExecuteContext): ExecuteContext {
+function normalizeContext(context: ExecuteContext): NormalizedExecuteContext {
 	context.cwd = normalizeCwd(context.cwd);
-	return context;
+	context.status ??= 0;
+	context.globalVars ??= new Map<string, string>();
+	context.localVars ??= new Map<string, string>();
+	return context as NormalizedExecuteContext;
 }
 
 function resolvePathFromCwd(cwd: string, path: string): string {
@@ -398,18 +545,26 @@ function resolvePathFromCwd(cwd: string, path: string): string {
 async function executeEffectStep(
 	step: EffectStep,
 	fs: FS,
-	context: ExecuteContext
+	context: NormalizedExecuteContext
 ): Promise<void> {
 	switch (step.cmd) {
 		case 'cd': {
-			const requestedPath = expandedWordToString(step.args.path);
+			assertNoUnsupportedGlobs('cd', [step.args.path]);
+			const requestedPath = await evaluateExpandedWord(
+				step.args.path,
+				fs,
+				context
+			);
+			if (requestedPath === '') {
+				throw new Error('cd: empty path');
+			}
 			const resolvedPath = resolvePathFromCwd(context.cwd, requestedPath);
 			let stat: Awaited<ReturnType<FS['stat']>>;
 			try {
 				stat = await fs.stat(resolvedPath);
 			} catch {
 				throw new Error(
-					`cd: no such file or directory: ${requestedPath}`
+					`cd: directory does not exist: ${requestedPath}`
 				);
 			}
 
@@ -418,11 +573,21 @@ async function executeEffectStep(
 			}
 
 			context.cwd = resolvedPath;
+			context.status = 0;
 			break;
 		}
 		case 'cp': {
-			const srcPaths = extractPathsFromExpandedWords(step.args.srcs);
-			const destPath = expandedWordToString(step.args.dest);
+			assertNoUnsupportedGlobs('cp', [...step.args.srcs, step.args.dest]);
+			const srcPaths = await evaluateExpandedWords(
+				step.args.srcs,
+				fs,
+				context
+			);
+			const destPath = await evaluateExpandedWord(
+				step.args.dest,
+				fs,
+				context
+			);
 			await cp(fs)({
 				srcs: srcPaths,
 				dest: destPath,
@@ -430,28 +595,50 @@ async function executeEffectStep(
 				interactive: step.args.interactive,
 				recursive: step.args.recursive,
 			});
+			context.status = 0;
 			break;
 		}
 		case 'mkdir': {
-			const paths = extractPathsFromExpandedWords(step.args.paths);
+			assertNoUnsupportedGlobs('mkdir', step.args.paths);
+			const paths = await evaluateExpandedWords(
+				step.args.paths,
+				fs,
+				context
+			);
 			for (const path of paths) {
 				await mkdir(fs)({ path, recursive: step.args.recursive });
 			}
+			context.status = 0;
 			break;
 		}
 		case 'mv': {
-			const srcPaths = extractPathsFromExpandedWords(step.args.srcs);
-			const destPath = expandedWordToString(step.args.dest);
+			assertNoUnsupportedGlobs('mv', [...step.args.srcs, step.args.dest]);
+			const srcPaths = await evaluateExpandedWords(
+				step.args.srcs,
+				fs,
+				context
+			);
+			const destPath = await evaluateExpandedWord(
+				step.args.dest,
+				fs,
+				context
+			);
 			await mv(fs)({
 				srcs: srcPaths,
 				dest: destPath,
 				force: step.args.force,
 				interactive: step.args.interactive,
 			});
+			context.status = 0;
 			break;
 		}
 		case 'rm': {
-			const paths = extractPathsFromExpandedWords(step.args.paths);
+			assertNoUnsupportedGlobs('rm', step.args.paths);
+			const paths = await evaluateExpandedWords(
+				step.args.paths,
+				fs,
+				context
+			);
 			for (const path of paths) {
 				await rm(fs)({
 					path,
@@ -460,15 +647,22 @@ async function executeEffectStep(
 					recursive: step.args.recursive,
 				});
 			}
+			context.status = 0;
 			break;
 		}
 		case 'touch': {
-			const filePaths = extractPathsFromExpandedWords(step.args.files);
+			assertNoUnsupportedGlobs('touch', step.args.files);
+			const filePaths = await evaluateExpandedWords(
+				step.args.files,
+				fs,
+				context
+			);
 			await touch(fs)({
 				files: filePaths,
 				accessTimeOnly: step.args.accessTimeOnly,
 				modificationTimeOnly: step.args.modificationTimeOnly,
 			});
+			context.status = 0;
 			break;
 		}
 		default: {
@@ -478,6 +672,214 @@ async function executeEffectStep(
 			);
 		}
 	}
+}
+
+function assertNoUnsupportedGlobs(
+	command: string,
+	words: ExpandedWord[]
+): void {
+	for (const word of words) {
+		if (word.kind === 'glob') {
+			throw new Error(`${command}: ${UNSUPPORTED_GLOB_MESSAGE}`);
+		}
+	}
+}
+
+function resolveVariable(
+	variableName: string,
+	context: NormalizedExecuteContext
+): string {
+	if (variableName === 'status') {
+		return String(context.status);
+	}
+	return (
+		context.localVars.get(variableName) ??
+		context.globalVars.get(variableName) ??
+		''
+	);
+}
+
+function expandVariables(
+	input: string,
+	context: NormalizedExecuteContext
+): string {
+	return input.replace(VARIABLE_REFERENCE_REGEX, (_full, variableName) => {
+		return resolveVariable(variableName, context);
+	});
+}
+
+async function evaluateExpandedWords(
+	words: ExpandedWord[],
+	fs: FS,
+	context: NormalizedExecuteContext
+): Promise<string[]> {
+	const resolvedWords: string[] = [];
+	for (const word of words) {
+		resolvedWords.push(await evaluateExpandedWord(word, fs, context));
+	}
+	return resolvedWords;
+}
+
+async function evaluateExpandedWord(
+	word: ExpandedWord,
+	fs: FS,
+	context: NormalizedExecuteContext
+): Promise<string> {
+	switch (word.kind) {
+		case 'literal':
+			return expandVariables(word.value, context);
+		case 'glob':
+			return expandVariables(word.pattern, context);
+		case 'commandSub': {
+			const commandText = expandVariables(word.command, context);
+			return await evaluateCommandSubstitution(commandText, fs, context);
+		}
+		default: {
+			const _exhaustive: never = word;
+			throw new Error(
+				`Unknown word kind: ${JSON.stringify(_exhaustive)}`
+			);
+		}
+	}
+}
+
+async function evaluateCommandSubstitution(
+	command: string,
+	fs: FS,
+	context: NormalizedExecuteContext
+): Promise<string> {
+	const parsed = parse(command);
+	const nestedIR = compile(parsed);
+	const result = execute(nestedIR, fs, context);
+	const outputs = await collectOutputRecords(result);
+	return outputs.join('\n');
+}
+
+async function collectOutputRecords(result: ExecuteResult): Promise<string[]> {
+	if (result.kind === 'sink') {
+		await result.value;
+		return [];
+	}
+
+	const outputs: string[] = [];
+	for await (const record of result.value) {
+		outputs.push(formatRecord(record));
+	}
+	return outputs;
+}
+
+function evaluateTestStatus(operands: string[]): 0 | 1 {
+	if (operands.length === 1) {
+		return operands[0] === '' ? 1 : 0;
+	}
+
+	if (operands.length === 3) {
+		const [left, operator, right] = operands;
+		if (operator === '=') {
+			return left === right ? 0 : 1;
+		}
+		if (operator === '!=') {
+			return left !== right ? 0 : 1;
+		}
+	}
+
+	throw new Error('test: unsupported arguments');
+}
+
+function executeStringStep(
+	step: Extract<StreamStep, { cmd: 'string' }>,
+	fs: FS,
+	context: NormalizedExecuteContext
+): Stream<Record> {
+	return (async function* (): Stream<Record> {
+		const subcommand = await evaluateExpandedWord(
+			step.args.subcommand,
+			fs,
+			context
+		);
+		const operands = await evaluateExpandedWords(
+			step.args.operands,
+			fs,
+			context
+		);
+
+		if (subcommand === 'replace') {
+			yield* executeStringReplace(operands, context);
+			return;
+		}
+
+		if (subcommand === 'match') {
+			yield* executeStringMatch(operands, context);
+			return;
+		}
+
+		throw new Error(`string: unsupported subcommand: ${subcommand}`);
+	})();
+}
+
+async function* executeStringReplace(
+	operands: string[],
+	context: NormalizedExecuteContext
+): Stream<Record> {
+	if (operands.length < 3) {
+		throw new Error('string replace requires pattern replacement text');
+	}
+	const [pattern, replacement, ...inputs] = operands;
+	if (inputs.length === 0) {
+		context.status = 1;
+		return;
+	}
+	for (const input of inputs) {
+		yield {
+			kind: 'line',
+			text: input.replaceAll(pattern, replacement),
+		} as const;
+	}
+	context.status = 0;
+}
+
+async function* executeStringMatch(
+	operands: string[],
+	context: NormalizedExecuteContext
+): Stream<Record> {
+	const quiet = operands[0] === '-q';
+	const filtered = quiet ? operands.slice(1) : operands;
+	const [pattern, value] = filtered;
+	if (!(pattern && value !== undefined)) {
+		throw new Error('string match requires pattern and value');
+	}
+	const isMatch = picomatch(pattern, { dot: true })(value);
+	context.status = isMatch ? 0 : 1;
+	if (isMatch && !quiet) {
+		yield { kind: 'line', text: value } as const;
+	}
+}
+
+async function readFromStream(
+	fs: FS,
+	input: Stream<Record>
+): Promise<string | null> {
+	let firstValue: string | null = null;
+	for await (const record of input) {
+		const value = await recordToText(fs, record);
+		if (firstValue === null) {
+			firstValue = value;
+		}
+	}
+	return firstValue;
+}
+
+async function recordToText(fs: FS, record: Record): Promise<string> {
+	if (record.kind === 'line') {
+		return record.text;
+	}
+	if (record.kind === 'file') {
+		for await (const line of fs.readLines(record.path)) {
+			return line;
+		}
+		return '';
+	}
+	return JSON.stringify(record.value);
 }
 
 async function* toLineStream(

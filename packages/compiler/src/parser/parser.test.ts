@@ -56,3 +56,24 @@ test('parse keeps pipe newline continuation within one statement', () => {
 	expect(program.statements).toHaveLength(1);
 	expect(program.statements[0]?.pipeline.commands).toHaveLength(2);
 });
+
+test('parse supports standalone command substitution in argument position', () => {
+	const program = parse('cd (echo subdir)');
+	const arg = program.statements[0]?.pipeline.commands[0]?.args[0];
+	expect(arg?.hasCommandSub).toBe(true);
+});
+
+test('parse supports nested command substitutions in argument position', () => {
+	const program = parse('echo (echo (echo nested))');
+	const arg = program.statements[0]?.pipeline.commands[0]?.args[0];
+	expect(arg?.hasCommandSub).toBe(true);
+});
+
+test('parse records chain metadata for and/or statements', () => {
+	const program = parse('test 1 = 1; and echo pass; or echo fail');
+	expect(program.statements.map((statement) => statement.chainMode)).toEqual([
+		'always',
+		'and',
+		'or',
+	]);
+});

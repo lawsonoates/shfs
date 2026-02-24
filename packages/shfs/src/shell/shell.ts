@@ -63,6 +63,8 @@ async function collectRecords(result: ExecuteResult): Promise<Record[]> {
 export class Shell {
 	private readonly fs: FS;
 	private currentCwd: string;
+	private currentStatus = 0;
+	private readonly globalVars = new Map<string, string>();
 
 	constructor(fs: FS, options: ShellOptions = {}) {
 		this.fs = fs;
@@ -89,10 +91,16 @@ export class Shell {
 			const commandStartCwd = normalizeCwd(
 				cwdOverride ?? this.currentCwd
 			);
-			const context = { cwd: commandStartCwd };
+			const context = {
+				cwd: commandStartCwd,
+				status: this.currentStatus,
+				globalVars: this.globalVars,
+				localVars: new Map<string, string>(),
+			};
 			try {
 				return await collectRecords(execute(ir(), fs, context));
 			} finally {
+				this.currentStatus = context.status ?? this.currentStatus;
 				if (
 					cwdOverride === undefined ||
 					context.cwd !== commandStartCwd
@@ -105,7 +113,12 @@ export class Shell {
 			const commandStartCwd = normalizeCwd(
 				cwdOverride ?? this.currentCwd
 			);
-			const context = { cwd: commandStartCwd };
+			const context = {
+				cwd: commandStartCwd,
+				status: this.currentStatus,
+				globalVars: this.globalVars,
+				localVars: new Map<string, string>(),
+			};
 			try {
 				const result = execute(ir(), fs, context);
 				if (result.kind === 'sink') {
@@ -118,6 +131,7 @@ export class Shell {
 					}
 				}
 			} finally {
+				this.currentStatus = context.status ?? this.currentStatus;
 				if (
 					cwdOverride === undefined ||
 					context.cwd !== commandStartCwd
