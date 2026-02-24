@@ -821,6 +821,10 @@ async function* executeStringReplace(
 	operands: string[],
 	context: NormalizedExecuteContext
 ): Stream<Record> {
+	if (operands[0]?.startsWith('-')) {
+		throw new Error(`string replace: unsupported flag: ${operands[0]}`);
+	}
+
 	if (operands.length < 3) {
 		throw new Error('string replace requires pattern replacement text');
 	}
@@ -842,11 +846,27 @@ async function* executeStringMatch(
 	operands: string[],
 	context: NormalizedExecuteContext
 ): Stream<Record> {
-	const quiet = operands[0] === '-q';
-	const filtered = quiet ? operands.slice(1) : operands;
+	let quiet = false;
+	let offset = 0;
+
+	while (operands[offset]?.startsWith('-')) {
+		const flag = operands[offset];
+		if (flag === '-q' && !quiet) {
+			quiet = true;
+			offset += 1;
+			continue;
+		}
+
+		throw new Error(`string match: unsupported flag: ${flag}`);
+	}
+
+	const filtered = operands.slice(offset);
 	const [pattern, value] = filtered;
 	if (!(pattern && value !== undefined)) {
 		throw new Error('string match requires pattern and value');
+	}
+	if (filtered.length > 2) {
+		throw new Error('string match: unsupported arguments');
 	}
 	const isMatch = picomatch(pattern, { dot: true })(value);
 	context.status = isMatch ? 0 : 1;
