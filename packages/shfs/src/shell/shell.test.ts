@@ -62,3 +62,25 @@ test('cwd override can be used as base for cd and persists resulting cwd', async
 	expect(await shell.$`cd project`.cwd('/tmp').text()).toBe('');
 	expect(await shell.$`pwd`.text()).toBe('/tmp/project');
 });
+
+test('shell executes newline-separated statements in one invocation', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace/project', true);
+	const shell = new Shell(fs);
+
+	const output = await shell.$`cd /workspace
+cd project
+pwd`.text();
+
+	expect(output).toBe('/workspace/project');
+});
+
+test('shell executes semicolon-separated statements in one invocation', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace/project', true);
+	const shell = new Shell(fs);
+
+	const output = await shell.$`cd /workspace; cd project; pwd`.text();
+
+	expect(output).toBe('/workspace/project');
+});

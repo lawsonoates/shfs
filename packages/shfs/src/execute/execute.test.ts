@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test';
-import { literal, type PipelineIR } from '@shfs/compiler';
+import {
+	compile,
+	literal,
+	type PipelineIR,
+	parse,
+	type ScriptIR,
+} from '@shfs/compiler';
 
 import { collect } from '../consumer/consumer';
 import { MemoryFS } from '../fs/memory';
@@ -185,6 +191,30 @@ test('executes multi-step stream pipelines end-to-end', async () => {
 	expect(lineRecords.map((record) => record.text)).toEqual(['gamma']);
 });
 
+test('cat/head/tail expand glob file arguments relative to cwd', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/logs/a.txt', 'a1\na2\n');
+	fs.setFile('/workspace/logs/b.txt', 'b1\nb2\n');
+
+	const runLines = async (command: string): Promise<string[]> => {
+		const result = execute(compile(parse(command)), fs, {
+			cwd: '/workspace',
+		});
+		expect(result.kind).toBe('stream');
+		if (result.kind !== 'stream') {
+			throw new Error('Expected stream result');
+		}
+		const records = await collect<ShellRecord>()(result.value);
+		return records
+			.filter((record): record is LineRecord => record.kind === 'line')
+			.map((record) => record.text);
+	};
+
+	expect(await runLines('cat logs/*.txt')).toEqual(['a1', 'a2', 'b1', 'b2']);
+	expect(await runLines('head -n 1 logs/*.txt')).toEqual(['a1', 'b1']);
+	expect(await runLines('tail -n 1 logs/*.txt')).toEqual(['a2', 'b2']);
+});
+
 test('wires cp force flag through execute', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('source.txt', 'from source');
@@ -215,7 +245,7 @@ test('wires cp force flag through execute', async () => {
 	expect(firstResult.kind).toBe('sink');
 	if (firstResult.kind === 'sink') {
 		await expect(firstResult.value).rejects.toThrow(
-			'cp: destination exists (use -f to overwrite): dest.txt'
+			'cp: destination exists (use -f to overwrite): /dest.txt'
 		);
 	}
 
@@ -418,6 +448,45 @@ test('ls with dot path does not recurse into nested paths', async () => {
 	expect(filePaths).not.toContain('/nested/deep.txt');
 });
 
+test('ls with dot path uses execution context cwd', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace', true);
+	fs.setFile('/workspace/file.txt', 'content');
+	fs.setFile('/other.txt', 'other');
+
+	const ir: PipelineIR = {
+		firstCommand: {
+			name: literal('ls'),
+			args: [literal('.')],
+			redirections: [],
+		},
+		source: { kind: 'fs', glob: '.' },
+		steps: [
+			{
+				cmd: 'ls',
+				args: {
+					longFormat: false,
+					paths: [literal('.')],
+					showAll: false,
+				},
+			},
+		],
+	};
+
+	const result = execute(ir, fs, { cwd: '/workspace' });
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const filePaths = records
+		.filter((record): record is FileRecord => record.kind === 'file')
+		.map((record) => record.path);
+
+	expect(filePaths).toContain('/workspace/file.txt');
+	expect(filePaths).not.toContain('/other.txt');
+});
+
 test('wires pwd through execute', async () => {
 	const fs = new MemoryFS();
 
@@ -563,7 +632,7 @@ test('cd throws when target does not exist', async () => {
 	expect(result.kind).toBe('sink');
 	if (result.kind === 'sink') {
 		await expect(result.value).rejects.toThrow(
-			'cd: no such file or directory: /missing'
+			'cd: directory does not exist: /missing'
 		);
 	}
 });
@@ -595,4 +664,197 @@ test('cd throws when target is a file', async () => {
 			'cd: not a directory: /file.txt'
 		);
 	}
+});
+
+test('executes script statements in deterministic order', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace', true);
+	const context = { cwd: '/' };
+
+	const script: ScriptIR = {
+		statements: [
+			{
+				chainMode: 'always',
+				pipeline: {
+					firstCommand: {
+						name: literal('cd'),
+						args: [literal('/workspace')],
+						redirections: [],
+					},
+					source: { kind: 'fs', glob: '/workspace' },
+					steps: [
+						{
+							cmd: 'cd',
+							args: { path: literal('/workspace') },
+						},
+					],
+				},
+			},
+			{
+				chainMode: 'always',
+				pipeline: {
+					firstCommand: {
+						name: literal('pwd'),
+						args: [],
+						redirections: [],
+					},
+					source: { kind: 'fs', glob: '**/*' },
+					steps: [
+						{
+							cmd: 'pwd',
+							args: {},
+						},
+					],
+				},
+			},
+			{
+				chainMode: 'always',
+				pipeline: {
+					firstCommand: {
+						name: literal('cd'),
+						args: [literal('/')],
+						redirections: [],
+					},
+					source: { kind: 'fs', glob: '/' },
+					steps: [
+						{
+							cmd: 'cd',
+							args: { path: literal('/') },
+						},
+					],
+				},
+			},
+			{
+				chainMode: 'always',
+				pipeline: {
+					firstCommand: {
+						name: literal('pwd'),
+						args: [],
+						redirections: [],
+					},
+					source: { kind: 'fs', glob: '**/*' },
+					steps: [
+						{
+							cmd: 'pwd',
+							args: {},
+						},
+					],
+				},
+			},
+		],
+	};
+
+	const result = execute(script, fs, context);
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lines = records
+		.filter((record): record is LineRecord => record.kind === 'line')
+		.map((record) => record.text);
+
+	expect(lines).toEqual(['/workspace', '/']);
+	expect(context.cwd).toBe('/');
+});
+
+test('script execution reuses shared context across statements', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace/project', true);
+	const context = { cwd: '/' };
+
+	const script: ScriptIR = {
+		statements: [
+			{
+				chainMode: 'always',
+				pipeline: {
+					firstCommand: {
+						name: literal('cd'),
+						args: [literal('/workspace/project')],
+						redirections: [],
+					},
+					source: { kind: 'fs', glob: '/workspace/project' },
+					steps: [
+						{
+							cmd: 'cd',
+							args: { path: literal('/workspace/project') },
+						},
+					],
+				},
+			},
+			{
+				chainMode: 'always',
+				pipeline: {
+					firstCommand: {
+						name: literal('pwd'),
+						args: [],
+						redirections: [],
+					},
+					source: { kind: 'fs', glob: '**/*' },
+					steps: [
+						{
+							cmd: 'pwd',
+							args: {},
+						},
+					],
+				},
+			},
+		],
+	};
+
+	const result = execute(script, fs, context);
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lines = records
+		.filter((record): record is LineRecord => record.kind === 'line')
+		.map((record) => record.text);
+
+	expect(lines).toEqual(['/workspace/project']);
+	expect(context.cwd).toBe('/workspace/project');
+});
+
+test('and/or chain modes gate statements based on prior status', async () => {
+	const fs = new MemoryFS();
+	const context = { cwd: '/', status: 0 };
+	const ir = compile(parse('test 1 = 2; and echo pass; or echo fail'));
+
+	const result = execute(ir, fs, context);
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lines = records
+		.filter((record): record is LineRecord => record.kind === 'line')
+		.map((record) => record.text);
+
+	expect(lines).toEqual(['fail']);
+	expect(context.status).toBe(0);
+});
+
+test('expanded command substitution can feed path-taking commands', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace/subdir', true);
+	const context = {
+		cwd: '/workspace',
+		status: 0,
+		globalVars: new Map<string, string>([['TARGET', 'subdir']]),
+	};
+	const ir = compile(parse('cd (echo $TARGET); pwd'));
+
+	const result = execute(ir, fs, context);
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lines = records
+		.filter((record): record is LineRecord => record.kind === 'line')
+		.map((record) => record.text);
+
+	expect(lines).toEqual(['/workspace/subdir']);
+	expect(context.cwd).toBe('/workspace/subdir');
 });

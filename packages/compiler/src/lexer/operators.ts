@@ -27,6 +27,7 @@ export const OPERATORS: readonly OperatorEntry[] = [
  */
 export const SINGLE_CHAR_OPS: ReadonlyMap<string, TokenKind> = new Map([
 	['|', TokenKind.PIPE],
+	[';', TokenKind.SEMICOLON],
 	['<', TokenKind.LESS],
 	['>', TokenKind.GREAT],
 ]);
@@ -42,6 +43,7 @@ export const SPECIAL_CHARS = new Set([
 	'\t',
 	'\n',
 	'|',
+	';',
 	'<',
 	'>',
 	'(',
@@ -63,6 +65,7 @@ export const WORD_BOUNDARY_CHARS = new Set([
 	'\t',
 	'\n',
 	'|',
+	';',
 	'<',
 	'>',
 	'(',

@@ -12,6 +12,7 @@
  *
  * Fish subset features supported:
  * - Pipelines (|)
+ * - Multi-statement scripts (newline and ;)
  * - Command substitution (...)
  * - Globbing (* ? [...])
  * - Redirections (< >) - Phase 2
@@ -22,14 +23,13 @@
  * - Control flow (if, for, while, etc.)
  * - Functions
  * - Brace expansion
- * - Semicolons
  * - Background jobs (&)
  */
 
 import { type SourcePosition, SourceSpan } from '../lexer/position';
 import { Scanner } from '../lexer/scanner';
 import { Token, TokenKind } from '../lexer/token';
-import { Program } from './ast';
+import type { Program } from './ast';
 import { CommandParser } from './command';
 import { ErrorReporter } from './error-reporter';
 import { StatementParser } from './statement';
@@ -237,35 +237,10 @@ export class Parser {
 	 * Parse a complete program.
 	 *
 	 * Grammar:
-	 *   program ::= pipeline
+	 *   program ::= (statement separator*)? statement (separator+ statement)* separator*
 	 */
 	private parseProgram(): Program {
-		const startPos = this.startSpan();
-
-		// Skip leading comments and newlines
-		this.skipIgnorable();
-
-		// Parse the pipeline
-		const pipeline = this.statementParser.parsePipeline();
-
-		if (!pipeline) {
-			this.syntacticError('Expected command', 'command');
-		}
-
-		// Skip trailing comments and newlines
-		this.skipIgnorable();
-
-		// Expect EOF
-		if (this._currentToken.kind !== TokenKind.EOF) {
-			this.syntacticError(
-				'Unexpected token after pipeline',
-				'end of input'
-			);
-		}
-
-		const span = this.finishSpan(startPos);
-
-		return new Program(span, pipeline);
+		return this.statementParser.parseScript();
 	}
 
 	/**
@@ -292,22 +267,6 @@ export class Parser {
 		);
 
 		return innerParser.parse();
-	}
-
-	// ─────────────────────────────────────────────────────────
-	// Helpers
-	// ─────────────────────────────────────────────────────────
-
-	/**
-	 * Skip comments and newlines.
-	 */
-	private skipIgnorable(): void {
-		while (
-			this._currentToken.kind === TokenKind.COMMENT ||
-			this._currentToken.kind === TokenKind.NEWLINE
-		) {
-			this.advance();
-		}
 	}
 }
 

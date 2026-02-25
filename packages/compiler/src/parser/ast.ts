@@ -23,6 +23,7 @@ import type { SourceSpan } from '../lexer/position';
  */
 export interface Visitor<T> {
 	visitProgram(node: Program): T;
+	visitStatement(node: Statement): T;
 	visitPipeline(node: Pipeline): T;
 	visitSimpleCommand(node: SimpleCommand): T;
 	visitWord(node: Word): T;
@@ -59,18 +60,43 @@ export abstract class ASTNode {
 
 /**
  * Root AST node representing a complete program.
- * A program is a single pipeline (Fish subset does not support multiple statements).
+ * A program is an ordered list of statements.
  */
 export class Program extends ASTNode {
-	readonly pipeline: Pipeline;
+	readonly statements: Statement[];
 
-	constructor(span: SourceSpan, pipeline: Pipeline) {
+	constructor(span: SourceSpan, statements: Statement[]) {
 		super(span);
-		this.pipeline = pipeline;
+		this.statements = statements;
 	}
 
 	accept<T>(visitor: Visitor<T>): T {
 		return visitor.visitProgram(this);
+	}
+}
+
+export type StatementChainMode = 'always' | 'and' | 'or';
+
+/**
+ * A script statement containing a pipeline and chain metadata.
+ * The metadata is currently structural-only and defaults to "always".
+ */
+export class Statement extends ASTNode {
+	readonly pipeline: Pipeline;
+	readonly chainMode: StatementChainMode;
+
+	constructor(
+		span: SourceSpan,
+		pipeline: Pipeline,
+		chainMode: StatementChainMode = 'always'
+	) {
+		super(span);
+		this.pipeline = pipeline;
+		this.chainMode = chainMode;
+	}
+
+	accept<T>(visitor: Visitor<T>): T {
+		return visitor.visitStatement(this);
 	}
 }
 

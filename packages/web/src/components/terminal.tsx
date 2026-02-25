@@ -29,7 +29,7 @@ export const Terminal = () => {
 	const [historyLines, setHistoryLines] = useState<string[]>([]);
 	const [command, setCommand] = useState('');
 	const [isRunning, setIsRunning] = useState(false);
-	const [path] = useState('~');
+	const [path, setPath] = useState('~');
 
 	const handleSubmit = async () => {
 		if (isRunning) {
@@ -62,6 +62,8 @@ export const Terminal = () => {
 		} catch (error) {
 			setHistoryLines((previous) => [...previous, formatError(error)]);
 		} finally {
+			const pwdOutput = await shell.$`pwd`.text();
+			setPath(pwdOutput || '~');
 			setIsRunning(false);
 		}
 	};

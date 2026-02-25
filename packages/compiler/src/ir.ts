@@ -172,19 +172,84 @@ export interface PwdStep {
 }
 
 /**
+ * Echo step.
+ */
+export interface EchoStep {
+	cmd: 'echo';
+	redirections?: RedirectionIR[];
+	args: {
+		values: ExpandedWord[];
+	};
+}
+
+export type SetScope = 'global' | 'local';
+
+/**
+ * Set step.
+ */
+export interface SetStep {
+	cmd: 'set';
+	redirections?: RedirectionIR[];
+	args: {
+		scope: SetScope;
+		name: ExpandedWord;
+		values: ExpandedWord[];
+	};
+}
+
+/**
+ * Test step.
+ */
+export interface TestStep {
+	cmd: 'test';
+	redirections?: RedirectionIR[];
+	args: {
+		operands: ExpandedWord[];
+	};
+}
+
+/**
+ * Read step.
+ */
+export interface ReadStep {
+	cmd: 'read';
+	redirections?: RedirectionIR[];
+	args: {
+		name: ExpandedWord;
+	};
+}
+
+/**
+ * String step.
+ */
+export interface StringStep {
+	cmd: 'string';
+	redirections?: RedirectionIR[];
+	args: {
+		subcommand: ExpandedWord;
+		operands: ExpandedWord[];
+	};
+}
+
+/**
  * Union of all step types.
  */
 export type StepIR =
 	| CdStep
 	| CatStep
 	| CpStep
+	| EchoStep
 	| HeadStep
 	| LsStep
 	| MkdirStep
 	| MvStep
 	| PwdStep
+	| ReadStep
 	| RmStep
+	| SetStep
+	| StringStep
 	| TailStep
+	| TestStep
 	| TouchStep;
 
 /**
@@ -194,6 +259,17 @@ export interface PipelineIR {
 	source: SourceIR;
 	steps: StepIR[];
 	firstCommand?: SimpleCommandIR;
+}
+
+export type StatementChainModeIR = 'always' | 'and' | 'or';
+
+export interface ScriptStatementIR {
+	chainMode: StatementChainModeIR;
+	pipeline: PipelineIR;
+}
+
+export interface ScriptIR {
+	statements: ScriptStatementIR[];
 }
 
 // ─────────────────────────────────────────────────────────

@@ -28,14 +28,15 @@ export const TokenKind = {
 
 	// === Single-char Operators ===
 	PIPE: 7, // |
-	LPAREN: 8, // ( - command substitution start
-	RPAREN: 9, // ) - command substitution end
-	LESS: 10, // < - input redirection (Phase 2)
-	GREAT: 11, // > - output redirection (Phase 2)
+	SEMICOLON: 8, // ; - statement separator
+	LPAREN: 9, // ( - command substitution start
+	RPAREN: 10, // ) - command substitution end
+	LESS: 11, // < - input redirection (Phase 2)
+	GREAT: 12, // > - output redirection (Phase 2)
 
 	// === Expansion markers (for parser hints) ===
-	COMMAND_SUB: 12, // (command)
-	GLOB: 13, // contains * ? or [...]
+	COMMAND_SUB: 13, // (command)
+	GLOB: 14, // contains * ? or [...]
 } as const;
 
 export type TokenKind = (typeof TokenKind)[keyof typeof TokenKind];
@@ -83,6 +84,7 @@ const TOKEN_KIND_NAMES: Record<TokenKind, string> = {
 	[TokenKind.NAME]: 'NAME',
 	[TokenKind.NUMBER]: 'NUMBER',
 	[TokenKind.PIPE]: 'PIPE',
+	[TokenKind.SEMICOLON]: 'SEMICOLON',
 	[TokenKind.LPAREN]: 'LPAREN',
 	[TokenKind.RPAREN]: 'RPAREN',
 	[TokenKind.LESS]: 'LESS',
@@ -99,6 +101,7 @@ const TOKEN_SPELLINGS: ReadonlyMap<TokenKind, string> = new Map([
 	[TokenKind.ERROR, '<error>'],
 	[TokenKind.NEWLINE, '\\n'],
 	[TokenKind.PIPE, '|'],
+	[TokenKind.SEMICOLON, ';'],
 	[TokenKind.LPAREN, '('],
 	[TokenKind.RPAREN, ')'],
 	[TokenKind.LESS, '<'],
