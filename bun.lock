@@ -53,7 +53,7 @@
     },
     "packages/shfs": {
       "name": "shfs",
-      "version": "0.1.1",
+      "version": "0.1.3",
       "dependencies": {
         "picomatch": "^4.0.3",
         "remeda": "^2.33.1",
@@ -71,7 +71,7 @@
     },
     "packages/web": {
       "name": "bun-react-template",
-      "version": "0.1.0",
+      "version": "0.1.3",
       "dependencies": {
         "bun-plugin-tailwind": "^0.1.2",
         "picomatch": "^4.0.3",
