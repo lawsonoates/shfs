@@ -2,6 +2,7 @@
 
 ### Requirement: Unsupported wildcard policy for subset path arguments
 The shell SHALL perform fish-style glob expansion for unquoted wildcard patterns in path-taking command arguments that are in scope for the subset.
+For this change, in-scope path-taking commands are `cd`, `ls`, `rm`, `touch`, `cp`, `mv`, `mkdir`, `cat`, `head`, and `tail`.
 
 #### Scenario: Unquoted wildcard expands for ls
 - **WHEN** `ls *.txt` is executed in a directory containing `a.txt` and `b.txt`
@@ -30,6 +31,11 @@ The shell SHALL perform fish-style glob expansion for unquoted wildcard patterns
 #### Scenario: Unmatched wildcard reports deterministic failure
 - **WHEN** an unquoted wildcard argument is evaluated and has no matches
 - **THEN** execution fails with a deterministic wildcard/no-match error contract for the command
+- **AND** the error format is `<command>: no matches found: <pattern>`
+
+#### Scenario: Single-target command rejects multi-match expansion
+- **WHEN** a single-target command argument (for example `cd dir-*`) expands to more than one match
+- **THEN** execution fails with a deterministic post-expansion cardinality error contract
 
 ## ADDED Requirements
 

@@ -45,19 +45,24 @@ interface NormalizedExecuteContext {
 
 const textEncoder = new TextEncoder();
 const EFFECT_COMMANDS = new Set(['cd', 'cp', 'mkdir', 'mv', 'rm', 'touch']);
-const LS_GLOB_PATTERN_REGEX = /[*?]/;
+const GLOB_PATTERN_REGEX = /[*?[]/;
 const MULTIPLE_SLASH_REGEX = /\/+/g;
 const TRAILING_SLASH_REGEX = /\/+$/;
 const ROOT_DIRECTORY = '/';
 const VARIABLE_REFERENCE_REGEX = /\$([A-Za-z_][A-Za-z0-9_]*)/g;
 const VARIABLE_NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const UNSUPPORTED_GLOB_MESSAGE = 'unsupported wildcard pattern (glob)';
+const NO_GLOB_MATCH_MESSAGE = 'no matches found';
 
 type EffectStep = Extract<
 	StepIR,
 	{ cmd: 'cd' | 'cp' | 'mkdir' | 'mv' | 'rm' | 'touch' }
 >;
 type StreamStep = Exclude<StepIR, EffectStep>;
+
+interface FsEntry {
+	path: string;
+	isDirectory: boolean;
+}
 
 function isEffectStep(step: StepIR): step is EffectStep {
 	return EFFECT_COMMANDS.has(step.cmd);
@@ -317,7 +322,15 @@ function executeStreamStep(
 				};
 				const inputPath = getRedirectPath(step.redirections, 'input');
 				const filePaths = withInputRedirect(
-					await evaluateExpandedWords(step.args.files, fs, context),
+					resolvePathsFromCwd(
+						context.cwd,
+						await evaluateExpandedPathWords(
+							'cat',
+							step.args.files,
+							fs,
+							context
+						)
+					),
 					inputPath
 				);
 				if (filePaths.length > 0) {
@@ -335,7 +348,15 @@ function executeStreamStep(
 			return (async function* (): Stream<Record> {
 				const inputPath = getRedirectPath(step.redirections, 'input');
 				const filePaths = withInputRedirect(
-					await evaluateExpandedWords(step.args.files, fs, context),
+					resolvePathsFromCwd(
+						context.cwd,
+						await evaluateExpandedPathWords(
+							'head',
+							step.args.files,
+							fs,
+							context
+						)
+					),
 					inputPath
 				);
 				if (filePaths.length > 0) {
@@ -351,8 +372,8 @@ function executeStreamStep(
 		}
 		case 'ls': {
 			return (async function* () {
-				assertNoUnsupportedGlobs('ls', step.args.paths);
-				const paths = await evaluateExpandedWords(
+				const paths = await evaluateExpandedPathWords(
+					'ls',
 					step.args.paths,
 					fs,
 					context
@@ -384,7 +405,15 @@ function executeStreamStep(
 			return (async function* () {
 				const inputPath = getRedirectPath(step.redirections, 'input');
 				const filePaths = withInputRedirect(
-					await evaluateExpandedWords(step.args.files, fs, context),
+					resolvePathsFromCwd(
+						context.cwd,
+						await evaluateExpandedPathWords(
+							'tail',
+							step.args.files,
+							fs,
+							context
+						)
+					),
 					inputPath
 				);
 				if (filePaths.length > 0) {
@@ -408,7 +437,8 @@ function executeStreamStep(
 		}
 		case 'echo': {
 			return (async function* (): Stream<Record> {
-				const values = await evaluateExpandedWords(
+				const values = await evaluateExpandedPathWords(
+					'echo',
 					step.args.values,
 					fs,
 					context
@@ -549,12 +579,18 @@ async function executeEffectStep(
 ): Promise<void> {
 	switch (step.cmd) {
 		case 'cd': {
-			assertNoUnsupportedGlobs('cd', [step.args.path]);
-			const requestedPath = await evaluateExpandedWord(
+			const expandedPaths = await evaluateExpandedPathWord(
+				'cd',
 				step.args.path,
 				fs,
 				context
 			);
+			if (expandedPaths.length !== 1) {
+				throw new Error(
+					`cd: expected exactly 1 path after expansion, got ${expandedPaths.length}`
+				);
+			}
+			const requestedPath = expandedPaths[0];
 			if (requestedPath === '') {
 				throw new Error('cd: empty path');
 			}
@@ -577,17 +613,30 @@ async function executeEffectStep(
 			break;
 		}
 		case 'cp': {
-			assertNoUnsupportedGlobs('cp', [...step.args.srcs, step.args.dest]);
-			const srcPaths = await evaluateExpandedWords(
-				step.args.srcs,
-				fs,
-				context
+			const srcPaths = resolvePathsFromCwd(
+				context.cwd,
+				await evaluateExpandedPathWords(
+					'cp',
+					step.args.srcs,
+					fs,
+					context
+				)
 			);
-			const destPath = await evaluateExpandedWord(
-				step.args.dest,
-				fs,
-				context
+			const destinationPaths = resolvePathsFromCwd(
+				context.cwd,
+				await evaluateExpandedPathWord(
+					'cp',
+					step.args.dest,
+					fs,
+					context
+				)
 			);
+			if (destinationPaths.length !== 1) {
+				throw new Error(
+					`cp: destination must expand to exactly 1 path, got ${destinationPaths.length}`
+				);
+			}
+			const destPath = destinationPaths[0];
 			await cp(fs)({
 				srcs: srcPaths,
 				dest: destPath,
@@ -599,11 +648,14 @@ async function executeEffectStep(
 			break;
 		}
 		case 'mkdir': {
-			assertNoUnsupportedGlobs('mkdir', step.args.paths);
-			const paths = await evaluateExpandedWords(
-				step.args.paths,
-				fs,
-				context
+			const paths = resolvePathsFromCwd(
+				context.cwd,
+				await evaluateExpandedPathWords(
+					'mkdir',
+					step.args.paths,
+					fs,
+					context
+				)
 			);
 			for (const path of paths) {
 				await mkdir(fs)({ path, recursive: step.args.recursive });
@@ -612,17 +664,30 @@ async function executeEffectStep(
 			break;
 		}
 		case 'mv': {
-			assertNoUnsupportedGlobs('mv', [...step.args.srcs, step.args.dest]);
-			const srcPaths = await evaluateExpandedWords(
-				step.args.srcs,
-				fs,
-				context
+			const srcPaths = resolvePathsFromCwd(
+				context.cwd,
+				await evaluateExpandedPathWords(
+					'mv',
+					step.args.srcs,
+					fs,
+					context
+				)
 			);
-			const destPath = await evaluateExpandedWord(
-				step.args.dest,
-				fs,
-				context
+			const destinationPaths = resolvePathsFromCwd(
+				context.cwd,
+				await evaluateExpandedPathWord(
+					'mv',
+					step.args.dest,
+					fs,
+					context
+				)
 			);
+			if (destinationPaths.length !== 1) {
+				throw new Error(
+					`mv: destination must expand to exactly 1 path, got ${destinationPaths.length}`
+				);
+			}
+			const destPath = destinationPaths[0];
 			await mv(fs)({
 				srcs: srcPaths,
 				dest: destPath,
@@ -633,11 +698,14 @@ async function executeEffectStep(
 			break;
 		}
 		case 'rm': {
-			assertNoUnsupportedGlobs('rm', step.args.paths);
-			const paths = await evaluateExpandedWords(
-				step.args.paths,
-				fs,
-				context
+			const paths = resolvePathsFromCwd(
+				context.cwd,
+				await evaluateExpandedPathWords(
+					'rm',
+					step.args.paths,
+					fs,
+					context
+				)
 			);
 			for (const path of paths) {
 				await rm(fs)({
@@ -651,11 +719,14 @@ async function executeEffectStep(
 			break;
 		}
 		case 'touch': {
-			assertNoUnsupportedGlobs('touch', step.args.files);
-			const filePaths = await evaluateExpandedWords(
-				step.args.files,
-				fs,
-				context
+			const filePaths = resolvePathsFromCwd(
+				context.cwd,
+				await evaluateExpandedPathWords(
+					'touch',
+					step.args.files,
+					fs,
+					context
+				)
 			);
 			await touch(fs)({
 				files: filePaths,
@@ -674,13 +745,141 @@ async function executeEffectStep(
 	}
 }
 
-function assertNoUnsupportedGlobs(
+function resolvePathsFromCwd(cwd: string, paths: string[]): string[] {
+	return paths.map((path) => resolvePathFromCwd(cwd, path));
+}
+
+async function listFilesystemEntries(fs: FS): Promise<FsEntry[]> {
+	const entries: FsEntry[] = [];
+	for await (const path of fs.readdir('/**/*')) {
+		entries.push({
+			path,
+			isDirectory: (await fs.stat(path)).isDirectory,
+		});
+	}
+	entries.sort((left, right) => left.path.localeCompare(right.path));
+	return entries;
+}
+
+function toRelativePathFromCwd(path: string, cwd: string): string | null {
+	if (cwd === ROOT_DIRECTORY) {
+		if (path === ROOT_DIRECTORY) {
+			return null;
+		}
+		return path.startsWith(ROOT_DIRECTORY) ? path.slice(1) : path;
+	}
+	if (path === cwd) {
+		return null;
+	}
+	const prefix = `${cwd}${ROOT_DIRECTORY}`;
+	if (!path.startsWith(prefix)) {
+		return null;
+	}
+	return path.slice(prefix.length);
+}
+
+function toGlobCandidate(
+	entry: FsEntry,
+	cwd: string,
+	isAbsolutePattern: boolean,
+	directoryOnly: boolean
+): string | null {
+	if (directoryOnly && !entry.isDirectory) {
+		return null;
+	}
+
+	const basePath = isAbsolutePattern
+		? entry.path
+		: toRelativePathFromCwd(entry.path, cwd);
+	if (!basePath || basePath === '') {
+		return null;
+	}
+
+	if (directoryOnly) {
+		return `${basePath}${ROOT_DIRECTORY}`;
+	}
+	return basePath;
+}
+
+async function expandGlobPattern(
+	pattern: string,
+	fs: FS,
+	context: NormalizedExecuteContext
+): Promise<string[]> {
+	const directoryOnly = pattern.endsWith(ROOT_DIRECTORY);
+	const isAbsolutePattern = pattern.startsWith(ROOT_DIRECTORY);
+	const matcher = picomatch(pattern, { bash: true, dot: false });
+	const entries = await listFilesystemEntries(fs);
+	const matches: string[] = [];
+
+	for (const entry of entries) {
+		const candidate = toGlobCandidate(
+			entry,
+			context.cwd,
+			isAbsolutePattern,
+			directoryOnly
+		);
+		if (!candidate) {
+			continue;
+		}
+		if (matcher(candidate)) {
+			matches.push(candidate);
+		}
+	}
+
+	matches.sort((left, right) => left.localeCompare(right));
+	return matches;
+}
+
+async function evaluateExpandedPathWords(
 	command: string,
-	words: ExpandedWord[]
-): void {
+	words: ExpandedWord[],
+	fs: FS,
+	context: NormalizedExecuteContext
+): Promise<string[]> {
+	const resolvedWords: string[] = [];
 	for (const word of words) {
-		if (word.kind === 'glob') {
-			throw new Error(`${command}: ${UNSUPPORTED_GLOB_MESSAGE}`);
+		const values = await evaluateExpandedPathWord(
+			command,
+			word,
+			fs,
+			context
+		);
+		resolvedWords.push(...values);
+	}
+	return resolvedWords;
+}
+
+async function evaluateExpandedPathWord(
+	command: string,
+	word: ExpandedWord,
+	fs: FS,
+	context: NormalizedExecuteContext
+): Promise<string[]> {
+	switch (word.kind) {
+		case 'literal':
+			return [expandVariables(word.value, context)];
+		case 'glob': {
+			const pattern = expandVariables(word.pattern, context);
+			const matches = await expandGlobPattern(pattern, fs, context);
+			if (matches.length === 0) {
+				throw new Error(
+					`${command}: ${NO_GLOB_MATCH_MESSAGE}: ${pattern}`
+				);
+			}
+			return matches;
+		}
+		case 'commandSub': {
+			const commandText = expandVariables(word.command, context);
+			return [
+				await evaluateCommandSubstitution(commandText, fs, context),
+			];
+		}
+		default: {
+			const _exhaustive: never = word;
+			throw new Error(
+				`Unknown word kind: ${JSON.stringify(_exhaustive)}`
+			);
 		}
 	}
 }
@@ -967,7 +1166,7 @@ async function resolveLsPath(
 	cwd: string
 ): Promise<string> {
 	const normalizedPath = normalizeLsPath(path, cwd);
-	if (LS_GLOB_PATTERN_REGEX.test(normalizedPath)) {
+	if (GLOB_PATTERN_REGEX.test(normalizedPath)) {
 		return normalizedPath;
 	}
 

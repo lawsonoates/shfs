@@ -57,6 +57,18 @@ This change is cross-cutting:
 - Alternative considered: Design a standalone glob test suite from scratch.
 - Why not: Loses traceability to upstream fish behavior.
 
+### 6. Freeze command scope for this change before runtime edits
+- Decision: Treat `cd`, `ls`, `rm`, `touch`, `cp`, `mv`, `mkdir`, `cat`, `head`, and `tail` as the in-scope path-taking commands for mandatory glob support in this change.
+- Why: These commands currently consume path arguments in the subset runtime and need consistent post-expansion behavior.
+- Alternative considered: Expand only `cd`, `ls`, `rm`, and `touch` in this iteration.
+- Why not: Leaves inconsistent behavior across existing path-taking commands and complicates follow-up diffs.
+
+### 7. Standardize deterministic failure contracts
+- Decision: Use `"<command>: no matches found: <pattern>"` when an unquoted glob has zero matches, and enforce explicit cardinality errors for single-target destinations after expansion (`cd` and destination operands for `cp`/`mv`).
+- Why: Keeps failures deterministic and makes post-expansion arity behavior explicit for commands that require a single resolved target.
+- Alternative considered: Allow pass-through patterns on no-match or rely on command-level downstream errors.
+- Why not: Produces inconsistent behavior and obscures whether failure came from expansion or command execution.
+
 ## Risks / Trade-offs
 
 - [Risk] Glob expansion order differs from fish in edge cases (especially recursive matches). -> Mitigation: define deterministic ordering and assert against fish-derived expectations where subset-applicable.
@@ -78,6 +90,4 @@ Rollback strategy:
 
 ## Open Questions
 
-- Which commands are officially classified as “relevant commands” for mandatory glob support in this phase (`ls`, `rm`, `touch`, `cp`, `mv`, `mkdir`, `cd`, `cat`, others)?
-- What exact failure contract should apply when a pattern for a single-target command expands to zero or multiple matches?
-- Should no-match behavior emulate fish exactly for all in-scope commands, or be deterministic-but-not-verbatim where fish behavior depends on excluded features?
+- None at this time.

@@ -8,6 +8,7 @@ The current subset contract explicitly rejects unquoted wildcards, which blocks 
 - Define supported wildcard behavior for `*`, `?`, `[ ... ]`, and `**`, including recursive matching, hidden-file behavior, and trailing-slash directory matching.
 - Preserve literal behavior for quoted wildcard characters.
 - Keep out-of-scope exclusions in force (notably symlink-focused behavior): globbing must not implicitly enable excluded capabilities.
+- Confirm in-scope path-taking command coverage for this change: `cd`, `ls`, `rm`, `touch`, `cp`, `mv`, `mkdir`, `cat`, `head`, and `tail`.
 - Update subset tests/spec expectations from "unsupported glob" failures to deterministic fish-style match behavior where features are in-scope.
 
 ## Capabilities

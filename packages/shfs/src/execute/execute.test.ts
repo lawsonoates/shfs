@@ -191,6 +191,30 @@ test('executes multi-step stream pipelines end-to-end', async () => {
 	expect(lineRecords.map((record) => record.text)).toEqual(['gamma']);
 });
 
+test('cat/head/tail expand glob file arguments relative to cwd', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/logs/a.txt', 'a1\na2\n');
+	fs.setFile('/workspace/logs/b.txt', 'b1\nb2\n');
+
+	const runLines = async (command: string): Promise<string[]> => {
+		const result = execute(compile(parse(command)), fs, {
+			cwd: '/workspace',
+		});
+		expect(result.kind).toBe('stream');
+		if (result.kind !== 'stream') {
+			throw new Error('Expected stream result');
+		}
+		const records = await collect<ShellRecord>()(result.value);
+		return records
+			.filter((record): record is LineRecord => record.kind === 'line')
+			.map((record) => record.text);
+	};
+
+	expect(await runLines('cat logs/*.txt')).toEqual(['a1', 'a2', 'b1', 'b2']);
+	expect(await runLines('head -n 1 logs/*.txt')).toEqual(['a1', 'b1']);
+	expect(await runLines('tail -n 1 logs/*.txt')).toEqual(['a2', 'b2']);
+});
+
 test('wires cp force flag through execute', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('source.txt', 'from source');
@@ -221,7 +245,7 @@ test('wires cp force flag through execute', async () => {
 	expect(firstResult.kind).toBe('sink');
 	if (firstResult.kind === 'sink') {
 		await expect(firstResult.value).rejects.toThrow(
-			'cp: destination exists (use -f to overwrite): dest.txt'
+			'cp: destination exists (use -f to overwrite): /dest.txt'
 		);
 	}
 
