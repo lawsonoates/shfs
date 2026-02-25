@@ -1,15 +1,16 @@
-import {
-	compile,
-	type ExpandedWord,
-	expandedWordToString,
-	type PipelineIR,
-	parse,
-	type RedirectionIR,
-	type ScriptIR,
-	type StatementChainModeIR,
-	type StepIR,
+import type {
+	PipelineIR,
+	ScriptIR,
+	StatementChainModeIR,
+	StepIR,
 } from '@shfs/compiler';
-import picomatch from 'picomatch';
+import { cd } from '../builtin/cd/cd';
+import { echo } from '../builtin/echo/echo';
+import { read } from '../builtin/read/read';
+import { set } from '../builtin/set/set';
+import { string } from '../builtin/string/string';
+import { test } from '../builtin/test/test';
+import type { BuiltinContext, BuiltinRuntime } from '../builtin/types';
 import type { FS } from '../fs/fs';
 import { cat } from '../operator/cat/cat';
 import { cp } from '../operator/cp/cp';
@@ -21,13 +22,24 @@ import { pwd } from '../operator/pwd/pwd';
 import { rm } from '../operator/rm/rm';
 import { tail } from '../operator/tail/tail';
 import { touch } from '../operator/touch/touch';
-import type { LineRecord, Record } from '../record';
+import type { Record as ShellRecord } from '../record';
 import type { Stream } from '../stream';
+import {
+	evaluateExpandedPathWord,
+	evaluateExpandedPathWords,
+	normalizeCwd,
+	resolvePathsFromCwd,
+} from './path';
 import { files } from './producers';
+import { toLineStream } from './records';
+import {
+	applyOutputRedirect,
+	getRedirectPath,
+	type ExecuteResult as RedirectExecuteResult,
+	withInputRedirect,
+} from './redirection';
 
-export type ExecuteResult =
-	| { kind: 'stream'; value: Stream<Record> }
-	| { kind: 'sink'; value: Promise<void> };
+export type { ExecuteResult } from './redirection';
 
 export interface ExecuteContext {
 	cwd: string;
@@ -36,33 +48,19 @@ export interface ExecuteContext {
 	localVars?: Map<string, string>;
 }
 
-interface NormalizedExecuteContext {
-	cwd: string;
-	status: number;
-	globalVars: Map<string, string>;
-	localVars: Map<string, string>;
-}
-
-const textEncoder = new TextEncoder();
-const EFFECT_COMMANDS = new Set(['cd', 'cp', 'mkdir', 'mv', 'rm', 'touch']);
-const GLOB_PATTERN_REGEX = /[*?[]/;
-const MULTIPLE_SLASH_REGEX = /\/+/g;
-const TRAILING_SLASH_REGEX = /\/+$/;
-const ROOT_DIRECTORY = '/';
-const VARIABLE_REFERENCE_REGEX = /\$([A-Za-z_][A-Za-z0-9_]*)/g;
-const VARIABLE_NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const NO_GLOB_MATCH_MESSAGE = 'no matches found';
+type NormalizedExecuteContext = BuiltinContext;
 
 type EffectStep = Extract<
 	StepIR,
 	{ cmd: 'cd' | 'cp' | 'mkdir' | 'mv' | 'rm' | 'touch' }
 >;
+
 type StreamStep = Exclude<StepIR, EffectStep>;
 
-interface FsEntry {
-	path: string;
-	isDirectory: boolean;
-}
+const EFFECT_COMMANDS = new Set(['cd', 'cp', 'mkdir', 'mv', 'rm', 'touch']);
+const GLOB_PATTERN_REGEX = /[*?[]/;
+const ROOT_DIRECTORY = '/';
+const TRAILING_SLASH_REGEX = /\/+$/;
 
 function isEffectStep(step: StepIR): step is EffectStep {
 	return EFFECT_COMMANDS.has(step.cmd);
@@ -80,7 +78,7 @@ export function execute(
 	ir: PipelineIR | ScriptIR,
 	fs: FS,
 	context: ExecuteContext = { cwd: ROOT_DIRECTORY }
-): ExecuteResult {
+): RedirectExecuteResult {
 	const normalizedContext = normalizeContext(context);
 	const scriptIR = isScriptIR(ir) ? ir : toScriptIR(ir);
 	return executeScript(scriptIR, fs, normalizedContext);
@@ -130,11 +128,11 @@ function executeScript(
 	script: ScriptIR,
 	fs: FS,
 	context: NormalizedExecuteContext
-): ExecuteResult {
+): RedirectExecuteResult {
 	if (script.statements.length === 0) {
 		return {
 			kind: 'stream',
-			value: emptyStream<Record>(),
+			value: emptyStream<ShellRecord>(),
 		};
 	}
 
@@ -178,7 +176,7 @@ async function* runScriptToStream(
 	script: ScriptIR,
 	fs: FS,
 	context: NormalizedExecuteContext
-): Stream<Record> {
+): Stream<ShellRecord> {
 	for (const statement of script.statements) {
 		if (!shouldExecuteStatement(statement.chainMode, context.status)) {
 			continue;
@@ -197,7 +195,7 @@ async function* runScriptToStream(
 	}
 }
 
-async function drainResult(result: ExecuteResult): Promise<void> {
+async function drainResult(result: RedirectExecuteResult): Promise<void> {
 	if (result.kind === 'sink') {
 		await result.value;
 		return;
@@ -212,11 +210,11 @@ function executePipeline(
 	ir: PipelineIR,
 	fs: FS,
 	context: NormalizedExecuteContext
-): ExecuteResult {
+): RedirectExecuteResult {
 	if (ir.steps.length === 0) {
 		return {
 			kind: 'stream',
-			value: emptyStream<Record>(),
+			value: emptyStream<ShellRecord>(),
 		};
 	}
 
@@ -224,7 +222,7 @@ function executePipeline(
 	if (!lastStep) {
 		return {
 			kind: 'stream',
-			value: emptyStream<Record>(),
+			value: emptyStream<ShellRecord>(),
 		};
 	}
 
@@ -263,9 +261,9 @@ function executePipelineToStream(
 	steps: StepIR[],
 	fs: FS,
 	context: NormalizedExecuteContext
-): Stream<Record> {
+): Stream<ShellRecord> {
 	return (async function* () {
-		let stream: Stream<Record> | null = null;
+		let stream: Stream<ShellRecord> | null = null;
 		for (const step of steps) {
 			if (isEffectStep(step)) {
 				throw new Error(
@@ -305,12 +303,14 @@ async function executePipelineToSink(
 function executeStreamStep(
 	step: StreamStep,
 	fs: FS,
-	input: Stream<Record> | null,
+	input: Stream<ShellRecord> | null,
 	context: NormalizedExecuteContext
-): Stream<Record> {
+): Stream<ShellRecord> {
+	const builtinRuntime = createBuiltinRuntime(fs, context, input);
+
 	switch (step.cmd) {
 		case 'cat': {
-			return (async function* (): Stream<Record> {
+			return (async function* (): Stream<ShellRecord> {
 				const options = {
 					numberLines: step.args.numberLines,
 					numberNonBlank: step.args.numberNonBlank,
@@ -345,7 +345,7 @@ function executeStreamStep(
 			})();
 		}
 		case 'head': {
-			return (async function* (): Stream<Record> {
+			return (async function* (): Stream<ShellRecord> {
 				const inputPath = getRedirectPath(step.redirections, 'input');
 				const filePaths = withInputRedirect(
 					resolvePathsFromCwd(
@@ -371,7 +371,7 @@ function executeStreamStep(
 			})();
 		}
 		case 'ls': {
-			return (async function* () {
+			return (async function* (): Stream<ShellRecord> {
 				const paths = await evaluateExpandedPathWords(
 					'ls',
 					step.args.paths,
@@ -402,7 +402,7 @@ function executeStreamStep(
 			})();
 		}
 		case 'tail': {
-			return (async function* () {
+			return (async function* (): Stream<ShellRecord> {
 				const inputPath = getRedirectPath(step.redirections, 'input');
 				const filePaths = withInputRedirect(
 					resolvePathsFromCwd(
@@ -430,90 +430,25 @@ function executeStreamStep(
 			})();
 		}
 		case 'pwd': {
-			return (async function* (): Stream<Record> {
+			return (async function* (): Stream<ShellRecord> {
 				yield* pwd(context.cwd);
 				context.status = 0;
 			})();
 		}
 		case 'echo': {
-			return (async function* (): Stream<Record> {
-				const values = await evaluateExpandedPathWords(
-					'echo',
-					step.args.values,
-					fs,
-					context
-				);
-				yield {
-					kind: 'line',
-					text: values.join(' '),
-				} as const;
-				context.status = 0;
-			})();
+			return echo(builtinRuntime, step.args);
 		}
 		case 'set': {
-			return (async function* (): Stream<Record> {
-				const name = await evaluateExpandedWord(
-					step.args.name,
-					fs,
-					context
-				);
-				if (!VARIABLE_NAME_REGEX.test(name)) {
-					throw new Error(`set: invalid variable name: ${name}`);
-				}
-				const values = await evaluateExpandedWords(
-					step.args.values,
-					fs,
-					context
-				);
-				const value = values.join(' ');
-				if (step.args.scope === 'global') {
-					context.globalVars.set(name, value);
-				} else {
-					context.localVars.set(name, value);
-				}
-				context.status = 0;
-				yield* emptyStream<Record>();
-			})();
+			return set(builtinRuntime, step.args);
 		}
 		case 'test': {
-			return (async function* (): Stream<Record> {
-				const operands = await evaluateExpandedWords(
-					step.args.operands,
-					fs,
-					context
-				);
-				context.status = evaluateTestStatus(operands);
-				yield* emptyStream<Record>();
-			})();
+			return test(builtinRuntime, step.args);
 		}
 		case 'read': {
-			return (async function* (): Stream<Record> {
-				const name = await evaluateExpandedWord(
-					step.args.name,
-					fs,
-					context
-				);
-				if (!VARIABLE_NAME_REGEX.test(name)) {
-					throw new Error(`read: invalid variable name: ${name}`);
-				}
-				if (!input) {
-					context.status = 1;
-					yield* emptyStream<Record>();
-					return;
-				}
-				const value = await readFromStream(fs, input);
-				if (value === null) {
-					context.status = 1;
-					yield* emptyStream<Record>();
-					return;
-				}
-				context.localVars.set(name, value);
-				context.status = 0;
-				yield* emptyStream<Record>();
-			})();
+			return read(builtinRuntime, step.args);
 		}
 		case 'string': {
-			return executeStringStep(step, fs, context);
+			return string(builtinRuntime, step.args);
 		}
 		default: {
 			const _exhaustive: never = step;
@@ -524,92 +459,16 @@ function executeStreamStep(
 	}
 }
 
-function normalizeAbsolutePath(path: string): string {
-	const withLeadingSlash = path.startsWith(ROOT_DIRECTORY)
-		? path
-		: `${ROOT_DIRECTORY}${path}`;
-	const singleSlashes = withLeadingSlash.replace(MULTIPLE_SLASH_REGEX, '/');
-	const segments = singleSlashes.split(ROOT_DIRECTORY);
-	const normalizedSegments: string[] = [];
-	for (const segment of segments) {
-		if (segment === '' || segment === '.') {
-			continue;
-		}
-		if (segment === '..') {
-			normalizedSegments.pop();
-			continue;
-		}
-		normalizedSegments.push(segment);
-	}
-	const normalizedPath = `${ROOT_DIRECTORY}${normalizedSegments.join(ROOT_DIRECTORY)}`;
-	return normalizedPath === '' ? ROOT_DIRECTORY : normalizedPath;
-}
-
-function normalizeCwd(cwd: string): string {
-	if (cwd === '') {
-		return ROOT_DIRECTORY;
-	}
-	const normalized = normalizeAbsolutePath(cwd);
-	const trimmed = normalized.replace(TRAILING_SLASH_REGEX, '');
-	return trimmed === '' ? ROOT_DIRECTORY : trimmed;
-}
-
-function normalizeContext(context: ExecuteContext): NormalizedExecuteContext {
-	context.cwd = normalizeCwd(context.cwd);
-	context.status ??= 0;
-	context.globalVars ??= new Map<string, string>();
-	context.localVars ??= new Map<string, string>();
-	return context as NormalizedExecuteContext;
-}
-
-function resolvePathFromCwd(cwd: string, path: string): string {
-	if (path === '') {
-		return cwd;
-	}
-	if (path.startsWith(ROOT_DIRECTORY)) {
-		return normalizeAbsolutePath(path);
-	}
-	return normalizeAbsolutePath(`${cwd}/${path}`);
-}
-
 async function executeEffectStep(
 	step: EffectStep,
 	fs: FS,
 	context: NormalizedExecuteContext
 ): Promise<void> {
+	const builtinRuntime = createBuiltinRuntime(fs, context, null);
+
 	switch (step.cmd) {
 		case 'cd': {
-			const expandedPaths = await evaluateExpandedPathWord(
-				'cd',
-				step.args.path,
-				fs,
-				context
-			);
-			if (expandedPaths.length !== 1) {
-				throw new Error(
-					`cd: expected exactly 1 path after expansion, got ${expandedPaths.length}`
-				);
-			}
-			const requestedPath = expandedPaths[0];
-			if (requestedPath === '') {
-				throw new Error('cd: empty path');
-			}
-			const resolvedPath = resolvePathFromCwd(context.cwd, requestedPath);
-			let stat: Awaited<ReturnType<FS['stat']>>;
-			try {
-				stat = await fs.stat(resolvedPath);
-			} catch {
-				throw new Error(
-					`cd: directory does not exist: ${requestedPath}`
-				);
-			}
-
-			if (!stat.isDirectory) {
-				throw new Error(`cd: not a directory: ${requestedPath}`);
-			}
-
-			context.cwd = resolvedPath;
-			context.status = 0;
+			await cd(builtinRuntime, step.args);
 			break;
 		}
 		case 'cp': {
@@ -631,19 +490,22 @@ async function executeEffectStep(
 					context
 				)
 			);
-			if (destinationPaths.length !== 1) {
-				throw new Error(
-					`cp: destination must expand to exactly 1 path, got ${destinationPaths.length}`
-				);
-			}
-			const destPath = destinationPaths[0];
-			await cp(fs)({
-				srcs: srcPaths,
-				dest: destPath,
-				force: step.args.force,
-				interactive: step.args.interactive,
-				recursive: step.args.recursive,
-			});
+				if (destinationPaths.length !== 1) {
+					throw new Error(
+						`cp: destination must expand to exactly 1 path, got ${destinationPaths.length}`
+					);
+				}
+				const destinationPath = destinationPaths.at(0);
+				if (destinationPath === undefined) {
+					throw new Error('cp: destination missing after expansion');
+				}
+				await cp(fs)({
+					srcs: srcPaths,
+					dest: destinationPath,
+					force: step.args.force,
+					interactive: step.args.interactive,
+					recursive: step.args.recursive,
+				});
 			context.status = 0;
 			break;
 		}
@@ -682,18 +544,21 @@ async function executeEffectStep(
 					context
 				)
 			);
-			if (destinationPaths.length !== 1) {
-				throw new Error(
-					`mv: destination must expand to exactly 1 path, got ${destinationPaths.length}`
-				);
-			}
-			const destPath = destinationPaths[0];
-			await mv(fs)({
-				srcs: srcPaths,
-				dest: destPath,
-				force: step.args.force,
-				interactive: step.args.interactive,
-			});
+				if (destinationPaths.length !== 1) {
+					throw new Error(
+						`mv: destination must expand to exactly 1 path, got ${destinationPaths.length}`
+					);
+				}
+				const destinationPath = destinationPaths.at(0);
+				if (destinationPath === undefined) {
+					throw new Error('mv: destination missing after expansion');
+				}
+				await mv(fs)({
+					srcs: srcPaths,
+					dest: destinationPath,
+					force: step.args.force,
+					interactive: step.args.interactive,
+				});
 			context.status = 0;
 			break;
 		}
@@ -745,390 +610,16 @@ async function executeEffectStep(
 	}
 }
 
-function resolvePathsFromCwd(cwd: string, paths: string[]): string[] {
-	return paths.map((path) => resolvePathFromCwd(cwd, path));
-}
-
-async function listFilesystemEntries(fs: FS): Promise<FsEntry[]> {
-	const entries: FsEntry[] = [];
-	for await (const path of fs.readdir('/**/*')) {
-		entries.push({
-			path,
-			isDirectory: (await fs.stat(path)).isDirectory,
-		});
-	}
-	entries.sort((left, right) => left.path.localeCompare(right.path));
-	return entries;
-}
-
-function toRelativePathFromCwd(path: string, cwd: string): string | null {
-	if (cwd === ROOT_DIRECTORY) {
-		if (path === ROOT_DIRECTORY) {
-			return null;
-		}
-		return path.startsWith(ROOT_DIRECTORY) ? path.slice(1) : path;
-	}
-	if (path === cwd) {
-		return null;
-	}
-	const prefix = `${cwd}${ROOT_DIRECTORY}`;
-	if (!path.startsWith(prefix)) {
-		return null;
-	}
-	return path.slice(prefix.length);
-}
-
-function toGlobCandidate(
-	entry: FsEntry,
-	cwd: string,
-	isAbsolutePattern: boolean,
-	directoryOnly: boolean
-): string | null {
-	if (directoryOnly && !entry.isDirectory) {
-		return null;
-	}
-
-	const basePath = isAbsolutePattern
-		? entry.path
-		: toRelativePathFromCwd(entry.path, cwd);
-	if (!basePath || basePath === '') {
-		return null;
-	}
-
-	if (directoryOnly) {
-		return `${basePath}${ROOT_DIRECTORY}`;
-	}
-	return basePath;
-}
-
-async function expandGlobPattern(
-	pattern: string,
+function createBuiltinRuntime(
 	fs: FS,
-	context: NormalizedExecuteContext
-): Promise<string[]> {
-	const directoryOnly = pattern.endsWith(ROOT_DIRECTORY);
-	const isAbsolutePattern = pattern.startsWith(ROOT_DIRECTORY);
-	const matcher = picomatch(pattern, { bash: true, dot: false });
-	const entries = await listFilesystemEntries(fs);
-	const matches: string[] = [];
-
-	for (const entry of entries) {
-		const candidate = toGlobCandidate(
-			entry,
-			context.cwd,
-			isAbsolutePattern,
-			directoryOnly
-		);
-		if (!candidate) {
-			continue;
-		}
-		if (matcher(candidate)) {
-			matches.push(candidate);
-		}
-	}
-
-	matches.sort((left, right) => left.localeCompare(right));
-	return matches;
-}
-
-async function evaluateExpandedPathWords(
-	command: string,
-	words: ExpandedWord[],
-	fs: FS,
-	context: NormalizedExecuteContext
-): Promise<string[]> {
-	const resolvedWords: string[] = [];
-	for (const word of words) {
-		const values = await evaluateExpandedPathWord(
-			command,
-			word,
-			fs,
-			context
-		);
-		resolvedWords.push(...values);
-	}
-	return resolvedWords;
-}
-
-async function evaluateExpandedPathWord(
-	command: string,
-	word: ExpandedWord,
-	fs: FS,
-	context: NormalizedExecuteContext
-): Promise<string[]> {
-	switch (word.kind) {
-		case 'literal':
-			return [expandVariables(word.value, context)];
-		case 'glob': {
-			const pattern = expandVariables(word.pattern, context);
-			const matches = await expandGlobPattern(pattern, fs, context);
-			if (matches.length === 0) {
-				throw new Error(
-					`${command}: ${NO_GLOB_MATCH_MESSAGE}: ${pattern}`
-				);
-			}
-			return matches;
-		}
-		case 'commandSub': {
-			const commandText = expandVariables(word.command, context);
-			return [
-				await evaluateCommandSubstitution(commandText, fs, context),
-			];
-		}
-		default: {
-			const _exhaustive: never = word;
-			throw new Error(
-				`Unknown word kind: ${JSON.stringify(_exhaustive)}`
-			);
-		}
-	}
-}
-
-function resolveVariable(
-	variableName: string,
-	context: NormalizedExecuteContext
-): string {
-	if (variableName === 'status') {
-		return String(context.status);
-	}
-	return (
-		context.localVars.get(variableName) ??
-		context.globalVars.get(variableName) ??
-		''
-	);
-}
-
-function expandVariables(
-	input: string,
-	context: NormalizedExecuteContext
-): string {
-	return input.replace(VARIABLE_REFERENCE_REGEX, (_full, variableName) => {
-		return resolveVariable(variableName, context);
-	});
-}
-
-async function evaluateExpandedWords(
-	words: ExpandedWord[],
-	fs: FS,
-	context: NormalizedExecuteContext
-): Promise<string[]> {
-	const resolvedWords: string[] = [];
-	for (const word of words) {
-		resolvedWords.push(await evaluateExpandedWord(word, fs, context));
-	}
-	return resolvedWords;
-}
-
-async function evaluateExpandedWord(
-	word: ExpandedWord,
-	fs: FS,
-	context: NormalizedExecuteContext
-): Promise<string> {
-	switch (word.kind) {
-		case 'literal':
-			return expandVariables(word.value, context);
-		case 'glob':
-			return expandVariables(word.pattern, context);
-		case 'commandSub': {
-			const commandText = expandVariables(word.command, context);
-			return await evaluateCommandSubstitution(commandText, fs, context);
-		}
-		default: {
-			const _exhaustive: never = word;
-			throw new Error(
-				`Unknown word kind: ${JSON.stringify(_exhaustive)}`
-			);
-		}
-	}
-}
-
-async function evaluateCommandSubstitution(
-	command: string,
-	fs: FS,
-	context: NormalizedExecuteContext
-): Promise<string> {
-	const parsed = parse(command);
-	const nestedIR = compile(parsed);
-	const result = execute(nestedIR, fs, context);
-	const outputs = await collectOutputRecords(result);
-	return outputs.join('\n');
-}
-
-async function collectOutputRecords(result: ExecuteResult): Promise<string[]> {
-	if (result.kind === 'sink') {
-		await result.value;
-		return [];
-	}
-
-	const outputs: string[] = [];
-	for await (const record of result.value) {
-		outputs.push(formatRecord(record));
-	}
-	return outputs;
-}
-
-function evaluateTestStatus(operands: string[]): 0 | 1 {
-	if (operands.length === 1) {
-		return operands[0] === '' ? 1 : 0;
-	}
-
-	if (operands.length === 3) {
-		const [left, operator, right] = operands;
-		if (operator === '=') {
-			return left === right ? 0 : 1;
-		}
-		if (operator === '!=') {
-			return left !== right ? 0 : 1;
-		}
-	}
-
-	throw new Error('test: unsupported arguments');
-}
-
-function executeStringStep(
-	step: Extract<StreamStep, { cmd: 'string' }>,
-	fs: FS,
-	context: NormalizedExecuteContext
-): Stream<Record> {
-	return (async function* (): Stream<Record> {
-		const subcommand = await evaluateExpandedWord(
-			step.args.subcommand,
-			fs,
-			context
-		);
-		const operands = await evaluateExpandedWords(
-			step.args.operands,
-			fs,
-			context
-		);
-
-		if (subcommand === 'replace') {
-			yield* executeStringReplace(operands, context);
-			return;
-		}
-
-		if (subcommand === 'match') {
-			yield* executeStringMatch(operands, context);
-			return;
-		}
-
-		throw new Error(`string: unsupported subcommand: ${subcommand}`);
-	})();
-}
-
-async function* executeStringReplace(
-	operands: string[],
-	context: NormalizedExecuteContext
-): Stream<Record> {
-	if (operands[0]?.startsWith('-')) {
-		throw new Error(`string replace: unsupported flag: ${operands[0]}`);
-	}
-
-	if (operands.length < 3) {
-		throw new Error('string replace requires pattern replacement text');
-	}
-	const [pattern, replacement, ...inputs] = operands;
-	if (inputs.length === 0) {
-		context.status = 1;
-		return;
-	}
-	for (const input of inputs) {
-		yield {
-			kind: 'line',
-			text: input.replaceAll(pattern, replacement),
-		} as const;
-	}
-	context.status = 0;
-}
-
-async function* executeStringMatch(
-	operands: string[],
-	context: NormalizedExecuteContext
-): Stream<Record> {
-	let quiet = false;
-	let offset = 0;
-
-	while (operands[offset]?.startsWith('-')) {
-		const flag = operands[offset];
-		if (flag === '-q' && !quiet) {
-			quiet = true;
-			offset += 1;
-			continue;
-		}
-
-		throw new Error(`string match: unsupported flag: ${flag}`);
-	}
-
-	const filtered = operands.slice(offset);
-	const [pattern, value] = filtered;
-	if (!(pattern && value !== undefined)) {
-		throw new Error('string match requires pattern and value');
-	}
-	if (filtered.length > 2) {
-		throw new Error('string match: unsupported arguments');
-	}
-	const isMatch = picomatch(pattern, { dot: true })(value);
-	context.status = isMatch ? 0 : 1;
-	if (isMatch && !quiet) {
-		yield { kind: 'line', text: value } as const;
-	}
-}
-
-async function readFromStream(
-	fs: FS,
-	input: Stream<Record>
-): Promise<string | null> {
-	let firstValue: string | null = null;
-	for await (const record of input) {
-		const value = await recordToText(fs, record);
-		if (firstValue === null) {
-			firstValue = value;
-		}
-	}
-	return firstValue;
-}
-
-async function recordToText(fs: FS, record: Record): Promise<string> {
-	if (record.kind === 'line') {
-		return record.text;
-	}
-	if (record.kind === 'file') {
-		for await (const line of fs.readLines(record.path)) {
-			return line;
-		}
-		return '';
-	}
-	return JSON.stringify(record.value);
-}
-
-async function* toLineStream(
-	fs: FS,
-	input: Stream<Record>
-): Stream<LineRecord> {
-	for await (const record of input) {
-		if (record.kind === 'line') {
-			yield record;
-			continue;
-		}
-
-		if (record.kind === 'file') {
-			let lineNum = 1;
-			for await (const text of fs.readLines(record.path)) {
-				yield {
-					kind: 'line',
-					text,
-					file: record.path,
-					lineNum: lineNum++,
-				};
-			}
-			continue;
-		}
-
-		yield {
-			kind: 'line',
-			text: JSON.stringify(record.value),
-		};
-	}
+	context: NormalizedExecuteContext,
+	input: Stream<ShellRecord> | null
+): BuiltinRuntime {
+	return {
+		fs,
+		context,
+		input,
+	};
 }
 
 function formatLongListing(
@@ -1147,14 +638,14 @@ function normalizeLsPath(path: string, cwd: string): string {
 	if (path.startsWith('./')) {
 		return `${cwd}/${path.slice(2)}`;
 	}
-	if (path.startsWith('/')) {
+	if (path.startsWith(ROOT_DIRECTORY)) {
 		return path;
 	}
 	return `${cwd}/${path}`;
 }
 
 function trimTrailingSlash(path: string): string {
-	if (path === '/') {
+	if (path === ROOT_DIRECTORY) {
 		return path;
 	}
 	return path.replace(TRAILING_SLASH_REGEX, '');
@@ -1180,85 +671,16 @@ async function resolveLsPath(
 	}
 
 	const directoryPath = trimTrailingSlash(normalizedPath);
-	if (directoryPath === '/') {
+	if (directoryPath === ROOT_DIRECTORY) {
 		return '/*';
 	}
 	return `${directoryPath}/*`;
 }
 
-function getRedirectPath(
-	redirections: RedirectionIR[] | undefined,
-	kind: RedirectionIR['kind']
-): string | null {
-	if (!redirections) {
-		return null;
-	}
-
-	let redirectedPath: string | null = null;
-	for (const redirection of redirections) {
-		if (redirection.kind === kind) {
-			redirectedPath = expandedWordToString(redirection.target);
-		}
-	}
-	return redirectedPath;
-}
-
-function withInputRedirect(
-	paths: string[],
-	inputPath: string | null
-): string[] {
-	if (paths.length > 0 || !inputPath) {
-		return paths;
-	}
-	return [inputPath];
-}
-
-function applyOutputRedirect(
-	result: ExecuteResult,
-	step: StepIR,
-	fs: FS
-): ExecuteResult {
-	const outputPath = getRedirectPath(step.redirections, 'output');
-	if (!outputPath) {
-		return result;
-	}
-
-	if (result.kind === 'stream') {
-		return {
-			kind: 'sink',
-			value: writeStreamToFile(result.value, outputPath, fs),
-		};
-	}
-
-	return {
-		kind: 'sink',
-		value: result.value.then(async () => {
-			await fs.writeFile(outputPath, textEncoder.encode(''));
-		}),
-	};
-}
-
-async function writeStreamToFile(
-	stream: Stream<Record>,
-	path: string,
-	fs: FS
-): Promise<void> {
-	const outputChunks: string[] = [];
-	for await (const record of stream) {
-		outputChunks.push(formatRecord(record));
-	}
-	await fs.writeFile(path, textEncoder.encode(outputChunks.join('\n')));
-}
-
-function formatRecord(record: Record): string {
-	switch (record.kind) {
-		case 'line':
-			return record.text;
-		case 'file':
-			return record.path;
-		case 'json':
-			return JSON.stringify(record.value);
-		default:
-			throw new Error('Unknown record kind');
-	}
+function normalizeContext(context: ExecuteContext): NormalizedExecuteContext {
+	context.cwd = normalizeCwd(context.cwd);
+	context.status ??= 0;
+	context.globalVars ??= new Map<string, string>();
+	context.localVars ??= new Map<string, string>();
+	return context as NormalizedExecuteContext;
 }
