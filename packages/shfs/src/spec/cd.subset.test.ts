@@ -37,6 +37,36 @@ test('cd/pwd: navigating above root stays at root', async () => {
 	expect(await run('pwd')).toBe('/');
 });
 
+test('cd subset: supports -- for directories that begin with a hyphen', async () => {
+	await run('mkdir -p /workspace');
+	await run('mkdir /workspace/-testdir');
+	await run('cd /workspace');
+	await run('cd -- -testdir');
+
+	expect(await run('pwd')).toBe('/workspace/-testdir');
+	expect(await run('echo $status')).toBe('0');
+});
+
+test('cd subset: failed cd does not change the current working directory', async () => {
+	await run('mkdir -p /workspace/current');
+	await run('cd /workspace/current');
+
+	await expect(run('cd /workspace/missing')).rejects.toThrow(
+		'cd: directory does not exist: /workspace/missing'
+	);
+	expect(await run('pwd')).toBe('/workspace/current');
+});
+
+test('cd subset: pwd remains absolute after relative cd navigation', async () => {
+	await run('mkdir -p /workspace/alpha/beta');
+	await run('cd /workspace/alpha');
+	await run('cd beta');
+
+	const current = await run('pwd');
+	expect(current.startsWith('/')).toBe(true);
+	expect(current).toBe('/workspace/alpha/beta');
+});
+
 test('set: global variables persist, local variables are scoped to one script run', async () => {
 	await run('set -g PROJECT_ROOT /workspace');
 	expect(await run('echo $PROJECT_ROOT')).toBe('/workspace');
