@@ -33,7 +33,7 @@ export const TerminalInput = ({
 			onSubmit={handleSubmit}
 		>
 			<span className="shrink-0 text-[#7aa2f7]">{path}</span>
-			<span className="shrink-0 text-[#d8dee9]">$</span>
+			<span className="shrink-0 text-[#d8dee9]">&gt;</span>
 			<input
 				autoFocus
 				className="w-full border-none bg-transparent p-0 text-[#d8dee9] outline-none"

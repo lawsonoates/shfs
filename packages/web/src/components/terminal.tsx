@@ -6,6 +6,19 @@ import { TerminalInput } from './terminal-input';
 const TERMINAL_STORAGE_KEY = 'shfs-web-terminal-fs';
 const TITLE = 'lawsonoates@macbook-pro: fish';
 
+const BANNER = `
+███████╗██╗  ██╗███████╗███████╗
+██╔════╝██║  ██║██╔════╝██╔════╝
+███████╗███████║█████╗  ███████╗
+╚════██║██╔══██║██╔══╝  ╚════██║
+███████║██║  ██║██║     ███████║
+╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝
+
+shfs — simulated fish shell for filesystem commands
+`.trim();
+
+const INTRO_LINES = BANNER.split('\n');
+
 function splitText(text: string): string[] {
 	if (text.trim().length === 0) {
 		return [];
@@ -26,7 +39,7 @@ export const Terminal = () => {
 		return new Shell(fs);
 	}, []);
 
-	const [historyLines, setHistoryLines] = useState<string[]>([]);
+	const [historyLines, setHistoryLines] = useState<string[]>(INTRO_LINES);
 	const [command, setCommand] = useState('');
 	const [isRunning, setIsRunning] = useState(false);
 	const [path, setPath] = useState('~');
@@ -48,7 +61,7 @@ export const Terminal = () => {
 			return;
 		}
 
-		const promptLine = `$ ${command}`;
+		const promptLine = `> ${command}`;
 		setHistoryLines((previous) => [...previous, promptLine]);
 		setCommand('');
 
