@@ -1,7 +1,7 @@
 import { beforeEach, expect, test } from 'bun:test';
 
-import { MemoryFS } from '../fs/memory';
-import { Shell } from '../shell/shell';
+import { MemoryFS } from '../../fs/memory';
+import { Shell } from '../../shell/shell';
 
 let shell!: Shell;
 const REQUIRES_ONE_VARIABLE_NAME = 'read requires exactly one variable name';

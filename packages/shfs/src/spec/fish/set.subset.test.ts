@@ -1,7 +1,7 @@
 import { beforeEach, expect, test } from 'bun:test';
 
-import { MemoryFS } from '../fs/memory';
-import { Shell } from '../shell/shell';
+import { MemoryFS } from '../../fs/memory';
+import { Shell } from '../../shell/shell';
 
 let shell!: Shell;
 
