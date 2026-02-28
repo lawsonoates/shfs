@@ -21,6 +21,10 @@
 			"import": "./dist/fs.mjs",
 			"types": "./dist/fs.d.mts"
 		},
+		"./fs/cache": {
+			"import": "./dist/fs/cache.mjs",
+			"types": "./dist/fs/cache.d.mts"
+		},
 		"./util/path": {
 			"import": "./dist/util/path.mjs",
 			"types": "./dist/util/path.d.mts"

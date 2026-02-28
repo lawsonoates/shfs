@@ -36,6 +36,30 @@ const content = await $`cat hello.txt`.text();
 console.log(content);
 ```
 
+### Cached filesystem wrapper
+
+`shfs` also provides a strategy-based cache wrapper at `shfs/fs/cache`.
+
+```typescript
+import { Shell } from 'shfs';
+import { MemoryFS } from 'shfs/fs';
+import { CachedFS, lruStrategy, ttlStrategy } from 'shfs/fs/cache';
+
+const baseFs = new MemoryFS();
+baseFs.setFile('/hello.txt', 'hello world');
+
+const cachedFs = new CachedFS(baseFs, {
+	strategies: [
+		ttlStrategy({ ttlMs: 30_000 }),
+		lruStrategy({ maxEntries: 500 }),
+	],
+});
+
+const { $ } = new Shell(cachedFs);
+const content = await $`cat /hello.txt`.text();
+console.log(content);
+```
+
 ## Supported Commands
 - cat
 - cd
