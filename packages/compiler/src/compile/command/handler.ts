@@ -10,6 +10,7 @@ import { compileCat } from './cat/cat';
 import { compileCd } from './cd/cd';
 import { compileCp } from './cp/cp';
 import { compileEcho } from './echo/echo';
+import { compileGrep } from './grep/grep';
 import { compileHead } from './head/head';
 import { compileLs } from './ls/ls';
 import { compileMkdir } from './mkdir/mkdir';
@@ -38,6 +39,7 @@ export namespace CommandHandler {
 		cd: compileCd,
 		cp: compileCp,
 		echo: compileEcho,
+		grep: compileGrep,
 		head: compileHead,
 		ls: compileLs,
 		mkdir: compileMkdir,

@@ -182,6 +182,17 @@ export interface EchoStep {
 	};
 }
 
+/**
+ * Grep step.
+ */
+export interface GrepStep {
+	cmd: 'grep';
+	redirections?: RedirectionIR[];
+	args: {
+		argv: ExpandedWord[];
+	};
+}
+
 export type SetScope = 'global' | 'local';
 
 /**
@@ -239,6 +250,7 @@ export type StepIR =
 	| CatStep
 	| CpStep
 	| EchoStep
+	| GrepStep
 	| HeadStep
 	| LsStep
 	| MkdirStep

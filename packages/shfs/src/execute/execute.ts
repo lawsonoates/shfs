@@ -14,6 +14,7 @@ import type { BuiltinContext, BuiltinRuntime } from '../builtin/types';
 import type { FS } from '../fs/fs';
 import { cat } from '../operator/cat/cat';
 import { cp } from '../operator/cp/cp';
+import { runGrepCommand } from '../operator/grep/grep';
 import { headLines, headWithN } from '../operator/head/head';
 import { ls } from '../operator/ls/ls';
 import { mkdir } from '../operator/mkdir/mkdir';
@@ -342,6 +343,24 @@ function executeStreamStep(
 					yield* cat(fs, options)(input);
 				}
 				context.status = 0;
+			})();
+		}
+		case 'grep': {
+			return (async function* (): Stream<ShellRecord> {
+				const result = await runGrepCommand({
+					argv: step.args.argv,
+					context,
+					fs,
+					input,
+					redirections: step.redirections,
+				});
+				context.status = result.status;
+				for (const text of result.lines) {
+					yield {
+						kind: 'line',
+						text,
+					};
+				}
 			})();
 		}
 		case 'head': {

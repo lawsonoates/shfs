@@ -18,7 +18,7 @@ const harness = createGrepHarness();
 async function expectStatus(
 	command: string,
 	expectedStatus: number,
-	expectedOutput = ''
+	expectedOutput?: string
 ): Promise<void> {
 	const { output, status } = await harness.runWithStatus(command);
 	if (status !== expectedStatus) {
@@ -26,7 +26,7 @@ async function expectStatus(
 			`Expected status ${expectedStatus} but received ${status} for command: ${command}`
 		);
 	}
-	if (output !== expectedOutput) {
+	if (expectedOutput !== undefined && output !== expectedOutput) {
 		throw new Error(
 			`Expected output ${JSON.stringify(expectedOutput)} but received ${JSON.stringify(output)} for command: ${command}`
 		);

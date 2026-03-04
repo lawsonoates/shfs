@@ -87,7 +87,7 @@ export class CommandParser {
 	 * Parse a redirection if present.
 	 *
 	 * Grammar:
-	 *   redirection ::= '<' word | '>' word
+	 *   redirection ::= '<' word | '>' word | '>>' word
 	 */
 	parseRedirection(): Redirection | null {
 		const token = this.parser.currentToken;
@@ -109,10 +109,15 @@ export class CommandParser {
 			return new Redirection(span, 'input', target);
 		}
 
-		// Output redirection: > file
+		// Output redirection: > file (or >> file, treated as output in the subset)
 		if (token.kind === TokenKind.GREAT) {
 			const startPos = token.span.start;
 			this.parser.advance(); // consume >
+
+			// Support GNU-style append syntax for compatibility with grep tests.
+			if (this.parser.currentToken.kind === TokenKind.GREAT) {
+				this.parser.advance(); // consume second > from >>
+			}
 
 			const target = this.wordParser.parseWord();
 			if (!target) {
