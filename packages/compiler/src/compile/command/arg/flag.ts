@@ -1,5 +1,5 @@
 export interface Flag {
-	short: string;
+	short?: string;
 	long?: string;
 	takesValue: boolean;
 }

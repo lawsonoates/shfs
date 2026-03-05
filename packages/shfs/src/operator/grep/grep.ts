@@ -2,9 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-	expandedWordToString,
-	literal,
 	type ExpandedWord,
+	expandedWordToString,
 	type RedirectionIR,
 } from '@shfs/compiler';
 import picomatch from 'picomatch';
@@ -22,19 +21,17 @@ import type { Record as ShellRecord } from '../../record';
 import type { Stream } from '../../stream';
 
 type RegexMode = 'bre' | 'ere' | 'fixed' | 'pcre';
-type FilenameMode = 'always' | 'default' | 'never';
-type DirectoriesMode = 'read' | 'skip';
 
-interface GrepOptions {
+interface GrepOptionsIR {
 	afterContext: number;
 	beforeContext: number;
 	binaryWithoutMatch: boolean;
 	byteOffset: boolean;
 	countOnly: boolean;
-	directories: DirectoriesMode;
+	directories: 'read' | 'skip';
 	excludeDir: string[];
 	excludeFiles: string[];
-	filenameMode: FilenameMode;
+	filenameMode: 'always' | 'default' | 'never';
 	help: boolean;
 	ignoreCase: boolean;
 	includeFiles: string[];
@@ -55,14 +52,18 @@ interface GrepOptions {
 	wordRegexp: boolean;
 }
 
-type WordRef = { kind: 'word'; value: ExpandedWord } | { kind: 'literal'; value: string };
-
-interface ParseResult {
-	explicitPatterns: WordRef[];
-	fileOperands: WordRef[];
+interface GrepArgsIR {
+	diagnostics: ReadonlyArray<{
+		code: 'invalid-value' | 'missing-value' | 'unknown-option';
+		message: string;
+		token: string;
+		tokenIndex: number;
+	}>;
+	explicitPatterns: ExpandedWord[];
+	fileOperands: ExpandedWord[];
 	noPatternsYet: boolean;
-	options: GrepOptions;
-	patternFiles: WordRef[];
+	options: GrepOptionsIR;
+	patternFiles: ExpandedWord[];
 	usageError: boolean;
 }
 
@@ -112,10 +113,10 @@ interface MatcherBuildResult {
 }
 
 interface RunGrepCommandOptions {
-	argv: ExpandedWord[];
 	context: BuiltinContext;
 	fs: FS;
 	input: Stream<ShellRecord> | null;
+	parsed: GrepArgsIR;
 	redirections: RedirectionIR[] | undefined;
 }
 
@@ -142,39 +143,8 @@ const UTF8_ENCODER = new TextEncoder();
 const WORD_CHAR_REGEX = /[\p{L}\p{N}_]/u;
 const WHITESPACE_ESCAPE_REGEX = /\\[sS]/;
 const REGEX_META_REGEX = /[\\^$.*+?()[\]{}|]/;
-const CONTEXT_SHORT_VALUE_FLAGS = new Set(['A', 'B', 'C']);
-const VALUE_SHORT_FLAGS = new Set(['A', 'B', 'C', 'D', 'e', 'f', 'm']);
-const DEFAULT_OPTIONS: GrepOptions = {
-	afterContext: 0,
-	beforeContext: 0,
-	binaryWithoutMatch: false,
-	byteOffset: false,
-	countOnly: false,
-	directories: 'read',
-	excludeDir: [],
-	excludeFiles: [],
-	filenameMode: 'default',
-	help: false,
-	ignoreCase: false,
-	includeFiles: [],
-	invertMatch: false,
-	lineNumber: false,
-	lineRegexp: false,
-	listFilesWithMatches: false,
-	listFilesWithoutMatch: false,
-	maxCount: null,
-	mode: 'bre',
-	noMessages: false,
-	nullData: false,
-	onlyMatching: false,
-	quiet: false,
-	recursive: false,
-	textMode: false,
-	version: false,
-	wordRegexp: false,
-};
 const QUANTIFIER_VALUE_REGEX = /\{(\d+)(?:,(\d*))?\}/g;
-const QUANTIFIER_OVERFLOW_LIMIT = 4294967295;
+const QUANTIFIER_OVERFLOW_LIMIT = 4_294_967_295;
 const CORPUS_FILE_SPECS = [
 	['bre.tests', 'bre'],
 	['ere.tests', 'ere'],
@@ -197,7 +167,7 @@ export async function runGrepCommand(
 async function runGrepCommandInner(
 	options: RunGrepCommandOptions
 ): Promise<RunGrepCommandResult> {
-	const parsed = parseArgs(options.argv);
+	const parsed = options.parsed;
 	if (parsed.options.help) {
 		return {
 			lines: [
@@ -215,7 +185,11 @@ async function runGrepCommandInner(
 	}
 
 	let hadError = parsed.usageError;
-	const normalized = await normalizeInvocation(parsed, options.fs, options.context);
+	const normalized = await normalizeInvocation(
+		parsed,
+		options.fs,
+		options.context
+	);
 	hadError ||= normalized.hadError;
 	if (normalized.patterns.length === 0) {
 		return { lines: [], status: hadError ? 2 : 1 };
@@ -378,476 +352,8 @@ async function runGrepCommandInner(
 	return { lines, status: anySelected ? 0 : 1 };
 }
 
-function parseArgs(argv: ExpandedWord[]): ParseResult {
-	const options: GrepOptions = {
-		...DEFAULT_OPTIONS,
-		excludeDir: [],
-		excludeFiles: [],
-		includeFiles: [],
-	};
-	const explicitPatterns: WordRef[] = [];
-	const patternFiles: WordRef[] = [];
-	const fileOperands: WordRef[] = [];
-	let usageError = false;
-	let endOfOptions = false;
-	let implicitPatternAssigned = false;
-
-	for (let index = 0; index < argv.length; index += 1) {
-		const word = argv[index];
-		if (word === undefined) {
-			continue;
-		}
-		const token = expandedWordToString(word);
-
-		if (!endOfOptions && token === '--') {
-			endOfOptions = true;
-			continue;
-		}
-
-		if (!endOfOptions && token.startsWith('--') && token.length > 2) {
-			const consumed = parseLongOption(
-				token,
-				argv[index + 1],
-				options,
-				explicitPatterns,
-				patternFiles
-			);
-			if (consumed.error) {
-				usageError = true;
-			}
-			if (consumed.consumedNext) {
-				index += 1;
-			}
-			continue;
-		}
-
-		if (!endOfOptions && token.startsWith('-') && token !== '-') {
-			if (/^-[0-9]+$/.test(token)) {
-				const contextAmount = parseNumericOption(token.slice(1));
-				if (contextAmount === null) {
-					usageError = true;
-				} else {
-					options.beforeContext = contextAmount;
-					options.afterContext = contextAmount;
-				}
-				continue;
-			}
-
-			const consumed = parseShortOptionCluster(
-				token,
-				argv[index + 1],
-				options,
-				explicitPatterns,
-				patternFiles
-			);
-			if (consumed.error) {
-				usageError = true;
-			}
-			if (consumed.consumedNext) {
-				index += 1;
-			}
-			if (consumed.handled) {
-				continue;
-			}
-		}
-
-		if (
-			!implicitPatternAssigned &&
-			explicitPatterns.length === 0 &&
-			patternFiles.length === 0
-		) {
-			explicitPatterns.push({ kind: 'word', value: word });
-			implicitPatternAssigned = true;
-			continue;
-		}
-		fileOperands.push({ kind: 'word', value: word });
-	}
-
-	const noPatternsYet = explicitPatterns.length === 0 && patternFiles.length === 0;
-
-	return {
-		explicitPatterns,
-		fileOperands,
-		noPatternsYet,
-		options,
-		patternFiles,
-		usageError,
-	};
-}
-
-function parseLongOption(
-	token: string,
-	nextWord: ExpandedWord | undefined,
-	options: GrepOptions,
-	explicitPatterns: WordRef[],
-	patternFiles: WordRef[]
-): { consumedNext: boolean; error: boolean } {
-	const [name, inlineValue] = splitLongOption(token);
-	const takeValue = (required: boolean): WordRef | null => {
-		if (inlineValue !== null) {
-			return { kind: 'literal', value: inlineValue };
-		}
-		if (nextWord === undefined) {
-			return required ? null : null;
-		}
-		return { kind: 'word', value: nextWord };
-	};
-
-	switch (name) {
-		case '--after-context': {
-			const valueRef = takeValue(true);
-			const parsed = parseNumericOption(
-				valueRef === null ? null : getWordRefLiteral(valueRef)
-			);
-			if (parsed === null) {
-				return { consumedNext: inlineValue === null, error: true };
-			}
-			options.afterContext = parsed;
-			return { consumedNext: inlineValue === null, error: false };
-		}
-		case '--before-context': {
-			const valueRef = takeValue(true);
-			const parsed = parseNumericOption(
-				valueRef === null ? null : getWordRefLiteral(valueRef)
-			);
-			if (parsed === null) {
-				return { consumedNext: inlineValue === null, error: true };
-			}
-			options.beforeContext = parsed;
-			return { consumedNext: inlineValue === null, error: false };
-		}
-		case '--context': {
-			const valueRef = takeValue(true);
-			const parsed = parseNumericOption(
-				valueRef === null ? null : getWordRefLiteral(valueRef)
-			);
-			if (parsed === null) {
-				return { consumedNext: inlineValue === null, error: true };
-			}
-			options.beforeContext = parsed;
-			options.afterContext = parsed;
-			return { consumedNext: inlineValue === null, error: false };
-		}
-		case '--binary-file': {
-			const valueRef = takeValue(true);
-			const value = valueRef === null ? '' : getWordRefLiteral(valueRef);
-			options.binaryWithoutMatch = value === 'without-match';
-			return { consumedNext: inlineValue === null, error: valueRef === null };
-		}
-		case '--directories': {
-			const valueRef = takeValue(true);
-			const value = valueRef === null ? '' : getWordRefLiteral(valueRef);
-			options.directories = value === 'skip' ? 'skip' : 'read';
-			return { consumedNext: inlineValue === null, error: valueRef === null };
-		}
-		case '--devices': {
-			const valueRef = takeValue(true);
-			return { consumedNext: inlineValue === null, error: valueRef === null };
-		}
-		case '--exclude': {
-			const valueRef = takeValue(true);
-			if (valueRef === null) {
-				return { consumedNext: inlineValue === null, error: true };
-			}
-			options.excludeFiles.push(getWordRefLiteral(valueRef));
-			return { consumedNext: inlineValue === null, error: false };
-		}
-		case '--exclude-dir': {
-			const valueRef = takeValue(true);
-			if (valueRef === null) {
-				return { consumedNext: inlineValue === null, error: true };
-			}
-			options.excludeDir.push(getWordRefLiteral(valueRef));
-			return { consumedNext: inlineValue === null, error: false };
-		}
-		case '--include': {
-			const valueRef = takeValue(true);
-			if (valueRef === null) {
-				return { consumedNext: inlineValue === null, error: true };
-			}
-			options.includeFiles.push(getWordRefLiteral(valueRef));
-			return { consumedNext: inlineValue === null, error: false };
-		}
-		case '--max-count': {
-			const valueRef = takeValue(true);
-			const parsed = parseNumericOption(
-				valueRef === null ? null : getWordRefLiteral(valueRef)
-			);
-			if (parsed === null) {
-				return { consumedNext: inlineValue === null, error: true };
-			}
-			options.maxCount = parsed;
-			return { consumedNext: inlineValue === null, error: false };
-		}
-		case '--regexp': {
-			const valueRef = takeValue(true);
-			if (valueRef === null) {
-				return { consumedNext: inlineValue === null, error: true };
-			}
-			explicitPatterns.push(valueRef);
-			return { consumedNext: inlineValue === null, error: false };
-		}
-		case '--file': {
-			const valueRef = takeValue(true);
-			if (valueRef === null) {
-				return { consumedNext: inlineValue === null, error: true };
-			}
-			patternFiles.push(valueRef);
-			return { consumedNext: inlineValue === null, error: false };
-		}
-		case '--extended-regexp':
-			options.mode = 'ere';
-			return { consumedNext: false, error: false };
-		case '--basic-regexp':
-			options.mode = 'bre';
-			return { consumedNext: false, error: false };
-		case '--fixed-strings':
-			options.mode = 'fixed';
-			return { consumedNext: false, error: false };
-		case '--perl-regexp':
-			options.mode = 'pcre';
-			return { consumedNext: false, error: false };
-		case '--recursive':
-		case '--dereference-recursive':
-			options.recursive = true;
-			return { consumedNext: false, error: false };
-		case '--with-filename':
-			options.filenameMode = 'always';
-			return { consumedNext: false, error: false };
-		case '--no-filename':
-			options.filenameMode = 'never';
-			return { consumedNext: false, error: false };
-		case '--files-with-matches':
-			options.listFilesWithMatches = true;
-			options.listFilesWithoutMatch = false;
-			return { consumedNext: false, error: false };
-		case '--files-without-match':
-			options.listFilesWithoutMatch = true;
-			options.listFilesWithMatches = false;
-			return { consumedNext: false, error: false };
-		case '--line-number':
-			options.lineNumber = true;
-			return { consumedNext: false, error: false };
-		case '--byte-offset':
-			options.byteOffset = true;
-			return { consumedNext: false, error: false };
-		case '--quiet':
-		case '--silent':
-			options.quiet = true;
-			return { consumedNext: false, error: false };
-		case '--invert-match':
-			options.invertMatch = true;
-			return { consumedNext: false, error: false };
-		case '--line-regexp':
-			options.lineRegexp = true;
-			return { consumedNext: false, error: false };
-		case '--word-regexp':
-			options.wordRegexp = true;
-			return { consumedNext: false, error: false };
-		case '--ignore-case':
-			options.ignoreCase = true;
-			return { consumedNext: false, error: false };
-		case '--null-data':
-			options.nullData = true;
-			return { consumedNext: false, error: false };
-		case '--count':
-			options.countOnly = true;
-			return { consumedNext: false, error: false };
-		case '--only-matching':
-			options.onlyMatching = true;
-			return { consumedNext: false, error: false };
-		case '--text':
-			options.textMode = true;
-			return { consumedNext: false, error: false };
-		case '--no-messages':
-			options.noMessages = true;
-			return { consumedNext: false, error: false };
-		case '--help':
-			options.help = true;
-			return { consumedNext: false, error: false };
-		case '--version':
-			options.version = true;
-			return { consumedNext: false, error: false };
-		default:
-			return { consumedNext: false, error: true };
-	}
-}
-
-function splitLongOption(token: string): [string, string | null] {
-	const equalsIndex = token.indexOf('=');
-	if (equalsIndex === -1) {
-		return [token, null];
-	}
-	return [token.slice(0, equalsIndex), token.slice(equalsIndex + 1)];
-}
-
-function parseShortOptionCluster(
-	token: string,
-	nextWord: ExpandedWord | undefined,
-	options: GrepOptions,
-	explicitPatterns: WordRef[],
-	patternFiles: WordRef[]
-): { consumedNext: boolean; error: boolean; handled: boolean } {
-	let consumedNext = false;
-	const body = token.slice(1);
-	if (body.length === 0) {
-		return { consumedNext: false, error: false, handled: false };
-	}
-
-	for (let i = 0; i < body.length; i += 1) {
-		const flag = body[i];
-		if (flag === undefined) {
-			continue;
-		}
-
-		if (VALUE_SHORT_FLAGS.has(flag)) {
-			const inlineValue = body.slice(i + 1);
-			const valueRef: WordRef | null =
-				inlineValue === ''
-					? nextWord
-						? { kind: 'word', value: nextWord }
-						: null
-					: { kind: 'literal', value: inlineValue };
-			if (valueRef === null) {
-				return { consumedNext, error: true, handled: true };
-			}
-			if (inlineValue === '') {
-				consumedNext = true;
-			}
-			if (flag === 'e') {
-				explicitPatterns.push(valueRef);
-				return { consumedNext, error: false, handled: true };
-			}
-			if (flag === 'f') {
-				patternFiles.push(valueRef);
-				return { consumedNext, error: false, handled: true };
-			}
-			if (flag === 'm') {
-				const parsedValue = parseNumericOption(getWordRefLiteral(valueRef));
-				if (parsedValue === null) {
-					return { consumedNext, error: true, handled: true };
-				}
-				options.maxCount = parsedValue;
-				return { consumedNext, error: false, handled: true };
-			}
-			if (flag === 'D') {
-				return { consumedNext, error: false, handled: true };
-			}
-			if (CONTEXT_SHORT_VALUE_FLAGS.has(flag)) {
-				const parsedValue = parseNumericOption(getWordRefLiteral(valueRef));
-				if (parsedValue === null) {
-					return { consumedNext, error: true, handled: true };
-				}
-				if (flag === 'A') {
-					options.afterContext = parsedValue;
-				} else if (flag === 'B') {
-					options.beforeContext = parsedValue;
-				} else {
-					options.beforeContext = parsedValue;
-					options.afterContext = parsedValue;
-				}
-				return { consumedNext, error: false, handled: true };
-			}
-			return { consumedNext, error: true, handled: true };
-		}
-
-		switch (flag) {
-			case 'E':
-				options.mode = 'ere';
-				break;
-			case 'F':
-				options.mode = 'fixed';
-				break;
-			case 'G':
-				options.mode = 'bre';
-				break;
-			case 'P':
-				options.mode = 'pcre';
-				break;
-			case 'r':
-			case 'R':
-				options.recursive = true;
-				break;
-			case 'H':
-				options.filenameMode = 'always';
-				break;
-			case 'h':
-				options.filenameMode = 'never';
-				break;
-			case 'i':
-				options.ignoreCase = true;
-				break;
-			case 'L':
-				options.listFilesWithoutMatch = true;
-				options.listFilesWithMatches = false;
-				break;
-			case 'l':
-				options.listFilesWithMatches = true;
-				options.listFilesWithoutMatch = false;
-				break;
-			case 'm':
-				break;
-			case 'n':
-				options.lineNumber = true;
-				break;
-			case 'b':
-				options.byteOffset = true;
-				break;
-			case 'q':
-				options.quiet = true;
-				break;
-			case 's':
-				options.noMessages = true;
-				break;
-			case 'v':
-				options.invertMatch = true;
-				break;
-			case 'w':
-				options.wordRegexp = true;
-				break;
-			case 'x':
-				options.lineRegexp = true;
-				break;
-			case 'o':
-				options.onlyMatching = true;
-				break;
-			case 'c':
-				options.countOnly = true;
-				break;
-			case 'z':
-				options.nullData = true;
-				break;
-			case 'a':
-				options.textMode = true;
-				break;
-			default:
-				return { consumedNext, error: true, handled: true };
-		}
-	}
-
-	return { consumedNext, error: false, handled: true };
-}
-
-function getWordRefLiteral(reference: WordRef): string {
-	if (reference.kind === 'literal') {
-		return reference.value;
-	}
-	return expandedWordToString(reference.value);
-}
-
-function parseNumericOption(value: string | null): number | null {
-	if (value === null || value === '') {
-		return null;
-	}
-	const parsed = Number.parseInt(value, 10);
-	if (!Number.isFinite(parsed) || parsed < 0) {
-		return null;
-	}
-	return parsed;
-}
-
 async function normalizeInvocation(
-	parseResult: ParseResult,
+	parseResult: GrepArgsIR,
 	fs: FS,
 	context: BuiltinContext
 ): Promise<{
@@ -860,13 +366,9 @@ async function normalizeInvocation(
 	let hadError = false;
 
 	for (const patternRef of parseResult.explicitPatterns) {
-		if (patternRef.kind === 'literal') {
-			patterns.push({ text: patternRef.value, validUtf8: true });
-			continue;
-		}
 		try {
 			patterns.push({
-				text: await evaluatePatternWord(patternRef.value, fs, context),
+				text: await evaluatePatternWord(patternRef, fs, context),
 				validUtf8: true,
 			});
 		} catch {
@@ -875,16 +377,17 @@ async function normalizeInvocation(
 	}
 
 	for (const fileRef of parseResult.patternFiles) {
-		const expandedPaths =
-			fileRef.kind === 'literal'
-				? [fileRef.value]
-				: await expandPathWordSafe(fileRef.value, fs, context);
+		const expandedPaths = await expandPathWordSafe(fileRef, fs, context);
 		if (expandedPaths === null) {
 			hadError = true;
 			continue;
 		}
 		for (const pathValue of expandedPaths) {
-			const loaded = await loadPatternsFromFile(pathValue, fs, context.cwd);
+			const loaded = await loadPatternsFromFile(
+				pathValue,
+				fs,
+				context.cwd
+			);
 			if (loaded === null) {
 				hadError = true;
 				continue;
@@ -899,11 +402,7 @@ async function normalizeInvocation(
 
 	const fileOperands: string[] = [];
 	for (const operandRef of parseResult.fileOperands) {
-		if (operandRef.kind === 'literal') {
-			fileOperands.push(operandRef.value);
-			continue;
-		}
-		const expanded = await expandPathWordSafe(operandRef.value, fs, context);
+		const expanded = await expandPathWordSafe(operandRef, fs, context);
 		if (expanded === null) {
 			hadError = true;
 			continue;
@@ -992,7 +491,7 @@ function splitBufferByByte(bytes: Uint8Array, separator: number): Uint8Array[] {
 
 async function collectSearchTargets(
 	fileOperands: string[],
-	options: GrepOptions,
+	options: GrepOptionsIR,
 	fs: FS,
 	context: BuiltinContext
 ): Promise<{ hadError: boolean; targets: SearchTarget[] }> {
@@ -1030,7 +529,7 @@ async function collectSearchTargets(
 		const globRoot = trimTrailingSlash(rootPath);
 		const pattern = globRoot === '/' ? '/*' : `${globRoot}/*`;
 		for await (const childPath of fs.readdir(pattern)) {
-			let stat;
+			let stat: Awaited<ReturnType<FS['stat']>>;
 			try {
 				stat = await fs.stat(childPath);
 			} catch {
@@ -1050,7 +549,11 @@ async function collectSearchTargets(
 			}
 			targets.push({
 				absolutePath: childPath,
-				displayPath: toDisplayPath(childPath, context.cwd, preferRelative),
+				displayPath: toDisplayPath(
+					childPath,
+					context.cwd,
+					preferRelative
+				),
 				preferRelative,
 				stdin: false,
 			});
@@ -1079,7 +582,7 @@ async function collectSearchTargets(
 		}
 		const preferRelative = !operand.startsWith('/');
 		const absolutePath = resolvePathFromCwd(context.cwd, operand);
-		let stat;
+		let stat: Awaited<ReturnType<FS['stat']>>;
 		try {
 			stat = await fs.stat(absolutePath);
 		} catch {
@@ -1104,7 +607,11 @@ async function collectSearchTargets(
 		}
 		targets.push({
 			absolutePath,
-			displayPath: toDisplayPath(absolutePath, context.cwd, preferRelative),
+			displayPath: toDisplayPath(
+				absolutePath,
+				context.cwd,
+				preferRelative
+			),
 			preferRelative,
 			stdin: false,
 		});
@@ -1129,7 +636,11 @@ function basename(path: string): string {
 	return normalized.slice(slashIndex + 1);
 }
 
-function toDisplayPath(path: string, cwd: string, preferRelative: boolean): string {
+function toDisplayPath(
+	path: string,
+	cwd: string,
+	preferRelative: boolean
+): string {
 	if (!preferRelative) {
 		return path;
 	}
@@ -1194,7 +705,7 @@ function hasInputOutputConflict(
 	return inputPaths.has(outputPath);
 }
 
-function allowsSameInputOutputPath(options: GrepOptions): boolean {
+function allowsSameInputOutputPath(options: GrepOptionsIR): boolean {
 	const earlyExit =
 		options.listFilesWithMatches ||
 		options.listFilesWithoutMatch ||
@@ -1205,7 +716,7 @@ function allowsSameInputOutputPath(options: GrepOptions): boolean {
 }
 
 function shouldDisplayFilename(
-	options: GrepOptions,
+	options: GrepOptionsIR,
 	fileOperands: string[]
 ): boolean {
 	if (options.filenameMode === 'always') {
@@ -1226,7 +737,10 @@ function shouldDisplayFilename(
 	return concreteFiles.some((operand) => operand.includes('/'));
 }
 
-function buildMatchers(patterns: PatternSpec[], options: GrepOptions): MatcherBuildResult {
+function buildMatchers(
+	patterns: PatternSpec[],
+	options: GrepOptionsIR
+): MatcherBuildResult {
 	const compiled: CompiledPattern[] = [];
 	let compileError = false;
 
@@ -1248,7 +762,11 @@ function buildMatchers(patterns: PatternSpec[], options: GrepOptions): MatcherBu
 			continue;
 		}
 
-		const translated = translatePattern(pattern.text, options.mode, options.ignoreCase);
+		const translated = translatePattern(
+			pattern.text,
+			options.mode,
+			options.ignoreCase
+		);
 		if (translated.error) {
 			compileError = true;
 			continue;
@@ -1287,7 +805,9 @@ function buildMatchers(patterns: PatternSpec[], options: GrepOptions): MatcherBu
 			if (isBenignBracketTypo(pattern.text)) {
 				try {
 					const flagBase = options.ignoreCase ? 'iu' : 'u';
-					let fallbackSource = escapeRegexLiteralPattern(pattern.text);
+					let fallbackSource = escapeRegexLiteralPattern(
+						pattern.text
+					);
 					if (options.wordRegexp) {
 						fallbackSource = `(?<![\\p{L}\\p{N}_])(?:${fallbackSource})(?![\\p{L}\\p{N}_])`;
 					}
@@ -1297,7 +817,10 @@ function buildMatchers(patterns: PatternSpec[], options: GrepOptions): MatcherBu
 					compiled.push({
 						kind: 'regex',
 						value: {
-							globalRegex: new RegExp(fallbackSource, `g${flagBase}`),
+							globalRegex: new RegExp(
+								fallbackSource,
+								`g${flagBase}`
+							),
 							regex: new RegExp(fallbackSource, flagBase),
 							usesSpaceEscape: false,
 						},
@@ -1353,7 +876,10 @@ function expandTurkishIRegexLiterals(source: string): string {
 			continue;
 		}
 
-		if (!inClass && (char === 'I' || char === 'i' || char === 'İ' || char === 'ı')) {
+		if (
+			!inClass &&
+			(char === 'I' || char === 'i' || char === 'İ' || char === 'ı')
+		) {
 			result += variants;
 			continue;
 		}
@@ -1378,10 +904,7 @@ function translatePattern(
 		.replaceAll('\\<', '(?<![\\p{L}\\p{N}_])(?=[\\p{L}\\p{N}_])')
 		.replaceAll('\\>', '(?<=[\\p{L}\\p{N}_])(?![\\p{L}\\p{N}_])');
 	source = replacePosixClasses(source, ignoreCase);
-	source = source.replaceAll(
-		'[[=a=]]',
-		'[aAÀÁÂÃÄÅĀĂĄàáâãäåāăą]'
-	);
+	source = source.replaceAll('[[=a=]]', '[aAÀÁÂÃÄÅĀĂĄàáâãäåāăą]');
 	return { error: false, source, usesSpaceEscape };
 }
 
@@ -1622,7 +1145,7 @@ function searchBuffer(
 	bytes: Uint8Array,
 	displayPath: string,
 	patterns: CompiledPattern[],
-	options: GrepOptions,
+	options: GrepOptionsIR,
 	showFilename: boolean
 ): FileSearchResult {
 	const records = splitIntoRecords(bytes, options.nullData ? 0x00 : 0x0a);
@@ -1631,10 +1154,12 @@ function searchBuffer(
 	let hasSelectedLine = false;
 
 	const useContext =
-		!options.onlyMatching &&
-		!options.countOnly &&
-		!options.listFilesWithMatches &&
-		!options.listFilesWithoutMatch &&
+		!(
+			options.onlyMatching ||
+			options.countOnly ||
+			options.listFilesWithMatches ||
+			options.listFilesWithoutMatch
+		) &&
 		(options.beforeContext > 0 || options.afterContext > 0);
 	if (useContext) {
 		const contextLines = renderContextOutput(
@@ -1649,7 +1174,9 @@ function searchBuffer(
 
 	for (const record of records) {
 		const matches = findMatches(record, patterns, options);
-		const selected = options.invertMatch ? matches.length === 0 : matches.length > 0;
+		const selected = options.invertMatch
+			? matches.length === 0
+			: matches.length > 0;
 		if (!selected) {
 			continue;
 		}
@@ -1663,7 +1190,8 @@ function searchBuffer(
 			for (const match of matches) {
 				const matchText = record.text.slice(match.start, match.end);
 				const byteOffset =
-					record.byteOffset + byteLengthOfPrefix(record.text, match.start);
+					record.byteOffset +
+					byteLengthOfPrefix(record.text, match.start);
 				outputLines.push(
 					formatOutputLine(
 						matchText,
@@ -1703,7 +1231,7 @@ function renderContextOutput(
 	records: TextRecord[],
 	displayPath: string,
 	patterns: CompiledPattern[],
-	options: GrepOptions,
+	options: GrepOptionsIR,
 	showFilename: boolean
 ): FileSearchResult {
 	const outputLines: string[] = [];
@@ -1717,7 +1245,10 @@ function renderContextOutput(
 		if (record.lineNumber <= lastPrintedLineNumber) {
 			return;
 		}
-		if (outputLines.length > 0 && record.lineNumber > lastPrintedLineNumber + 1) {
+		if (
+			outputLines.length > 0 &&
+			record.lineNumber > lastPrintedLineNumber + 1
+		) {
 			outputLines.push('--');
 		}
 		outputLines.push(
@@ -1736,10 +1267,15 @@ function renderContextOutput(
 
 	for (const record of records) {
 		const matches = findMatches(record, patterns, options);
-		const selected = options.invertMatch ? matches.length === 0 : matches.length > 0;
+		const selected = options.invertMatch
+			? matches.length === 0
+			: matches.length > 0;
 
 		if (selected) {
-			if (options.maxCount !== null && selectedLineCount >= options.maxCount) {
+			if (
+				options.maxCount !== null &&
+				selectedLineCount >= options.maxCount
+			) {
 				break;
 			}
 			for (const queued of beforeQueue) {
@@ -1781,7 +1317,7 @@ function formatOutputLine(
 	byteOffset: number,
 	contextLine: boolean,
 	showFilename: boolean,
-	options: GrepOptions
+	options: GrepOptionsIR
 ): string {
 	const separator = contextLine ? '-' : ':';
 	const prefixes: string[] = [];
@@ -1803,12 +1339,16 @@ function formatOutputLine(
 function findMatches(
 	record: TextRecord,
 	patterns: CompiledPattern[],
-	options: GrepOptions
+	options: GrepOptionsIR
 ): MatchSpan[] {
 	const allMatches: MatchSpan[] = [];
 	for (const pattern of patterns) {
 		if (pattern.kind === 'fixed') {
-			const fixedMatches = findFixedMatches(record.text, pattern.value, options);
+			const fixedMatches = findFixedMatches(
+				record.text,
+				pattern.value,
+				options
+			);
 			if (fixedMatches.length > 0) {
 				allMatches.push(...fixedMatches);
 				if (!options.onlyMatching) {
@@ -1822,7 +1362,11 @@ function findMatches(
 			continue;
 		}
 
-		const regexMatches = findRegexMatches(record.text, pattern.value, options.onlyMatching);
+		const regexMatches = findRegexMatches(
+			record.text,
+			pattern.value,
+			options.onlyMatching
+		);
 		if (regexMatches.length > 0) {
 			allMatches.push(...regexMatches);
 			if (!options.onlyMatching) {
@@ -1867,7 +1411,7 @@ function findRegexMatches(
 function findFixedMatches(
 	text: string,
 	pattern: CompiledFixedPattern,
-	options: GrepOptions
+	options: GrepOptionsIR
 ): MatchSpan[] {
 	if (pattern.unmatchable) {
 		return [];
@@ -1914,7 +1458,7 @@ function findFixedMatches(
 function hasWordBoundary(text: string, start: number, end: number): boolean {
 	const previous = getPreviousCodePoint(text, start);
 	const next = getNextCodePoint(text, end);
-	return !isWordChar(previous) && !isWordChar(next);
+	return !(isWordChar(previous) || isWordChar(next));
 }
 
 function getPreviousCodePoint(text: string, index: number): string {

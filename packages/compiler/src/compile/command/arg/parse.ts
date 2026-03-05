@@ -15,6 +15,16 @@ export type FlagDef = Flag & {
 	 *   -I a -I b  =>  { I: ["a","b"] }
 	 */
 	multiple?: boolean;
+	/**
+	 * If true, a value-taking flag may consume a token that looks like another
+	 * flag (for example: `-e -n` where `-n` is the pattern).
+	 */
+	allowFlagLikeValue?: boolean;
+	/**
+	 * Controls short-cluster parsing when the inline suffix could also be
+	 * interpreted as flags. Default is `error`.
+	 */
+	ambiguousShortValuePolicy?: 'error' | 'value';
 };
 
 export type ParsedFlagValue = boolean | string | string[];
@@ -447,16 +457,24 @@ function buildFlagIndex(flagDefs: Record<string, FlagDef>): FlagIndex {
 	};
 
 	for (const [canonicalName, def] of Object.entries(flagDefs)) {
-		// Validate short
-		if (!SHORT_NAME_REGEX.test(def.short)) {
+		if (!(def.short || def.long)) {
 			throw new Error(
-				`Invalid short flag for "${canonicalName}": "${def.short}". Expected a single letter [A-Za-z].`
+				`Flag "${canonicalName}" must define at least one of "short" or "long".`
 			);
 		}
 
 		const entry = { canonical: canonicalName, def };
 		canonical.set(canonicalName, entry);
-		add(short, `-${def.short}`, entry);
+
+		// Validate short (optional)
+		if (def.short !== undefined) {
+			if (!SHORT_NAME_REGEX.test(def.short)) {
+				throw new Error(
+					`Invalid short flag for "${canonicalName}": "${def.short}". Expected a single letter [A-Za-z].`
+				);
+			}
+			add(short, `-${def.short}`, entry);
+		}
 
 		// Validate long (optional)
 		if (def.long) {
@@ -563,7 +581,8 @@ function parseLongToken(
 		args,
 		index,
 		token,
-		flagsIndex
+		flagsIndex,
+		entry
 	);
 	setValue(out, consumedValueIndices, entry, value, valueIndex);
 	return newIndex;
@@ -641,7 +660,8 @@ function parseSingleShortToken(
 		args,
 		index,
 		token,
-		flagsIndex
+		flagsIndex,
+		entry
 	);
 	setValue(out, consumedValueIndices, entry, value, valueIndex);
 	return newIndex;
@@ -713,13 +733,14 @@ function parseValueFlagInShortCluster(
 			args,
 			index,
 			name,
-			flagsIndex
+			flagsIndex,
+			entry
 		);
 		setValue(out, consumedValueIndices, entry, value, valueIndex);
 		return newIndex;
 	}
 
-	assertNotAmbiguousShortValue(token, name, rest, flagsIndex);
+	assertNotAmbiguousShortValue(token, name, rest, flagsIndex, entry);
 
 	// Safe inline suffix value (e.g. -n10, -n./path, -n-5)
 	setValue(out, consumedValueIndices, entry, rest, index);
@@ -754,8 +775,13 @@ function assertNotAmbiguousShortValue(
 	token: string,
 	name: string,
 	rest: string,
-	flagsIndex: FlagIndex
+	flagsIndex: FlagIndex,
+	entry: FlagEntry
 ): void {
+	if (entry.def.ambiguousShortValuePolicy === 'value') {
+		return;
+	}
+
 	// Ambiguity guard: if remainder begins with a known short flag, force explicit separation.
 	const first = rest[0] ?? '';
 	if (!(SHORT_NAME_REGEX.test(first) && flagsIndex.short.has(`-${first}`))) {
@@ -771,7 +797,8 @@ function consumeValue(
 	args: readonly string[],
 	index: number,
 	flagToken: string,
-	flagsIndex: FlagIndex
+	flagsIndex: FlagIndex,
+	entry: FlagEntry
 ): { value: string; newIndex: number; valueIndex: number } {
 	const nextIndex = index + 1;
 	if (nextIndex >= args.length) {
@@ -789,7 +816,7 @@ function consumeValue(
 
 	// Prevent accidentally consuming another flag as a value.
 	// If the user truly needs a value that looks like a flag, they can use: --flag=<value> or -f=<value>.
-	if (flagsIndex.isFlagToken(next)) {
+	if (!entry.def.allowFlagLikeValue && flagsIndex.isFlagToken(next)) {
 		throw new Error(`Flag ${flagToken} requires a value (got "${next}").`);
 	}
 
