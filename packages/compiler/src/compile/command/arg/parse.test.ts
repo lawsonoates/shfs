@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 
 import { literal } from '../../../ir';
 import type { Flag } from './flag';
-import { createArgParser, parseArgs, parseWords } from './parse';
+import { createArgParser, type FlagDef, parseArgs, parseWords } from './parse';
 
 const mixedFlags: Record<string, Flag> = {
 	number: { short: 'n', takesValue: false },
@@ -11,6 +11,20 @@ const mixedFlags: Record<string, Flag> = {
 
 const valueFlags: Record<string, Flag> = {
 	lines: { short: 'n', takesValue: true },
+};
+
+const longOnlyFlags: Record<string, FlagDef> = {
+	include: { long: 'include', takesValue: true },
+};
+
+const grepStyleFlags: Record<string, FlagDef> = {
+	invert: { short: 'v', takesValue: false },
+	regexp: {
+		short: 'e',
+		takesValue: true,
+		allowFlagLikeValue: true,
+		ambiguousShortValuePolicy: 'value',
+	},
 };
 
 test('parseArgs returns positional indices for non-flag tokens', () => {
@@ -109,6 +123,32 @@ test('parseArgs defaults to error on unknown flags', () => {
 	expect(() => {
 		parseArgs(['--missing'], mixedFlags);
 	}).toThrow('Unknown flag: --missing');
+});
+
+test('parseArgs supports long-only flags', () => {
+	const parsed = parseArgs(['--include', '*.ts', 'src'], longOnlyFlags);
+
+	expect(parsed.flags.include).toBe('*.ts');
+	expect(parsed.positional).toEqual(['src']);
+	expect(parsed.positionalIndices).toEqual([2]);
+});
+
+test('parseArgs allows flag-like value when configured', () => {
+	const parsed = parseArgs(['-e', '-v', 'file.txt'], grepStyleFlags);
+
+	expect(parsed.flags.regexp).toBe('-v');
+	expect(parsed.flags.invert).toBeUndefined();
+	expect(parsed.positional).toEqual(['file.txt']);
+	expect(parsed.positionalIndices).toEqual([2]);
+});
+
+test('parseArgs allows ambiguous short-cluster value when configured', () => {
+	const parsed = parseArgs(['-ev', 'file.txt'], grepStyleFlags);
+
+	expect(parsed.flags.regexp).toBe('v');
+	expect(parsed.flags.invert).toBeUndefined();
+	expect(parsed.positional).toEqual(['file.txt']);
+	expect(parsed.positionalIndices).toEqual([1]);
 });
 
 test('parseWords returns positional words and consumed value indices', () => {

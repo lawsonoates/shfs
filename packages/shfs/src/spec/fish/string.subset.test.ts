@@ -1,7 +1,12 @@
+// Translated/adapted from fish-shell tests/checks/string.fish.
+// Source: https://github.com/fish-shell/fish-shell/tree/master/tests/checks/string.fish
+// Copyright (C) 2009- fish-shell contributors
+// License: GNU General Public License, version 2.
+
 import { beforeEach, expect, test } from 'bun:test';
 
-import { MemoryFS } from '../fs/memory';
-import { Shell } from '../shell/shell';
+import { MemoryFS } from '../../fs/memory';
+import { Shell } from '../../shell/shell';
 
 let shell!: Shell;
 const UNSUPPORTED_STRING_FEATURE_REGEX = /string: unsupported|unsupported/i;

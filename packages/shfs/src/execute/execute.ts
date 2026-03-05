@@ -14,6 +14,7 @@ import type { BuiltinContext, BuiltinRuntime } from '../builtin/types';
 import type { FS } from '../fs/fs';
 import { cat } from '../operator/cat/cat';
 import { cp } from '../operator/cp/cp';
+import { runGrepCommand } from '../operator/grep/grep';
 import { headLines, headWithN } from '../operator/head/head';
 import { ls } from '../operator/ls/ls';
 import { mkdir } from '../operator/mkdir/mkdir';
@@ -344,6 +345,28 @@ function executeStreamStep(
 				context.status = 0;
 			})();
 		}
+		case 'grep': {
+			return (async function* (): Stream<ShellRecord> {
+				const result = await runGrepCommand({
+					context,
+					fs,
+					input,
+					// @shfs/compiler can be consumed as a built package in this workspace,
+					// so grep args may type as legacy argv until compiler is rebuilt.
+					parsed: step.args as unknown as Parameters<
+						typeof runGrepCommand
+					>[0]['parsed'],
+					redirections: step.redirections,
+				});
+				context.status = result.status;
+				for (const text of result.lines) {
+					yield {
+						kind: 'line',
+						text,
+					};
+				}
+			})();
+		}
 		case 'head': {
 			return (async function* (): Stream<ShellRecord> {
 				const inputPath = getRedirectPath(step.redirections, 'input');
@@ -490,22 +513,22 @@ async function executeEffectStep(
 					context
 				)
 			);
-				if (destinationPaths.length !== 1) {
-					throw new Error(
-						`cp: destination must expand to exactly 1 path, got ${destinationPaths.length}`
-					);
-				}
-				const destinationPath = destinationPaths.at(0);
-				if (destinationPath === undefined) {
-					throw new Error('cp: destination missing after expansion');
-				}
-				await cp(fs)({
-					srcs: srcPaths,
-					dest: destinationPath,
-					force: step.args.force,
-					interactive: step.args.interactive,
-					recursive: step.args.recursive,
-				});
+			if (destinationPaths.length !== 1) {
+				throw new Error(
+					`cp: destination must expand to exactly 1 path, got ${destinationPaths.length}`
+				);
+			}
+			const destinationPath = destinationPaths.at(0);
+			if (destinationPath === undefined) {
+				throw new Error('cp: destination missing after expansion');
+			}
+			await cp(fs)({
+				srcs: srcPaths,
+				dest: destinationPath,
+				force: step.args.force,
+				interactive: step.args.interactive,
+				recursive: step.args.recursive,
+			});
 			context.status = 0;
 			break;
 		}
@@ -544,21 +567,21 @@ async function executeEffectStep(
 					context
 				)
 			);
-				if (destinationPaths.length !== 1) {
-					throw new Error(
-						`mv: destination must expand to exactly 1 path, got ${destinationPaths.length}`
-					);
-				}
-				const destinationPath = destinationPaths.at(0);
-				if (destinationPath === undefined) {
-					throw new Error('mv: destination missing after expansion');
-				}
-				await mv(fs)({
-					srcs: srcPaths,
-					dest: destinationPath,
-					force: step.args.force,
-					interactive: step.args.interactive,
-				});
+			if (destinationPaths.length !== 1) {
+				throw new Error(
+					`mv: destination must expand to exactly 1 path, got ${destinationPaths.length}`
+				);
+			}
+			const destinationPath = destinationPaths.at(0);
+			if (destinationPath === undefined) {
+				throw new Error('mv: destination missing after expansion');
+			}
+			await mv(fs)({
+				srcs: srcPaths,
+				dest: destinationPath,
+				force: step.args.force,
+				interactive: step.args.interactive,
+			});
 			context.status = 0;
 			break;
 		}

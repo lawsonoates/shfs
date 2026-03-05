@@ -182,6 +182,66 @@ export interface EchoStep {
 	};
 }
 
+export type GrepRegexMode = 'bre' | 'ere' | 'fixed' | 'pcre';
+export type GrepFilenameMode = 'always' | 'default' | 'never';
+export type GrepDirectoriesMode = 'read' | 'skip';
+
+export interface GrepDiagnosticIR {
+	code: 'invalid-value' | 'missing-value' | 'unknown-option';
+	message: string;
+	token: string;
+	tokenIndex: number;
+}
+
+export interface GrepOptionsIR {
+	afterContext: number;
+	beforeContext: number;
+	binaryWithoutMatch: boolean;
+	byteOffset: boolean;
+	countOnly: boolean;
+	directories: GrepDirectoriesMode;
+	excludeDir: string[];
+	excludeFiles: string[];
+	filenameMode: GrepFilenameMode;
+	help: boolean;
+	ignoreCase: boolean;
+	includeFiles: string[];
+	invertMatch: boolean;
+	lineNumber: boolean;
+	lineRegexp: boolean;
+	listFilesWithMatches: boolean;
+	listFilesWithoutMatch: boolean;
+	maxCount: number | null;
+	mode: GrepRegexMode;
+	noMessages: boolean;
+	nullData: boolean;
+	onlyMatching: boolean;
+	quiet: boolean;
+	recursive: boolean;
+	textMode: boolean;
+	version: boolean;
+	wordRegexp: boolean;
+}
+
+export interface GrepArgsIR {
+	diagnostics: GrepDiagnosticIR[];
+	explicitPatterns: ExpandedWord[];
+	fileOperands: ExpandedWord[];
+	noPatternsYet: boolean;
+	options: GrepOptionsIR;
+	patternFiles: ExpandedWord[];
+	usageError: boolean;
+}
+
+/**
+ * Grep step.
+ */
+export interface GrepStep {
+	cmd: 'grep';
+	redirections?: RedirectionIR[];
+	args: GrepArgsIR;
+}
+
 export type SetScope = 'global' | 'local';
 
 /**
@@ -239,6 +299,7 @@ export type StepIR =
 	| CatStep
 	| CpStep
 	| EchoStep
+	| GrepStep
 	| HeadStep
 	| LsStep
 	| MkdirStep
