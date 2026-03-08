@@ -4,7 +4,7 @@ import { MemoryFS } from '../../fs/memory';
 import { Shell } from '../../shell/shell';
 import { ls } from './ls';
 
-test('ls lists files matching the glob pattern', async () => {
+test('ls lists immediate children for a directory path', async () => {
 	const fs = new MemoryFS();
 
 	fs.setFile('/file1.txt', 'content1');
@@ -12,11 +12,11 @@ test('ls lists files matching the glob pattern', async () => {
 	fs.setFile('/dir/file3.txt', 'content3');
 
 	const files: string[] = [];
-	for await (const record of ls(fs, '/*.txt')) {
+	for await (const record of ls(fs, '/')) {
 		files.push(record.path);
 	}
 
-	expect(files).toEqual(['/file1.txt', '/file2.txt']);
+	expect(files).toEqual(['/dir', '/file1.txt', '/file2.txt']);
 });
 
 test('ls . lists the current directory contents', async () => {
@@ -40,5 +40,17 @@ test('ls <directory> lists the contents of that directory', async () => {
 
 	expect(await shell.$`ls /workspace/docs`.text()).toBe(
 		'/workspace/docs/one.md\n/workspace/docs/two.md'
+	);
+});
+
+test('shell expands globs before invoking ls', async () => {
+	const fs = new MemoryFS();
+	const shell = new Shell(fs);
+
+	await shell.$`mkdir -p /workspace`.text();
+	await shell.$`touch /workspace/a.txt /workspace/b.txt /workspace/c.md`.text();
+
+	expect(await shell.$`ls /workspace/*.txt`.text()).toBe(
+		'/workspace/a.txt\n/workspace/b.txt'
 	);
 });

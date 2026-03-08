@@ -59,9 +59,7 @@ type EffectStep = Extract<
 type StreamStep = Exclude<StepIR, EffectStep>;
 
 const EFFECT_COMMANDS = new Set(['cd', 'cp', 'mkdir', 'mv', 'rm', 'touch']);
-const GLOB_PATTERN_REGEX = /[*?[]/;
 const ROOT_DIRECTORY = '/';
-const TRAILING_SLASH_REGEX = /\/+$/;
 
 function isEffectStep(step: StepIR): step is EffectStep {
 	return EFFECT_COMMANDS.has(step.cmd);
@@ -402,11 +400,7 @@ function executeStreamStep(
 					context
 				);
 				for (const inputPath of paths) {
-					const resolvedPath = await resolveLsPath(
-						fs,
-						inputPath,
-						context.cwd
-					);
+					const resolvedPath = resolveLsPath(inputPath, context.cwd);
 					for await (const fileRecord of ls(fs, resolvedPath, {
 						showAll: step.args.showAll,
 					})) {
@@ -667,37 +661,8 @@ function normalizeLsPath(path: string, cwd: string): string {
 	return `${cwd}/${path}`;
 }
 
-function trimTrailingSlash(path: string): string {
-	if (path === ROOT_DIRECTORY) {
-		return path;
-	}
-	return path.replace(TRAILING_SLASH_REGEX, '');
-}
-
-async function resolveLsPath(
-	fs: FS,
-	path: string,
-	cwd: string
-): Promise<string> {
-	const normalizedPath = normalizeLsPath(path, cwd);
-	if (GLOB_PATTERN_REGEX.test(normalizedPath)) {
-		return normalizedPath;
-	}
-
-	try {
-		const stat = await fs.stat(normalizedPath);
-		if (!stat.isDirectory) {
-			return normalizedPath;
-		}
-	} catch {
-		return normalizedPath;
-	}
-
-	const directoryPath = trimTrailingSlash(normalizedPath);
-	if (directoryPath === ROOT_DIRECTORY) {
-		return '/*';
-	}
-	return `${directoryPath}/*`;
+function resolveLsPath(path: string, cwd: string): string {
+	return normalizeLsPath(path, cwd);
 }
 
 function normalizeContext(context: ExecuteContext): NormalizedExecuteContext {

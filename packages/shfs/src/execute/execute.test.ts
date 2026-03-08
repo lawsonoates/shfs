@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import {
 	compile,
+	glob,
 	literal,
 	type PipelineIR,
 	parse,
@@ -381,7 +382,7 @@ test('wires ls long format through execute', async () => {
 	const ir: PipelineIR = {
 		firstCommand: {
 			name: literal('ls'),
-			args: [literal('/*')],
+			args: [glob('/*')],
 			redirections: [],
 		},
 		source: { kind: 'fs', glob: '/*' },
@@ -390,7 +391,7 @@ test('wires ls long format through execute', async () => {
 				cmd: 'ls',
 				args: {
 					longFormat: true,
-					paths: [literal('/*')],
+					paths: [glob('/*')],
 					showAll: false,
 				},
 			},

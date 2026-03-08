@@ -125,13 +125,53 @@ export function resolvePathsFromCwd(cwd: string, paths: string[]): string[] {
 }
 
 async function listFilesystemEntries(fs: FS): Promise<FsEntry[]> {
-	const entries: FsEntry[] = [];
-	for await (const path of fs.readdir('/**/*')) {
-		entries.push({
-			path,
-			isDirectory: (await fs.stat(path)).isDirectory,
-		});
+	return await walkFilesystemEntries(fs);
+}
+
+async function readDirectoryPaths(
+	fs: FS,
+	directoryPath: string
+): Promise<string[]> {
+	const children: string[] = [];
+	for await (const childPath of fs.readdir(directoryPath)) {
+		children.push(childPath);
 	}
+	children.sort((left, right) => left.localeCompare(right));
+	return children;
+}
+
+export async function walkFilesystemEntries(
+	fs: FS,
+	rootDir = ROOT_DIRECTORY
+): Promise<FsEntry[]> {
+	const normalizedRoot = normalizeAbsolutePath(rootDir);
+	const rootStat = await fs.stat(normalizedRoot);
+	if (!rootStat.isDirectory) {
+		throw new Error(`Not a directory: ${normalizedRoot}`);
+	}
+
+	const entries: FsEntry[] = [];
+	const pendingDirectories: string[] = [normalizedRoot];
+
+	while (pendingDirectories.length > 0) {
+		const currentDirectory = pendingDirectories.pop();
+		if (!currentDirectory) {
+			continue;
+		}
+
+		const children = await readDirectoryPaths(fs, currentDirectory);
+		for (const childPath of children) {
+			const stat = await fs.stat(childPath);
+			entries.push({
+				path: childPath,
+				isDirectory: stat.isDirectory,
+			});
+			if (stat.isDirectory) {
+				pendingDirectories.push(childPath);
+			}
+		}
+	}
+
 	entries.sort((left, right) => left.path.localeCompare(right.path));
 	return entries;
 }

@@ -1,5 +1,6 @@
 import { AgentFS } from 'agentfs-sdk';
 import type { FS } from 'shfs/fs';
+import { normalizePath } from 'shfs/util/path';
 
 export class TursoAgentFS implements FS {
 	private readonly agent: AgentFS;
@@ -48,9 +49,13 @@ export class TursoAgentFS implements FS {
 	}
 
 	async *readdir(path: string): AsyncIterable<string> {
-		const files = await this.agent.fs.readdir(path);
-		for (const file of files) {
-			yield file;
+		const normalizedDirectoryPath = normalizePath(path);
+		const entries = await this.agent.fs.readdir(path);
+		for (const entry of entries) {
+			const absolutePath = entry.startsWith('/')
+				? normalizePath(entry)
+				: normalizePath(`${normalizedDirectoryPath}/${entry}`);
+			yield absolutePath;
 		}
 	}
 

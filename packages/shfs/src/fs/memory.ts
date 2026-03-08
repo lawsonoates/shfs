@@ -1,4 +1,3 @@
-import picomatch from 'picomatch';
 import type { Stream } from '../stream';
 import { normalizePath } from '../util/path';
 import type { FS } from './fs';
@@ -21,6 +20,7 @@ export class MemoryFS implements FS {
 
 	setFile(path: string, content: string | Uint8Array): void {
 		const normalizedPath = normalizePath(path);
+		this.ensureParentDirectories(normalizedPath);
 		const encoded =
 			typeof content === 'string'
 				? new TextEncoder().encode(content)
@@ -56,6 +56,7 @@ export class MemoryFS implements FS {
 
 	async writeFile(path: string, content: Uint8Array): Promise<void> {
 		const normalizedPath = normalizePath(path);
+		this.ensureParentDirectories(normalizedPath);
 		this.files.set(normalizedPath, content);
 		this.fileMetadata.set(normalizedPath, {
 			mtime: new Date(),
@@ -118,17 +119,20 @@ export class MemoryFS implements FS {
 		}
 	}
 
-	async *readdir(glob: string): Stream<string> {
-		const isMatch = picomatch(glob, { dot: true });
+	async *readdir(path: string): Stream<string> {
+		const normalizedDirectoryPath = normalizePath(path);
+		if (this.files.has(normalizedDirectoryPath)) {
+			throw new Error(`Not a directory: ${path}`);
+		}
+		if (!this.directories.has(normalizedDirectoryPath)) {
+			throw new Error(`No such file or directory: ${path}`);
+		}
 
-		const allPaths = [
-			...Array.from(this.directories.keys()),
-			...Array.from(this.files.keys()),
-		];
-		const paths = allPaths.filter((path) => isMatch(path)).sort();
-
-		for (const path of paths) {
-			yield path;
+		const immediateChildren = this.listImmediateChildren(
+			normalizedDirectoryPath
+		);
+		for (const childPath of immediateChildren) {
+			yield childPath;
 		}
 	}
 
@@ -213,6 +217,74 @@ export class MemoryFS implements FS {
 		return (
 			this.files.has(normalizedPath) ||
 			this.directories.has(normalizedPath)
+		);
+	}
+
+	private ensureParentDirectories(path: string): void {
+		const parentDirectories = this.getParentDirectories(path);
+		for (const directoryPath of parentDirectories) {
+			if (this.directories.has(directoryPath)) {
+				continue;
+			}
+			if (this.files.has(directoryPath)) {
+				throw new Error(
+					`Parent path is not a directory: ${directoryPath}`
+				);
+			}
+			this.directories.add(directoryPath);
+			this.fileMetadata.set(directoryPath, {
+				mtime: new Date(),
+				isDirectory: true,
+			});
+		}
+	}
+
+	private getParentDirectories(path: string): string[] {
+		const parentPath = path.slice(0, path.lastIndexOf('/')) || '/';
+		if (parentPath === '/') {
+			return ['/'];
+		}
+		const segments = parentPath.split('/').filter(Boolean);
+		const parentDirectories: string[] = ['/'];
+		let currentPath = '';
+		for (const segment of segments) {
+			currentPath += `/${segment}`;
+			parentDirectories.push(currentPath);
+		}
+		return parentDirectories;
+	}
+
+	private listImmediateChildren(directoryPath: string): string[] {
+		const directoryPrefix =
+			directoryPath === '/' ? '/' : `${directoryPath}/`;
+		const children = new Set<string>();
+		const allPaths = [
+			...Array.from(this.directories.values()),
+			...Array.from(this.files.keys()),
+		];
+		for (const candidatePath of allPaths) {
+			if (candidatePath === directoryPath) {
+				continue;
+			}
+			if (!candidatePath.startsWith(directoryPrefix)) {
+				continue;
+			}
+			const relativePath = candidatePath.slice(directoryPrefix.length);
+			if (relativePath === '') {
+				continue;
+			}
+			const [firstSegment] = relativePath.split('/');
+			if (!firstSegment) {
+				continue;
+			}
+			const childPath =
+				directoryPath === '/'
+					? `/${firstSegment}`
+					: `${directoryPath}/${firstSegment}`;
+			children.add(childPath);
+		}
+		return Array.from(children).sort((left, right) =>
+			left.localeCompare(right)
 		);
 	}
 }

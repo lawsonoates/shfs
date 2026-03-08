@@ -13,6 +13,9 @@ export interface CpArgs {
 }
 
 function trimTrailingSlash(path: string): string {
+	if (path === '/') {
+		return path;
+	}
 	return path.replace(TRAILING_SLASH_REGEX, '');
 }
 
@@ -80,16 +83,72 @@ async function copyDirectoryRecursive(
 	force: boolean,
 	interactive: boolean
 ): Promise<void> {
-	const normalizedSrc = trimTrailingSlash(srcDir);
-	const glob = `${normalizedSrc}/**/*`;
-	for await (const srcPath of fs.readdir(glob)) {
-		const relativePath = srcPath.slice(normalizedSrc.length + 1);
-		const targetPath = joinPath(destDir, relativePath);
-		const sourceStat = await fs.stat(srcPath);
-		if (sourceStat.isDirectory) {
+	const readDirectory = async (directoryPath: string): Promise<string[]> => {
+		const children: string[] = [];
+		for await (const childPath of fs.readdir(directoryPath)) {
+			children.push(childPath);
+		}
+		children.sort((left, right) => left.localeCompare(right));
+		return children;
+	};
+
+	const ensureDirectory = async (path: string): Promise<void> => {
+		try {
+			const stat = await fs.stat(path);
+			if (stat.isDirectory) {
+				return;
+			}
+			throw new Error(`cp: destination is not a directory: ${path}`);
+		} catch (error) {
+			if (
+				error instanceof Error &&
+				error.message === `cp: destination is not a directory: ${path}`
+			) {
+				throw error;
+			}
+			await fs.mkdir(path, true);
+		}
+	};
+
+	const stack: Array<{ sourcePath: string; targetPath: string }> = [
+		{
+			sourcePath: trimTrailingSlash(srcDir),
+			targetPath: trimTrailingSlash(destDir),
+		},
+	];
+
+	const rootTargetPath = stack[0]?.targetPath;
+	if (!rootTargetPath) {
+		return;
+	}
+	await ensureDirectory(rootTargetPath);
+
+	while (stack.length > 0) {
+		const current = stack.pop();
+		if (!current) {
 			continue;
 		}
-		await copyFileWithPolicy(fs, srcPath, targetPath, force, interactive);
+		const childPaths = await readDirectory(current.sourcePath);
+		for (const childPath of childPaths) {
+			const childName = basename(childPath);
+			const targetPath = joinPath(current.targetPath, childName);
+			const sourceStat = await fs.stat(childPath);
+			if (sourceStat.isDirectory) {
+				await ensureDirectory(targetPath);
+				stack.push({
+					sourcePath: childPath,
+					targetPath,
+				});
+				continue;
+			}
+			await copyFileWithPolicy(
+				fs,
+				childPath,
+				targetPath,
+				force,
+				interactive
+			);
+		}
 	}
 }
 

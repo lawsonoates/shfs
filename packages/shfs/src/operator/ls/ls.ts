@@ -21,10 +21,16 @@ export async function* ls(
 	options?: LsOptions
 ): Stream<FileRecord> {
 	const showAll = options?.showAll ?? false;
-	for await (const listedPath of fs.readdir(path)) {
-		if (!showAll && basename(listedPath).startsWith('.')) {
+	const stat = await fs.stat(path);
+	if (!stat.isDirectory) {
+		yield { kind: 'file', path };
+		return;
+	}
+
+	for await (const childPath of fs.readdir(path)) {
+		if (!showAll && basename(childPath).startsWith('.')) {
 			continue;
 		}
-		yield { kind: 'file', path: listedPath };
+		yield { kind: 'file', path: childPath };
 	}
 }

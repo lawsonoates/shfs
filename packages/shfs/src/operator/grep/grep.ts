@@ -489,6 +489,18 @@ function splitBufferByByte(bytes: Uint8Array, separator: number): Uint8Array[] {
 	return chunks;
 }
 
+async function listSortedDirectoryChildren(
+	fs: FS,
+	directoryPath: string
+): Promise<string[]> {
+	const childPaths: string[] = [];
+	for await (const childPath of fs.readdir(directoryPath)) {
+		childPaths.push(childPath);
+	}
+	childPaths.sort((left, right) => left.localeCompare(right));
+	return childPaths;
+}
+
 async function collectSearchTargets(
 	fileOperands: string[],
 	options: GrepOptionsIR,
@@ -526,9 +538,8 @@ async function collectSearchTargets(
 		rootPath: string,
 		preferRelative: boolean
 	): Promise<void> => {
-		const globRoot = trimTrailingSlash(rootPath);
-		const pattern = globRoot === '/' ? '/*' : `${globRoot}/*`;
-		for await (const childPath of fs.readdir(pattern)) {
+		const childPaths = await listSortedDirectoryChildren(fs, rootPath);
+		for (const childPath of childPaths) {
 			let stat: Awaited<ReturnType<FS['stat']>>;
 			try {
 				stat = await fs.stat(childPath);

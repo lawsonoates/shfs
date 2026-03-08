@@ -1,4 +1,3 @@
-import picomatch from 'picomatch';
 import type { FS } from 'shfs/fs';
 import { normalizePath } from 'shfs/util/path';
 
@@ -94,6 +93,7 @@ export class BrowserStorageFS implements FS {
 
 	async writeFile(path: string, content: Uint8Array): Promise<void> {
 		const normalizedPath = normalizePath(path);
+		this.ensureParentDirectories(normalizedPath);
 		this.state.files.set(normalizedPath, content);
 		this.state.metadata.set(normalizedPath, {
 			isDirectory: false,
@@ -159,16 +159,20 @@ export class BrowserStorageFS implements FS {
 		this.persist();
 	}
 
-	async *readdir(glob: string): AsyncIterable<string> {
-		const isMatch = picomatch(glob, { dot: true });
-		const allPaths = [
-			...Array.from(this.state.directories.keys()),
-			...Array.from(this.state.files.keys()),
-		];
-		const paths = allPaths.filter((path) => isMatch(path)).sort();
+	async *readdir(path: string): AsyncIterable<string> {
+		const normalizedDirectoryPath = normalizePath(path);
+		if (this.state.files.has(normalizedDirectoryPath)) {
+			throw new Error(`Not a directory: ${path}`);
+		}
+		if (!this.state.directories.has(normalizedDirectoryPath)) {
+			throw new Error(`No such file or directory: ${path}`);
+		}
 
-		for (const path of paths) {
-			yield path;
+		const immediateChildren = this.listImmediateChildren(
+			normalizedDirectoryPath
+		);
+		for (const childPath of immediateChildren) {
+			yield childPath;
 		}
 	}
 
@@ -257,6 +261,74 @@ export class BrowserStorageFS implements FS {
 		);
 	}
 
+	private ensureParentDirectories(path: string): void {
+		const parentDirectories = this.getParentDirectories(path);
+		for (const directoryPath of parentDirectories) {
+			if (this.state.directories.has(directoryPath)) {
+				continue;
+			}
+			if (this.state.files.has(directoryPath)) {
+				throw new Error(
+					`Parent path is not a directory: ${directoryPath}`
+				);
+			}
+			this.state.directories.add(directoryPath);
+			this.state.metadata.set(directoryPath, {
+				isDirectory: true,
+				mtime: new Date(),
+			});
+		}
+	}
+
+	private getParentDirectories(path: string): string[] {
+		const parentPath = path.slice(0, path.lastIndexOf('/')) || '/';
+		if (parentPath === '/') {
+			return ['/'];
+		}
+		const segments = parentPath.split('/').filter(Boolean);
+		const parentDirectories: string[] = ['/'];
+		let currentPath = '';
+		for (const segment of segments) {
+			currentPath += `/${segment}`;
+			parentDirectories.push(currentPath);
+		}
+		return parentDirectories;
+	}
+
+	private listImmediateChildren(directoryPath: string): string[] {
+		const directoryPrefix =
+			directoryPath === '/' ? '/' : `${directoryPath}/`;
+		const children = new Set<string>();
+		const allPaths = [
+			...Array.from(this.state.directories.values()),
+			...Array.from(this.state.files.keys()),
+		];
+		for (const candidatePath of allPaths) {
+			if (candidatePath === directoryPath) {
+				continue;
+			}
+			if (!candidatePath.startsWith(directoryPrefix)) {
+				continue;
+			}
+			const relativePath = candidatePath.slice(directoryPrefix.length);
+			if (relativePath === '') {
+				continue;
+			}
+			const [firstSegment] = relativePath.split('/');
+			if (!firstSegment) {
+				continue;
+			}
+			const childPath =
+				directoryPath === '/'
+					? `/${firstSegment}`
+					: `${directoryPath}/${firstSegment}`;
+			children.add(childPath);
+		}
+		return Array.from(children).sort((left, right) =>
+			left.localeCompare(right)
+		);
+	}
+
 	private loadState(): FSState {
 		if (this.storage === null) {
 			return emptyState();
@@ -271,7 +343,7 @@ export class BrowserStorageFS implements FS {
 			const parsed = JSON.parse(serialized) as SerializedState;
 			const files = new Map<string, Uint8Array>();
 			for (const [path, content] of Object.entries(parsed.files)) {
-				files.set(path, base64ToBytes(content));
+				files.set(normalizePath(path), base64ToBytes(content));
 			}
 
 			const directories = new Set(
@@ -292,6 +364,25 @@ export class BrowserStorageFS implements FS {
 
 			if (!metadata.has('/')) {
 				metadata.set('/', { isDirectory: true, mtime: new Date() });
+			}
+
+			for (const filePath of files.keys()) {
+				const parentPath =
+					filePath.slice(0, filePath.lastIndexOf('/')) || '/';
+				const segments = parentPath.split('/').filter(Boolean);
+				let currentPath = '';
+				for (const segment of segments) {
+					currentPath += `/${segment}`;
+					if (!directories.has(currentPath)) {
+						directories.add(currentPath);
+					}
+					if (!metadata.has(currentPath)) {
+						metadata.set(currentPath, {
+							isDirectory: true,
+							mtime: new Date(),
+						});
+					}
+				}
 			}
 
 			return {

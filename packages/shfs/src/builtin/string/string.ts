@@ -12,19 +12,19 @@ function replace(runtime: BuiltinRuntime, operands: string[]) {
 			throw new Error(`string replace: unsupported flag: ${operands[0]}`);
 		}
 
-			if (operands.length < 3) {
-				throw new Error('string replace requires pattern replacement text');
-			}
-			const pattern = operands.at(0);
-			const replacement = operands.at(1);
-			const inputs = operands.slice(2);
-			if (pattern === undefined || replacement === undefined) {
-				throw new Error('string replace requires pattern replacement text');
-			}
-			if (inputs.length === 0) {
-				runtime.context.status = 1;
-				return;
-			}
+		if (operands.length < 3) {
+			throw new Error('string replace requires pattern replacement text');
+		}
+		const pattern = operands.at(0);
+		const replacement = operands.at(1);
+		const inputs = operands.slice(2);
+		if (pattern === undefined || replacement === undefined) {
+			throw new Error('string replace requires pattern replacement text');
+		}
+		if (inputs.length === 0) {
+			runtime.context.status = 1;
+			return;
+		}
 
 		for (const input of inputs) {
 			yield {
