@@ -1,7 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { ExpandedWord, RedirectionIR } from '@shfs/compiler';
+import {
+	type ExpandedWord,
+	expandedWordHasCommandSub,
+	expandedWordParts,
+	expandedWordToString,
+	type RedirectionIR,
+} from '@shfs/compiler';
 import picomatch from 'picomatch';
 
 import type { BuiltinContext } from '../../builtin/types';
@@ -102,13 +108,6 @@ interface CompiledFixedPattern {
 type CompiledPattern =
 	| { kind: 'regex'; value: CompiledRegexPattern }
 	| { kind: 'fixed'; value: CompiledFixedPattern };
-
-interface CompoundExpandedWord {
-	kind: 'compound';
-	parts: RuntimeExpandedWord[];
-}
-
-type RuntimeExpandedWord = ExpandedWord | CompoundExpandedWord;
 
 interface MatcherBuildResult {
 	compileError: boolean;
@@ -443,39 +442,19 @@ async function evaluatePatternWord(
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string> {
-	return await evaluatePatternRuntimeWord(
-		word as RuntimeExpandedWord,
-		fs,
-		context
-	);
-}
+	if (!expandedWordHasCommandSub(word)) {
+		return expandedWordToString(word);
+	}
 
-async function evaluatePatternRuntimeWord(
-	word: RuntimeExpandedWord,
-	fs: FS,
-	context: BuiltinContext
-): Promise<string> {
-	if (word.kind === 'compound') {
-		return await evaluateCompoundPatternWord(word, fs, context);
+	const segments: string[] = [];
+	for (const part of expandedWordParts(word)) {
+		if (part.kind === 'commandSub') {
+			segments.push(await evaluateExpandedWord(part, fs, context));
+			continue;
+		}
+		segments.push(expandedWordToString(part));
 	}
-	if (word.kind === 'commandSub') {
-		return await evaluateExpandedWord(word, fs, context);
-	}
-	return word.kind === 'literal' ? word.value : word.pattern;
-}
-
-async function evaluateCompoundPatternWord(
-	word: CompoundExpandedWord,
-	fs: FS,
-	context: BuiltinContext
-): Promise<string> {
-	const renderedParts: string[] = [];
-	for (const part of word.parts) {
-		renderedParts.push(
-			await evaluatePatternRuntimeWord(part, fs, context)
-		);
-	}
-	return renderedParts.join('');
+	return segments.join('');
 }
 
 async function expandPathWordSafe(

@@ -1,4 +1,12 @@
-import { compile, type ExpandedWord, parse } from '@shfs/compiler';
+import {
+	compile,
+	type ExpandedWord,
+	type ExpandedWordPart,
+	expandedWordHasGlob,
+	expandedWordParts,
+	parse,
+} from '@shfs/compiler';
+
 import picomatch from 'picomatch';
 import type { BuiltinContext } from '../builtin/types';
 import type { FS } from '../fs/fs';
@@ -9,22 +17,15 @@ interface FsEntry {
 	isDirectory: boolean;
 }
 
-interface CompoundExpandedWord {
-	kind: 'compound';
-	parts: RuntimeExpandedWord[];
-}
-
 type NestedExecuteResult =
 	| { kind: 'stream'; value: AsyncIterable<ShellRecord> }
 	| { kind: 'sink'; value: Promise<void> };
-type RuntimeExpandedWord = ExpandedWord | CompoundExpandedWord;
 
 const MULTIPLE_SLASH_REGEX = /\/+/g;
 const ROOT_DIRECTORY = '/';
 const TRAILING_SLASH_REGEX = /\/+$/;
 const VARIABLE_REFERENCE_REGEX = /\$([A-Za-z_][A-Za-z0-9_]*)/g;
 const NO_GLOB_MATCH_MESSAGE = 'no matches found';
-type RuntimeWordEvaluationMode = 'path' | 'text';
 
 function formatRecord(record: ShellRecord): string {
 	switch (record.kind) {
@@ -253,91 +254,6 @@ async function expandGlobPattern(
 	return matches;
 }
 
-async function evaluateExpandedWordValues(
-	command: string,
-	word: RuntimeExpandedWord,
-	fs: FS,
-	context: BuiltinContext,
-	mode: RuntimeWordEvaluationMode
-): Promise<string[]> {
-	if (word.kind === 'compound') {
-		return await evaluateCompoundWordValues(
-			command,
-			word,
-			fs,
-			context,
-			mode
-		);
-	}
-
-	switch (word.kind) {
-		case 'literal':
-			return [expandVariables(word.value, context)];
-		case 'glob': {
-			const pattern = expandVariables(word.pattern, context);
-			if (mode === 'text') {
-				return [pattern];
-			}
-			const matches = await expandGlobPattern(pattern, fs, context);
-			if (matches.length === 0) {
-				throw new Error(
-					`${command}: ${NO_GLOB_MATCH_MESSAGE}: ${pattern}`
-				);
-			}
-			return matches;
-		}
-		case 'commandSub': {
-			const commandText = expandVariables(word.command, context);
-			return [
-				await evaluateCommandSubstitution(commandText, fs, context),
-			];
-		}
-		default: {
-			throw new Error(`Unknown word kind: ${JSON.stringify(word)}`);
-		}
-	}
-}
-
-async function evaluateCompoundWordValues(
-	command: string,
-	word: CompoundExpandedWord,
-	fs: FS,
-	context: BuiltinContext,
-	mode: RuntimeWordEvaluationMode
-): Promise<string[]> {
-	const resolvedParts: string[] = [];
-	let hasGlobPart = false;
-
-	for (const part of word.parts) {
-		hasGlobPart ||= part.kind === 'glob';
-		const values = await evaluateExpandedWordValues(
-			command,
-			part,
-			fs,
-			context,
-			'text'
-		);
-		const resolvedValue = values.at(0);
-		if (resolvedValue === undefined) {
-			continue;
-		}
-		resolvedParts.push(resolvedValue);
-	}
-
-	const combinedValue = resolvedParts.join('');
-	if (mode === 'text' || !hasGlobPart) {
-		return [combinedValue];
-	}
-
-	const matches = await expandGlobPattern(combinedValue, fs, context);
-	if (matches.length === 0) {
-		throw new Error(
-			`${command}: ${NO_GLOB_MATCH_MESSAGE}: ${combinedValue}`
-		);
-	}
-	return matches;
-}
-
 function expectSingleExpandedPath(
 	command: string,
 	expectation: string,
@@ -379,13 +295,21 @@ export async function evaluateExpandedPathWord(
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string[]> {
-	return await evaluateExpandedWordValues(
-		command,
-		word as RuntimeExpandedWord,
-		fs,
-		context,
-		'path'
-	);
+	if (!expandedWordHasGlob(word)) {
+		return [await evaluateExpandedWord(word, fs, context)];
+	}
+
+	const patternSegments: string[] = [];
+	for (const part of expandedWordParts(word)) {
+		patternSegments.push(await evaluateExpandedWordPart(part, fs, context));
+	}
+
+	const pattern = patternSegments.join('');
+	const matches = await expandGlobPattern(pattern, fs, context);
+	if (matches.length === 0) {
+		throw new Error(`${command}: ${NO_GLOB_MATCH_MESSAGE}: ${pattern}`);
+	}
+	return matches;
 }
 
 export async function evaluateExpandedSinglePath(
@@ -419,15 +343,32 @@ export async function evaluateExpandedWord(
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string> {
-	return expectSingleExpandedPath(
-		'word',
-		'expected exactly 1 text value after expansion',
-		await evaluateExpandedWordValues(
-			'',
-			word as RuntimeExpandedWord,
-			fs,
-			context,
-			'text'
-		)
-	);
+	const segments: string[] = [];
+	for (const part of expandedWordParts(word)) {
+		segments.push(await evaluateExpandedWordPart(part, fs, context));
+	}
+	return segments.join('');
+}
+
+async function evaluateExpandedWordPart(
+	part: ExpandedWordPart,
+	fs: FS,
+	context: BuiltinContext
+): Promise<string> {
+	switch (part.kind) {
+		case 'literal':
+			return expandVariables(part.value, context);
+		case 'glob':
+			return expandVariables(part.pattern, context);
+		case 'commandSub': {
+			const commandText = expandVariables(part.command, context);
+			return await evaluateCommandSubstitution(commandText, fs, context);
+		}
+		default: {
+			const _exhaustive: never = part;
+			throw new Error(
+				`Unknown word kind: ${JSON.stringify(_exhaustive)}`
+			);
+		}
+	}
 }

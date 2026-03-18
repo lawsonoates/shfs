@@ -12,7 +12,11 @@
 
 import {
 	commandSub,
+	compound,
 	type ExpandedWord,
+	type ExpandedWordPart,
+	expandedWordHasCommandSub,
+	expandedWordToString,
 	glob,
 	literal,
 	type PipelineIR,
@@ -24,9 +28,6 @@ import {
 	type StepIR,
 } from '../ir';
 import type {
-	CommandSubPart,
-	GlobPart,
-	LiteralPart,
 	Pipeline,
 	Program,
 	Redirection,
@@ -137,73 +138,46 @@ class ProgramCompiler {
 
 	/**
 	 * Expand a Word to an ExpandedWord.
-	 * Handles concatenation of literal parts and detection of globs/command subs.
+	 * Preserves ordered parts for mixed words instead of flattening them.
 	 */
 	private expandWord(word: Word): ExpandedWord {
-		const parts = word.parts;
-
-		// Empty word
-		if (parts.length === 0) {
+		if (word.parts.length === 0) {
 			return literal('');
 		}
 
-		// Single part
-		if (parts.length === 1) {
-			const part = parts[0];
-			if (!part) {
+		const expandedParts = word.parts.map((part) =>
+			this.expandWordPart(part)
+		);
+		if (expandedParts.length === 1) {
+			const firstPart = expandedParts[0];
+			if (!firstPart) {
 				return literal('');
 			}
-			return this.expandWordPart(part);
+			return firstPart;
 		}
 
-		// Check if all parts are literals - concatenate them
-		const allLiterals = parts.every((p) => p.kind === 'literal');
+		const allLiterals = expandedParts.every(
+			(part) => part.kind === 'literal'
+		);
 		if (allLiterals) {
-			const value = parts.map((p) => (p as LiteralPart).value).join('');
+			const value = expandedParts
+				.map((part) => {
+					if (part.kind !== 'literal') {
+						throw new Error('Expected literal word part');
+					}
+					return part.value;
+				})
+				.join('');
 			return literal(value);
 		}
 
-		// Check for glob pattern mixed with literals (e.g., "foo*.txt")
-		const hasGlob = parts.some((p) => p.kind === 'glob');
-		if (hasGlob) {
-			// Concatenate all parts into a single glob pattern
-			const pattern = parts
-				.map((p) => {
-					if (p.kind === 'literal') {
-						return (p as LiteralPart).value;
-					}
-					if (p.kind === 'glob') {
-						return (p as GlobPart).pattern;
-					}
-					return '';
-				})
-				.join('');
-			return glob(pattern);
-		}
-
-		// Check for command substitution
-		const hasCommandSub = parts.some((p) => p.kind === 'commandSub');
-		if (hasCommandSub) {
-			// For now, handle simple case of single command sub
-			const cmdSubPart = parts.find(
-				(p) => p.kind === 'commandSub'
-			) as CommandSubPart;
-			const innerCommand = this.serializeProgram(cmdSubPart.program);
-			return commandSub(innerCommand);
-		}
-
-		// Fallback: concatenate literals
-		const value = parts
-			.filter((p) => p.kind === 'literal')
-			.map((p) => (p as LiteralPart).value)
-			.join('');
-		return literal(value);
+		return compound(expandedParts);
 	}
 
 	/**
-	 * Expand a single WordPart to an ExpandedWord.
+	 * Expand a single WordPart to an ExpandedWordPart.
 	 */
-	private expandWordPart(part: WordPart): ExpandedWord {
+	private expandWordPart(part: WordPart): ExpandedWordPart {
 		switch (part.kind) {
 			case 'literal':
 				return literal(part.value);
@@ -232,16 +206,10 @@ class ProgramCompiler {
 	private determineSource(firstCmd: SimpleCommandIR): SourceIR {
 		// Convention: first arg of first command is the glob/path
 		const firstArg = firstCmd.args[0];
-		if (firstArg?.kind === 'literal') {
+		if (firstArg && !expandedWordHasCommandSub(firstArg)) {
 			return {
 				kind: 'fs' as const,
-				glob: firstArg.value,
-			};
-		}
-		if (firstArg?.kind === 'glob') {
-			return {
-				kind: 'fs' as const,
-				glob: firstArg.pattern,
+				glob: expandedWordToString(firstArg),
 			};
 		}
 		// Default to current directory

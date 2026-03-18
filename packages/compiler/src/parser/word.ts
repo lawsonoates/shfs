@@ -9,7 +9,7 @@
  */
 
 import { SourceSpan } from '../lexer/position';
-import { type Token, TokenKind } from '../lexer/token';
+import { type Token, TokenKind, type TokenWordPart } from '../lexer/token';
 import {
 	CommandSubPart,
 	GlobPart,
@@ -53,8 +53,7 @@ export class WordParser {
 		const startPos = token.span.start;
 
 		// Parse the single token into word parts
-		const part = this.parseWordPart(token);
-		const parts = part ? [part] : [];
+		const parts = this.parseWordParts(token);
 
 		if (parts.length === 0) {
 			return null;
@@ -71,33 +70,57 @@ export class WordParser {
 	}
 
 	/**
-	 * Parse a single word part from a token.
+	 * Parse ordered word parts from token metadata.
 	 */
-	private parseWordPart(token: Token): WordPart | null {
-		// Command substitution token - contains (...)
-		if (token.hasExpansions) {
-			return this.parseCommandSubstitution(token);
-		}
+	private parseWordParts(token: Token): WordPart[] {
+		const tokenWordParts =
+			token.wordParts.length > 0
+				? token.wordParts
+				: [
+						{
+							escaped: false,
+							kind: 'literal',
+							quote: 'none' as const,
+							span: token.span,
+							text: token.spelling,
+						},
+					];
 
-		// Glob pattern
-		if (token.hasGlob) {
-			return this.parseGlobPart(token);
-		}
-
-		// Regular literal
-		return new LiteralPart(token.span, token.spelling);
+		return tokenWordParts.map((part) => this.parseTokenWordPart(part));
 	}
 
 	/**
-	 * Parse a command substitution from a token.
-	 * The token spelling contains the full (...) content.
+	 * Parse a single token word part into an AST part.
 	 */
-	private parseCommandSubstitution(token: Token): CommandSubPart {
-		const spelling = token.spelling;
+	private parseTokenWordPart(part: TokenWordPart): WordPart {
+		switch (part.kind) {
+			case 'literal':
+				return new LiteralPart(part.span, part.text);
+			case 'glob':
+				return new GlobPart(part.span, part.text);
+			case 'commandSub':
+				return this.parseCommandSubstitution(part.text, part.span);
+			default: {
+				const _exhaustive: never = part;
+				throw new Error(
+					`Unknown token word part: ${JSON.stringify(_exhaustive)}`
+				);
+			}
+		}
+	}
+
+	/**
+	 * Parse a command substitution from token part metadata.
+	 * The part text contains the full (...) content.
+	 */
+	private parseCommandSubstitution(
+		spelling: string,
+		span: SourceSpan
+	): CommandSubPart {
+		let inner = spelling;
 
 		// Extract the inner content (remove outer parens)
 		// The lexer includes the parens in the spelling
-		let inner = spelling;
 		if (inner.startsWith('(') && inner.endsWith(')')) {
 			inner = inner.slice(1, -1);
 		}
@@ -105,14 +128,7 @@ export class WordParser {
 		// Parse the inner content recursively
 		const innerProgram = this.parser.parseSubstitution(inner);
 
-		return new CommandSubPart(token.span, innerProgram);
-	}
-
-	/**
-	 * Parse a glob pattern from a token.
-	 */
-	private parseGlobPart(token: Token): GlobPart {
-		return new GlobPart(token.span, token.spelling);
+		return new CommandSubPart(span, innerProgram);
 	}
 
 	/**
@@ -123,9 +139,7 @@ export class WordParser {
 		return (
 			kind === TokenKind.WORD ||
 			kind === TokenKind.NAME ||
-			kind === TokenKind.NUMBER ||
-			kind === TokenKind.GLOB ||
-			kind === TokenKind.COMMAND_SUB
+			kind === TokenKind.NUMBER
 		);
 	}
 }
