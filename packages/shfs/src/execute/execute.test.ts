@@ -859,3 +859,44 @@ test('expanded command substitution can feed path-taking commands', async () => 
 	expect(lines).toEqual(['/workspace/subdir']);
 	expect(context.cwd).toBe('/workspace/subdir');
 });
+
+test('mixed command substitution words concatenate literal prefixes and suffixes at execution', async () => {
+	const fs = new MemoryFS();
+	const result = execute(compile(parse('echo foo(echo bar)baz')), fs, {
+		cwd: '/',
+		status: 0,
+	});
+
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lines = records
+		.filter((record): record is LineRecord => record.kind === 'line')
+		.map((record) => record.text);
+
+	expect(lines).toEqual(['foobarbaz']);
+});
+
+test('mixed glob words preserve literal prefixes and suffixes at execution', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/src/a.test.ts', '');
+	fs.setFile('/workspace/src/b.test.ts', '');
+
+	const result = execute(compile(parse('echo src/*.test.ts')), fs, {
+		cwd: '/workspace',
+		status: 0,
+	});
+
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lines = records
+		.filter((record): record is LineRecord => record.kind === 'line')
+		.map((record) => record.text);
+
+	expect(lines).toEqual(['src/a.test.ts src/b.test.ts']);
+});

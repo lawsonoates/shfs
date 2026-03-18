@@ -69,6 +69,74 @@ test('parse supports nested command substitutions in argument position', () => {
 	expect(arg?.hasCommandSub).toBe(true);
 });
 
+test('parse preserves ordered parts for mixed glob words', () => {
+	const program = parse('ls src/*.test.ts');
+	const arg = program.statements[0]?.pipeline.commands[0]?.args[0];
+
+	expect(
+		arg?.parts.map((part) => {
+			if (part.kind === 'literal') {
+				return { kind: part.kind, text: part.value };
+			}
+			if (part.kind === 'glob') {
+				return { kind: part.kind, text: part.pattern };
+			}
+			return { kind: part.kind, text: '(sub)' };
+		})
+	).toEqual([
+		{ kind: 'literal', text: 'src/' },
+		{ kind: 'glob', text: '*' },
+		{ kind: 'literal', text: '.test.ts' },
+	]);
+});
+
+test('parse preserves spans and nested substitutions for mixed command substitution words', () => {
+	const program = parse('echo foo(echo (echo bar))baz');
+	const arg = program.statements[0]?.pipeline.commands[0]?.args[0];
+	const commandSubPart = arg?.parts[1];
+
+	expect(arg?.parts.map((part) => part.kind)).toEqual([
+		'literal',
+		'commandSub',
+		'literal',
+	]);
+	expect(arg?.parts.map((part) => part.span.start.offset)).toEqual([
+		5, 8, 25,
+	]);
+	expect(arg?.parts.map((part) => part.span.end.offset)).toEqual([8, 25, 28]);
+
+	if (!commandSubPart || commandSubPart.kind !== 'commandSub') {
+		throw new Error('Expected command substitution part');
+	}
+
+	const nestedArg =
+		commandSubPart.program.statements[0]?.pipeline.commands[0]?.args[0];
+	expect(nestedArg?.hasCommandSub).toBe(true);
+});
+
+test('parse preserves mixed quoted and unquoted word parts', () => {
+	const program = parse('echo prefix"*"suffix?.txt');
+	const arg = program.statements[0]?.pipeline.commands[0]?.args[0];
+
+	expect(
+		arg?.parts.map((part) => {
+			if (part.kind === 'literal') {
+				return { kind: part.kind, text: part.value };
+			}
+			if (part.kind === 'glob') {
+				return { kind: part.kind, text: part.pattern };
+			}
+			return { kind: part.kind, text: '(sub)' };
+		})
+	).toEqual([
+		{ kind: 'literal', text: 'prefix' },
+		{ kind: 'literal', text: '*' },
+		{ kind: 'literal', text: 'suffix' },
+		{ kind: 'glob', text: '?' },
+		{ kind: 'literal', text: '.txt' },
+	]);
+});
+
 test('parse records chain metadata for and/or statements', () => {
 	const program = parse('test 1 = 1; and echo pass; or echo fail');
 	expect(program.statements.map((statement) => statement.chainMode)).toEqual([

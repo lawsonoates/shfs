@@ -33,13 +33,23 @@ export const TokenKind = {
 	RPAREN: 10, // ) - command substitution end
 	LESS: 11, // < - input redirection (Phase 2)
 	GREAT: 12, // > - output redirection (Phase 2)
-
-	// === Expansion markers (for parser hints) ===
-	COMMAND_SUB: 13, // (command)
-	GLOB: 14, // contains * ? or [...]
 } as const;
 
 export type TokenKind = (typeof TokenKind)[keyof typeof TokenKind];
+
+export type TokenWordPartQuote = 'none' | 'single' | 'double';
+
+interface TokenWordPartBase {
+	readonly escaped: boolean;
+	readonly quote: TokenWordPartQuote;
+	readonly span: SourceSpan;
+	readonly text: string;
+}
+
+export type TokenWordPart =
+	| (TokenWordPartBase & { readonly kind: 'literal' })
+	| (TokenWordPartBase & { readonly kind: 'glob' })
+	| (TokenWordPartBase & { readonly kind: 'commandSub' });
 
 /**
  * Token flags for metadata about how the token was formed.
@@ -89,8 +99,6 @@ const TOKEN_KIND_NAMES: Record<TokenKind, string> = {
 	[TokenKind.RPAREN]: 'RPAREN',
 	[TokenKind.LESS]: 'LESS',
 	[TokenKind.GREAT]: 'GREAT',
-	[TokenKind.COMMAND_SUB]: 'COMMAND_SUB',
-	[TokenKind.GLOB]: 'GLOB',
 };
 
 /**
@@ -116,17 +124,20 @@ export class Token {
 	readonly spelling: string;
 	readonly span: SourceSpan;
 	readonly flags: TokenFlagsObject;
+	readonly wordParts: readonly TokenWordPart[];
 
 	constructor(
 		kind: TokenKind,
 		spelling: string,
 		span: SourceSpan,
-		flags: TokenFlagsObject = createEmptyFlags()
+		flags: TokenFlagsObject = createEmptyFlags(),
+		wordParts: readonly TokenWordPart[] = []
 	) {
 		this.kind = kind;
 		this.spelling = spelling;
 		this.span = span;
 		this.flags = flags;
+		this.wordParts = wordParts;
 	}
 
 	/**
@@ -161,14 +172,20 @@ export class Token {
 	 * Check if this token contains expansions (command substitution).
 	 */
 	get hasExpansions(): boolean {
-		return this.flags.containsExpansion;
+		return (
+			this.flags.containsExpansion ||
+			this.wordParts.some((part) => part.kind === 'commandSub')
+		);
 	}
 
 	/**
 	 * Check if this token contains glob patterns.
 	 */
 	get hasGlob(): boolean {
-		return this.flags.containsGlob;
+		return (
+			this.flags.containsGlob ||
+			this.wordParts.some((part) => part.kind === 'glob')
+		);
 	}
 
 	toString(): string {

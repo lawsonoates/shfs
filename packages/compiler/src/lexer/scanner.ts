@@ -5,13 +5,15 @@ import {
 	SPECIAL_CHARS,
 	WORD_BOUNDARY_CHARS,
 } from './operators';
-import type { SourcePosition } from './position';
+import { type SourcePosition, SourceSpan } from './position';
 import { type SourceReader, StringSourceReader } from './source-reader';
 import {
 	createEmptyFlags,
 	Token,
 	type TokenFlagsObject,
 	TokenKind,
+	type TokenWordPart,
+	type TokenWordPartQuote,
 } from './token';
 
 // Pre-compiled regex patterns for performance
@@ -25,6 +27,7 @@ interface CharProcessResult {
 	chars: string;
 	flags: TokenFlagsObject;
 	done: boolean;
+	part: TokenWordPart | null;
 }
 
 /**
@@ -218,7 +221,13 @@ export class Scanner {
 		// Check if we hit a simple delimiter (fast path success)
 		const next = this.source.peek();
 		if (this.isWordBoundary(next)) {
-			return this.classifyWord(spelling, start, createEmptyFlags());
+			return this.classifyWord(spelling, start, createEmptyFlags(), [
+				this.createWordPart(
+					'literal',
+					spelling,
+					start.span(this.source.position)
+				),
+			]);
 		}
 
 		// Hit a special char that needs slow path processing
@@ -230,6 +239,7 @@ export class Scanner {
 		this.stateCtx.reset();
 		let spelling = '';
 		let flags = createEmptyFlags();
+		const wordParts: TokenWordPart[] = [];
 
 		while (!this.source.eof) {
 			const c = this.source.peek();
@@ -244,19 +254,22 @@ export class Scanner {
 			}
 
 			// Handle based on current context
-			const result = this.processChar(c);
+			const result = this.processChar(c, this.source.position);
 			spelling += result.chars;
 			flags = mergeFlags(flags, result.flags);
+			if (result.part) {
+				this.appendWordPart(wordParts, result.part);
+			}
 
 			if (result.done) {
 				break;
 			}
 		}
 
-		return this.classifyWord(spelling, start, flags);
+		return this.classifyWord(spelling, start, flags, wordParts);
 	}
 
-	private processChar(c: string): CharProcessResult {
+	private processChar(c: string, start: SourcePosition): CharProcessResult {
 		// Single quote - no expansions inside (literal)
 		if (c === "'" && !this.stateCtx.inDoubleQuote) {
 			return this.handleSingleQuote();
@@ -269,36 +282,59 @@ export class Scanner {
 
 		// Escape character - only in double quotes or unquoted
 		if (c === '\\' && !this.stateCtx.inSingleQuote) {
-			return this.handleEscape();
+			return this.handleEscape(start);
 		}
 
 		// Command substitution: (...) - only outside single quotes
 		if (c === '(' && !this.stateCtx.inSingleQuote) {
-			return this.readCommandSubstitution();
+			return this.readCommandSubstitution(start);
 		}
 
 		// Glob characters: * ?
 		if ((c === '*' || c === '?') && !this.stateCtx.inQuotes) {
-			return this.handleGlobChar(c);
+			return this.handleGlobChar(c, start);
 		}
 
 		// Character class: [...]
 		if (c === '[' && !this.stateCtx.inQuotes) {
-			return this.readCharacterClass();
+			return this.readCharacterClass(start);
 		}
 
 		// Regular character
+		const quote = this.currentWordPartQuote();
 		this.source.advance();
-		return { chars: c, flags: createEmptyFlags(), done: false };
+		return {
+			chars: c,
+			flags: createEmptyFlags(),
+			done: false,
+			part: this.createWordPart(
+				'literal',
+				c,
+				start.span(this.source.position),
+				quote
+			),
+		};
 	}
 
-	private handleGlobChar(c: string): CharProcessResult {
+	private handleGlobChar(
+		c: string,
+		start: SourcePosition
+	): CharProcessResult {
 		this.source.advance();
 		const flags = createEmptyFlags();
 		flags.containsGlob = true;
 		// Note: ** (recursive glob) is NOT supported in the subset
 		// We just treat consecutive * as two separate globs
-		return { chars: c, flags, done: false };
+		return {
+			chars: c,
+			flags,
+			done: false,
+			part: this.createWordPart(
+				'glob',
+				c,
+				start.span(this.source.position)
+			),
+		};
 	}
 
 	// ─────────────────────────────────────────────────────────
@@ -310,7 +346,12 @@ export class Scanner {
 			// Closing quote
 			this.stateCtx.pop();
 			this.source.advance();
-			return { chars: '', flags: createEmptyFlags(), done: false };
+			return {
+				chars: '',
+				flags: createEmptyFlags(),
+				done: false,
+				part: null,
+			};
 		}
 
 		// Opening quote
@@ -319,7 +360,7 @@ export class Scanner {
 		const flags = createEmptyFlags();
 		flags.singleQuoted = true;
 		flags.quoted = true;
-		return { chars: '', flags, done: false };
+		return { chars: '', flags, done: false, part: null };
 	}
 
 	private handleDoubleQuote(): CharProcessResult {
@@ -327,7 +368,12 @@ export class Scanner {
 			// Closing quote
 			this.stateCtx.pop();
 			this.source.advance();
-			return { chars: '', flags: createEmptyFlags(), done: false };
+			return {
+				chars: '',
+				flags: createEmptyFlags(),
+				done: false,
+				part: null,
+			};
 		}
 
 		// Opening quote
@@ -336,22 +382,38 @@ export class Scanner {
 		const flags = createEmptyFlags();
 		flags.doubleQuoted = true;
 		flags.quoted = true;
-		return { chars: '', flags, done: false };
+		return { chars: '', flags, done: false, part: null };
 	}
 
-	private handleEscape(): CharProcessResult {
+	private handleEscape(start: SourcePosition): CharProcessResult {
+		const quote = this.currentWordPartQuote();
 		this.source.advance(); // consume backslash
 		const next = this.source.peek();
 
 		if (this.source.eof || next === '\0') {
 			// Trailing backslash
-			return { chars: '\\', flags: createEmptyFlags(), done: false };
+			return {
+				chars: '\\',
+				flags: createEmptyFlags(),
+				done: false,
+				part: this.createWordPart(
+					'literal',
+					'\\',
+					start.span(this.source.position),
+					quote
+				),
+			};
 		}
 
 		// Line continuation
 		if (next === '\n') {
 			this.source.advance();
-			return { chars: '', flags: createEmptyFlags(), done: false };
+			return {
+				chars: '',
+				flags: createEmptyFlags(),
+				done: false,
+				part: null,
+			};
 		}
 
 		// In double quotes, only \" and \\ are special (minimal escaping per spec)
@@ -362,10 +424,27 @@ export class Scanner {
 					chars: next,
 					flags: createEmptyFlags(),
 					done: false,
+					part: this.createWordPart(
+						'literal',
+						next,
+						start.span(this.source.position),
+						quote,
+						true
+					),
 				};
 			}
 			// Backslash is literal before other chars in double quotes
-			return { chars: '\\', flags: createEmptyFlags(), done: false };
+			return {
+				chars: '\\',
+				flags: createEmptyFlags(),
+				done: false,
+				part: this.createWordPart(
+					'literal',
+					'\\',
+					start.span(this.source.position),
+					quote
+				),
+			};
 		}
 
 		// Outside quotes, backslash escapes any character (removes special meaning)
@@ -374,6 +453,13 @@ export class Scanner {
 			chars: next,
 			flags: createEmptyFlags(),
 			done: false,
+			part: this.createWordPart(
+				'literal',
+				next,
+				start.span(this.source.position),
+				quote,
+				true
+			),
 		};
 	}
 
@@ -381,7 +467,8 @@ export class Scanner {
 	// Command substitution handler
 	// ─────────────────────────────────────────────────────────
 
-	private readCommandSubstitution(): CharProcessResult {
+	private readCommandSubstitution(start: SourcePosition): CharProcessResult {
+		const quote = this.currentWordPartQuote();
 		let result = '';
 		result += this.source.advance(); // (
 
@@ -410,10 +497,20 @@ export class Scanner {
 
 		const flags = createEmptyFlags();
 		flags.containsExpansion = true;
-		return { chars: result, flags, done: false };
+		return {
+			chars: result,
+			flags,
+			done: false,
+			part: this.createWordPart(
+				'commandSub',
+				result,
+				start.span(this.source.position),
+				quote
+			),
+		};
 	}
 
-	private readCharacterClass(): CharProcessResult {
+	private readCharacterClass(start: SourcePosition): CharProcessResult {
 		let result = '';
 		result += this.source.advance(); // [
 
@@ -438,7 +535,16 @@ export class Scanner {
 
 		const flags = createEmptyFlags();
 		flags.containsGlob = true;
-		return { chars: result, flags, done: false };
+		return {
+			chars: result,
+			flags,
+			done: false,
+			part: this.createWordPart(
+				'glob',
+				result,
+				start.span(this.source.position)
+			),
+		};
 	}
 
 	private skipQuotedContent(quoteChar: string): string {
@@ -467,21 +573,52 @@ export class Scanner {
 	private classifyWord(
 		spelling: string,
 		start: SourcePosition,
-		flags: TokenFlagsObject
+		flags: TokenFlagsObject,
+		wordParts: readonly TokenWordPart[]
 	): Token {
+		const normalizedWordParts =
+			wordParts.length > 0
+				? wordParts
+				: [
+						this.createWordPart(
+							'literal',
+							spelling,
+							start.span(this.source.position),
+							this.defaultWordPartQuote(flags)
+						),
+					];
+
 		// No keywords in the subset - commands are just words
 
 		// Number
 		if (NUMBER_PATTERN.test(spelling)) {
-			return this.makeToken(TokenKind.NUMBER, spelling, start, flags);
+			return this.makeToken(
+				TokenKind.NUMBER,
+				spelling,
+				start,
+				flags,
+				normalizedWordParts
+			);
 		}
 
 		// Valid name/identifier
 		if (NAME_PATTERN.test(spelling)) {
-			return this.makeToken(TokenKind.NAME, spelling, start, flags);
+			return this.makeToken(
+				TokenKind.NAME,
+				spelling,
+				start,
+				flags,
+				normalizedWordParts
+			);
 		}
 
-		return this.makeToken(TokenKind.WORD, spelling, start, flags);
+		return this.makeToken(
+			TokenKind.WORD,
+			spelling,
+			start,
+			flags,
+			normalizedWordParts
+		);
 	}
 
 	// ─────────────────────────────────────────────────────────
@@ -523,13 +660,80 @@ export class Scanner {
 		kind: TokenKind,
 		spelling: string,
 		start: SourcePosition,
-		flags: TokenFlagsObject = createEmptyFlags()
+		flags: TokenFlagsObject = createEmptyFlags(),
+		wordParts: readonly TokenWordPart[] = []
 	): Token {
 		return new Token(
 			kind,
 			spelling,
 			start.span(this.source.position),
-			flags
+			flags,
+			wordParts
 		);
+	}
+
+	private createWordPart(
+		kind: TokenWordPart['kind'],
+		text: string,
+		span: SourceSpan,
+		quote: TokenWordPartQuote = 'none',
+		escaped = false
+	): TokenWordPart {
+		return {
+			escaped,
+			kind,
+			quote,
+			span,
+			text,
+		};
+	}
+
+	private appendWordPart(
+		wordParts: TokenWordPart[],
+		part: TokenWordPart
+	): void {
+		if (part.text === '') {
+			return;
+		}
+
+		const previousPart = wordParts.at(-1);
+		if (
+			previousPart?.kind === 'literal' &&
+			part.kind === 'literal' &&
+			previousPart.quote === part.quote &&
+			previousPart.escaped === part.escaped &&
+			previousPart.span.end.offset === part.span.start.offset
+		) {
+			wordParts[wordParts.length - 1] = this.createWordPart(
+				'literal',
+				`${previousPart.text}${part.text}`,
+				new SourceSpan(previousPart.span.start, part.span.end),
+				part.quote,
+				part.escaped
+			);
+			return;
+		}
+
+		wordParts.push(part);
+	}
+
+	private currentWordPartQuote(): TokenWordPartQuote {
+		if (this.stateCtx.inSingleQuote) {
+			return 'single';
+		}
+		if (this.stateCtx.inDoubleQuote) {
+			return 'double';
+		}
+		return 'none';
+	}
+
+	private defaultWordPartQuote(flags: TokenFlagsObject): TokenWordPartQuote {
+		if (flags.singleQuoted) {
+			return 'single';
+		}
+		if (flags.doubleQuoted) {
+			return 'double';
+		}
+		return 'none';
 	}
 }
