@@ -3,13 +3,20 @@
 // ─────────────────────────────────────────────────────────
 
 /**
- * Represents the result of word expansion.
- * Used by the new AST-based compiler to preserve expansion information.
+ * Represents one lossless part of a compiled shell word.
  */
-export type ExpandedWord =
+export type ExpandedWordPart =
 	| { kind: 'literal'; value: string }
 	| { kind: 'glob'; pattern: string; expanded: string[] }
 	| { kind: 'commandSub'; command: string; output: string[] };
+
+/**
+ * Represents the compiled shape of a shell word.
+ * Mixed words are preserved as ordered compound parts instead of being flattened.
+ */
+export type ExpandedWord =
+	| ExpandedWordPart
+	| { kind: 'compound'; parts: ExpandedWordPart[] };
 
 /**
  * Represents a simple command in IR form (for new AST-based compiler).
@@ -340,8 +347,15 @@ export interface ScriptIR {
 /**
  * Create a literal ExpandedWord.
  */
-export function literal(value: string): ExpandedWord {
+export function literal(value: string): ExpandedWordPart {
 	return { kind: 'literal', value };
+}
+
+/**
+ * Create a compound ExpandedWord that preserves ordered parts.
+ */
+export function compound(parts: ExpandedWordPart[]): ExpandedWord {
+	return { kind: 'compound', parts };
 }
 
 /**
@@ -359,7 +373,10 @@ export function cmd(
 /**
  * Create a glob ExpandedWord.
  */
-export function glob(pattern: string, expanded: string[] = []): ExpandedWord {
+export function glob(
+	pattern: string,
+	expanded: string[] = []
+): ExpandedWordPart {
 	return { kind: 'glob', pattern, expanded };
 }
 
@@ -369,7 +386,7 @@ export function glob(pattern: string, expanded: string[] = []): ExpandedWord {
 export function commandSub(
 	command: string,
 	output: string[] = []
-): ExpandedWord {
+): ExpandedWordPart {
 	return { kind: 'commandSub', command, output };
 }
 
@@ -385,6 +402,8 @@ export function expandedWordToString(word: ExpandedWord): string {
 			return word.pattern;
 		case 'commandSub':
 			return word.command;
+		case 'compound':
+			return word.parts.map(expandedWordPartToString).join('');
 		default: {
 			const _exhaustive: never = word;
 			throw new Error(
@@ -392,6 +411,18 @@ export function expandedWordToString(word: ExpandedWord): string {
 			);
 		}
 	}
+}
+
+export function expandedWordParts(word: ExpandedWord): ExpandedWordPart[] {
+	return word.kind === 'compound' ? word.parts : [word];
+}
+
+export function expandedWordHasGlob(word: ExpandedWord): boolean {
+	return expandedWordParts(word).some((part) => part.kind === 'glob');
+}
+
+export function expandedWordHasCommandSub(word: ExpandedWord): boolean {
+	return expandedWordParts(word).some((part) => part.kind === 'commandSub');
 }
 
 /**
@@ -410,6 +441,8 @@ export function extractPathsFromExpandedWords(words: ExpandedWord[]): string[] {
 					: [word.pattern];
 			case 'commandSub':
 				return word.output;
+			case 'compound':
+				return [expandedWordToString(word)];
 			default: {
 				const _exhaustive: never = word;
 				throw new Error(
@@ -418,4 +451,21 @@ export function extractPathsFromExpandedWords(words: ExpandedWord[]): string[] {
 			}
 		}
 	});
+}
+
+function expandedWordPartToString(part: ExpandedWordPart): string {
+	switch (part.kind) {
+		case 'literal':
+			return part.value;
+		case 'glob':
+			return part.pattern;
+		case 'commandSub':
+			return part.command;
+		default: {
+			const _exhaustive: never = part;
+			throw new Error(
+				`Unknown word part kind: ${JSON.stringify(_exhaustive)}`
+			);
+		}
+	}
 }

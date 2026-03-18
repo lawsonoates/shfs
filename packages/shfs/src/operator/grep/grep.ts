@@ -3,6 +3,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
 	type ExpandedWord,
+	expandedWordHasCommandSub,
+	expandedWordParts,
 	expandedWordToString,
 	type RedirectionIR,
 } from '@shfs/compiler';
@@ -430,10 +432,19 @@ async function evaluatePatternWord(
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string> {
-	if (word.kind === 'commandSub') {
-		return await evaluateExpandedWord(word, fs, context);
+	if (!expandedWordHasCommandSub(word)) {
+		return expandedWordToString(word);
 	}
-	return expandedWordToString(word);
+
+	const segments: string[] = [];
+	for (const part of expandedWordParts(word)) {
+		if (part.kind === 'commandSub') {
+			segments.push(await evaluateExpandedWord(part, fs, context));
+			continue;
+		}
+		segments.push(expandedWordToString(part));
+	}
+	return segments.join('');
 }
 
 async function expandPathWordSafe(

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { literal } from '@/ir';
+import { commandSub, compound, glob, literal } from '@/ir';
 import { parse } from '@/parser/parser';
 import { compile } from './compile';
 
@@ -81,6 +81,36 @@ test('compile preserves nested command substitution serialization', () => {
 					kind: 'commandSub',
 					command: 'echo (echo nested)',
 				},
+			],
+		},
+	});
+});
+
+test('compile preserves mixed glob words as compound arguments', () => {
+	const ir = compile(parse('echo src/*.test.ts'));
+
+	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+		cmd: 'echo',
+		args: {
+			values: [
+				compound([literal('src/'), glob('*'), literal('.test.ts')]),
+			],
+		},
+	});
+});
+
+test('compile preserves mixed command substitution words with adjacent literals', () => {
+	const ir = compile(parse('echo foo(echo bar)baz'));
+
+	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+		cmd: 'echo',
+		args: {
+			values: [
+				compound([
+					literal('foo'),
+					commandSub('echo bar'),
+					literal('baz'),
+				]),
 			],
 		},
 	});

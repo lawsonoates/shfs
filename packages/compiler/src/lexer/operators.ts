@@ -68,7 +68,6 @@ export const WORD_BOUNDARY_CHARS = new Set([
 	';',
 	'<',
 	'>',
-	'(',
 	')',
 	'\0',
 ]);
