@@ -1,11 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-	type ExpandedWord,
-	expandedWordToString,
-	type RedirectionIR,
-} from '@shfs/compiler';
+import type { ExpandedWord, RedirectionIR } from '@shfs/compiler';
 import picomatch from 'picomatch';
 
 import type { BuiltinContext } from '../../builtin/types';
@@ -15,7 +11,7 @@ import {
 	resolvePathFromCwd,
 } from '../../execute/path';
 import { toLineStream } from '../../execute/records';
-import { getRedirectPath } from '../../execute/redirection';
+import { resolveRedirectPath } from '../../execute/redirection';
 import type { FS } from '../../fs/fs';
 import type { Record as ShellRecord } from '../../record';
 import type { Stream } from '../../stream';
@@ -107,6 +103,13 @@ type CompiledPattern =
 	| { kind: 'regex'; value: CompiledRegexPattern }
 	| { kind: 'fixed'; value: CompiledFixedPattern };
 
+interface CompoundExpandedWord {
+	kind: 'compound';
+	parts: RuntimeExpandedWord[];
+}
+
+type RuntimeExpandedWord = ExpandedWord | CompoundExpandedWord;
+
 interface MatcherBuildResult {
 	compileError: boolean;
 	patterns: CompiledPattern[];
@@ -195,13 +198,28 @@ async function runGrepCommandInner(
 		return { lines: [], status: hadError ? 2 : 1 };
 	}
 
+	const inputRedirectPath = await resolveRedirectPath(
+		'grep',
+		options.redirections,
+		'input',
+		options.fs,
+		options.context
+	);
+	const outputRedirectPath = await resolveRedirectPath(
+		'grep',
+		options.redirections,
+		'output',
+		options.fs,
+		options.context
+	);
+
 	if (
 		hasInputOutputConflict(
 			normalized.fileOperands,
 			normalized.readsFromStdin,
 			options.context.cwd,
-			getRedirectPath(options.redirections, 'input'),
-			getRedirectPath(options.redirections, 'output')
+			inputRedirectPath,
+			outputRedirectPath
 		) &&
 		!allowsSameInputOutputPath(parsed.options)
 	) {
@@ -220,12 +238,7 @@ async function runGrepCommandInner(
 	hadError ||= searchTargets.hadError;
 
 	const stdinBytes = normalized.readsFromStdin
-		? await readStdinBytes(
-				options.fs,
-				options.context.cwd,
-				options.input,
-				getRedirectPath(options.redirections, 'input')
-			)
+		? await readStdinBytes(options.fs, options.input, inputRedirectPath)
 		: null;
 
 	const displayFilename = shouldDisplayFilename(
@@ -430,10 +443,39 @@ async function evaluatePatternWord(
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string> {
+	return await evaluatePatternRuntimeWord(
+		word as RuntimeExpandedWord,
+		fs,
+		context
+	);
+}
+
+async function evaluatePatternRuntimeWord(
+	word: RuntimeExpandedWord,
+	fs: FS,
+	context: BuiltinContext
+): Promise<string> {
+	if (word.kind === 'compound') {
+		return await evaluateCompoundPatternWord(word, fs, context);
+	}
 	if (word.kind === 'commandSub') {
 		return await evaluateExpandedWord(word, fs, context);
 	}
-	return expandedWordToString(word);
+	return word.kind === 'literal' ? word.value : word.pattern;
+}
+
+async function evaluateCompoundPatternWord(
+	word: CompoundExpandedWord,
+	fs: FS,
+	context: BuiltinContext
+): Promise<string> {
+	const renderedParts: string[] = [];
+	for (const part of word.parts) {
+		renderedParts.push(
+			await evaluatePatternRuntimeWord(part, fs, context)
+		);
+	}
+	return renderedParts.join('');
 }
 
 async function expandPathWordSafe(
@@ -667,13 +709,12 @@ function toDisplayPath(
 
 async function readStdinBytes(
 	fs: FS,
-	cwd: string,
 	input: Stream<ShellRecord> | null,
 	inputRedirect: string | null
 ): Promise<Uint8Array> {
 	if (inputRedirect !== null) {
 		try {
-			return await fs.readFile(resolvePathFromCwd(cwd, inputRedirect));
+			return await fs.readFile(inputRedirect);
 		} catch {
 			return new Uint8Array();
 		}
@@ -701,7 +742,7 @@ function hasInputOutputConflict(
 	if (outputRedirect === null) {
 		return false;
 	}
-	const outputPath = resolvePathFromCwd(cwd, outputRedirect);
+	const outputPath = outputRedirect;
 	const inputPaths = new Set<string>();
 
 	for (const operand of fileOperands) {
@@ -711,7 +752,7 @@ function hasInputOutputConflict(
 		inputPaths.add(resolvePathFromCwd(cwd, operand));
 	}
 	if (readsFromStdin && inputRedirect !== null) {
-		inputPaths.add(resolvePathFromCwd(cwd, inputRedirect));
+		inputPaths.add(inputRedirect);
 	}
 	return inputPaths.has(outputPath);
 }

@@ -152,6 +152,84 @@ test('creates an empty output file when redirecting sink commands', async () => 
 	expect(textDecoder.decode(await fs.readFile('logs.txt'))).toBe('');
 });
 
+test('variable-expanded output redirection resolves relative to cwd', async () => {
+	const fs = new MemoryFS();
+	const context = {
+		cwd: '/workspace',
+		globalVars: new Map<string, string>([['LOGFILE', 'logs.txt']]),
+	};
+
+	const result = execute(
+		compile(parse('echo hello > $LOGFILE')),
+		fs,
+		context
+	);
+	expect(result.kind).toBe('sink');
+	if (result.kind !== 'sink') {
+		throw new Error('Expected sink result');
+	}
+	await result.value;
+
+	expect(textDecoder.decode(await fs.readFile('/workspace/logs.txt'))).toBe(
+		'hello'
+	);
+});
+
+test('variable-expanded input redirection resolves relative to cwd', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/input.txt', 'alpha\nbeta\ngamma');
+
+	const result = execute(compile(parse('head -n 1 < $INPUTFILE')), fs, {
+		cwd: '/workspace',
+		globalVars: new Map<string, string>([['INPUTFILE', 'input.txt']]),
+	});
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lineRecords = records.filter(
+		(record): record is LineRecord => record.kind === 'line'
+	);
+	expect(lineRecords.map((record) => record.text)).toEqual(['alpha']);
+});
+
+test('command substitution can produce an output redirection target', async () => {
+	const fs = new MemoryFS();
+
+	const result = execute(compile(parse('echo hello > (echo out.txt)')), fs, {
+		cwd: '/workspace',
+	});
+	expect(result.kind).toBe('sink');
+	if (result.kind !== 'sink') {
+		throw new Error('Expected sink result');
+	}
+	await result.value;
+
+	expect(textDecoder.decode(await fs.readFile('/workspace/out.txt'))).toBe(
+		'hello'
+	);
+});
+
+test('redirect target expansion failures stop sink commands before side effects', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace/dir-a', true);
+	await fs.mkdir('/workspace/dir-b', true);
+
+	const result = execute(compile(parse('touch created.txt > dir-*')), fs, {
+		cwd: '/workspace',
+	});
+	expect(result.kind).toBe('sink');
+	if (result.kind !== 'sink') {
+		throw new Error('Expected sink result');
+	}
+
+	await expect(result.value).rejects.toThrow(
+		'touch: redirection target must expand to exactly 1 path, got 2'
+	);
+	expect(await fs.exists('/workspace/created.txt')).toBe(false);
+});
+
 test('executes multi-step stream pipelines end-to-end', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('input.txt', 'alpha\nbeta\ngamma');

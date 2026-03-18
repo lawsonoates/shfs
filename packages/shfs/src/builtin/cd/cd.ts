@@ -1,25 +1,19 @@
 import type { CdStep } from '@shfs/compiler';
 import {
-	evaluateExpandedPathWord,
+	evaluateExpandedSinglePath,
 	resolvePathFromCwd,
 } from '../../execute/path';
 import type { EffectBuiltin } from '../types';
 
 export const cd: EffectBuiltin<CdStep['args']> = async (runtime, args) => {
-	const expandedPaths = await evaluateExpandedPathWord(
+	const requestedPath = await evaluateExpandedSinglePath(
 		'cd',
+		'expected exactly 1 path after expansion',
 		args.path,
 		runtime.fs,
 		runtime.context
 	);
-	if (expandedPaths.length !== 1) {
-		throw new Error(
-			`cd: expected exactly 1 path after expansion, got ${expandedPaths.length}`
-		);
-	}
-
-	const requestedPath = expandedPaths.at(0);
-	if (!requestedPath) {
+	if (requestedPath === '') {
 		throw new Error('cd: empty path');
 	}
 
