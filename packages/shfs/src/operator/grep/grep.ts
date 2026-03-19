@@ -120,6 +120,7 @@ interface RunGrepCommandOptions {
 	input: Stream<ShellRecord> | null;
 	parsed: GrepArgsIR;
 	redirections: RedirectionIR[] | undefined;
+	resolvedOutputRedirectPath?: string;
 }
 
 export interface RunGrepCommandResult {
@@ -204,13 +205,15 @@ async function runGrepCommandInner(
 		options.fs,
 		options.context
 	);
-	const outputRedirectPath = await resolveRedirectPath(
-		'grep',
-		options.redirections,
-		'output',
-		options.fs,
-		options.context
-	);
+	const outputRedirectPath =
+		options.resolvedOutputRedirectPath ??
+		(await resolveRedirectPath(
+			'grep',
+			options.redirections,
+			'output',
+			options.fs,
+			options.context
+		));
 
 	if (
 		hasInputOutputConflict(

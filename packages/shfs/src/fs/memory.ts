@@ -20,6 +20,9 @@ export class MemoryFS implements FS {
 
 	setFile(path: string, content: string | Uint8Array): void {
 		const normalizedPath = normalizePath(path);
+		if (this.directories.has(normalizedPath)) {
+			throw new Error(`Is a directory: ${path}`);
+		}
 		this.ensureParentDirectories(normalizedPath);
 		const encoded =
 			typeof content === 'string'
@@ -56,6 +59,9 @@ export class MemoryFS implements FS {
 
 	async writeFile(path: string, content: Uint8Array): Promise<void> {
 		const normalizedPath = normalizePath(path);
+		if (this.directories.has(normalizedPath)) {
+			throw new Error(`Is a directory: ${path}`);
+		}
 		this.ensureParentDirectories(normalizedPath);
 		this.files.set(normalizedPath, content);
 		this.fileMetadata.set(normalizedPath, {

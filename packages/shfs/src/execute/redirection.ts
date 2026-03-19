@@ -72,7 +72,8 @@ export function applyOutputRedirect(
 	result: ExecuteResult,
 	step: StepIR,
 	fs: FS,
-	context: BuiltinContext
+	context: BuiltinContext,
+	resolvedOutputPath?: string
 ): ExecuteResult {
 	if (!hasRedirect(step.redirections, 'output')) {
 		return result;
@@ -82,13 +83,15 @@ export function applyOutputRedirect(
 		return {
 			kind: 'sink',
 			value: (async () => {
-				const outputPath = await resolveRedirectPath(
-					step.cmd,
-					step.redirections,
-					'output',
-					fs,
-					context
-				);
+				const outputPath =
+					resolvedOutputPath ??
+					(await resolveRedirectPath(
+						step.cmd,
+						step.redirections,
+						'output',
+						fs,
+						context
+					));
 				if (!outputPath) {
 					throw new Error(
 						`${step.cmd}: output redirection missing target`
@@ -102,13 +105,15 @@ export function applyOutputRedirect(
 	return {
 		kind: 'sink',
 		value: (async () => {
-			const outputPath = await resolveRedirectPath(
-				step.cmd,
-				step.redirections,
-				'output',
-				fs,
-				context
-			);
+			const outputPath =
+				resolvedOutputPath ??
+				(await resolveRedirectPath(
+					step.cmd,
+					step.redirections,
+					'output',
+					fs,
+					context
+				));
 			if (!outputPath) {
 				throw new Error(
 					`${step.cmd}: output redirection missing target`

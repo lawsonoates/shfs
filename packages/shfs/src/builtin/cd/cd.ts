@@ -11,7 +11,8 @@ export const cd: EffectBuiltin<CdStep['args']> = async (runtime, args) => {
 		'expected exactly 1 path after expansion',
 		args.path,
 		runtime.fs,
-		runtime.context
+		runtime.context,
+		{ allowEmpty: true }
 	);
 	if (requestedPath === '') {
 		throw new Error('cd: empty path');

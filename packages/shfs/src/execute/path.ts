@@ -257,7 +257,8 @@ async function expandGlobPattern(
 function expectSingleExpandedPath(
 	command: string,
 	expectation: string,
-	values: string[]
+	values: string[],
+	allowEmpty = false
 ): string {
 	if (values.length !== 1) {
 		throw new Error(`${command}: ${expectation}, got ${values.length}`);
@@ -266,6 +267,9 @@ function expectSingleExpandedPath(
 	const resolvedValue = values.at(0);
 	if (resolvedValue === undefined) {
 		throw new Error(`${command}: path missing after expansion`);
+	}
+	if (!allowEmpty && resolvedValue === '') {
+		throw new Error(`${command}: ${expectation}, got empty path`);
 	}
 	return resolvedValue;
 }
@@ -317,12 +321,14 @@ export async function evaluateExpandedSinglePath(
 	expectation: string,
 	word: ExpandedWord,
 	fs: FS,
-	context: BuiltinContext
+	context: BuiltinContext,
+	options?: { allowEmpty?: boolean }
 ): Promise<string> {
 	return expectSingleExpandedPath(
 		command,
 		expectation,
-		await evaluateExpandedPathWord(command, word, fs, context)
+		await evaluateExpandedPathWord(command, word, fs, context),
+		options?.allowEmpty ?? false
 	);
 }
 

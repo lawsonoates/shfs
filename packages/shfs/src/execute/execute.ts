@@ -63,6 +63,10 @@ const EFFECT_COMMANDS = new Set(['cd', 'cp', 'mkdir', 'mv', 'rm', 'touch']);
 const ROOT_DIRECTORY = '/';
 const TEXT_ENCODER = new TextEncoder();
 
+interface StreamExecutionOptions {
+	finalGrepOutputRedirectPath?: string;
+}
+
 function isEffectStep(step: StepIR): step is EffectStep {
 	return EFFECT_COMMANDS.has(step.cmd);
 }
@@ -263,6 +267,48 @@ function executePipeline(
 		};
 	}
 
+	if (
+		lastStep.cmd === 'grep' &&
+		hasRedirect(lastStep.redirections, 'output')
+	) {
+		return {
+			kind: 'sink',
+			value: (async () => {
+				const outputPath = await resolveRedirectPath(
+					lastStep.cmd,
+					lastStep.redirections,
+					'output',
+					fs,
+					context
+				);
+				if (!outputPath) {
+					throw new Error(
+						`${lastStep.cmd}: output redirection missing target`
+					);
+				}
+
+				const redirectedResult = applyOutputRedirect(
+					{
+						kind: 'stream',
+						value: executePipelineToStream(ir.steps, fs, context, {
+							finalGrepOutputRedirectPath: outputPath,
+						}),
+					},
+					lastStep,
+					fs,
+					context,
+					outputPath
+				);
+				if (redirectedResult.kind !== 'sink') {
+					throw new Error(
+						`${lastStep.cmd}: output redirection did not produce a sink`
+					);
+				}
+				await redirectedResult.value;
+			})(),
+		};
+	}
+
 	const stream = executePipelineToStream(ir.steps, fs, context);
 	return applyOutputRedirect(
 		{
@@ -278,17 +324,26 @@ function executePipeline(
 function executePipelineToStream(
 	steps: StepIR[],
 	fs: FS,
-	context: NormalizedExecuteContext
+	context: NormalizedExecuteContext,
+	options: StreamExecutionOptions = {}
 ): Stream<ShellRecord> {
 	return (async function* () {
 		let stream: Stream<ShellRecord> | null = null;
-		for (const step of steps) {
+		for (const [index, step] of steps.entries()) {
 			if (isEffectStep(step)) {
 				throw new Error(
 					`Unsupported pipeline: "${step.cmd}" requires being the final command`
 				);
 			}
-			stream = executeStreamStep(step, fs, stream, context);
+			stream = executeStreamStep(
+				step,
+				fs,
+				stream,
+				context,
+				index === steps.length - 1
+					? options.finalGrepOutputRedirectPath
+					: undefined
+			);
 		}
 
 		if (!stream) {
@@ -322,7 +377,8 @@ function executeStreamStep(
 	step: StreamStep,
 	fs: FS,
 	input: Stream<ShellRecord> | null,
-	context: NormalizedExecuteContext
+	context: NormalizedExecuteContext,
+	resolvedOutputRedirectPath?: string
 ): Stream<ShellRecord> {
 	const builtinRuntime = createBuiltinRuntime(fs, context, input);
 
@@ -380,6 +436,7 @@ function executeStreamStep(
 						typeof runGrepCommand
 					>[0]['parsed'],
 					redirections: step.redirections,
+					resolvedOutputRedirectPath,
 				});
 				context.status = result.status;
 				for (const text of result.lines) {
