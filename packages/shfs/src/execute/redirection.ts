@@ -1,11 +1,9 @@
-import {
-	expandedWordToString,
-	type RedirectionIR,
-	type StepIR,
-} from '@shfs/compiler';
+import type { RedirectionIR, StepIR } from '@shfs/compiler';
+import type { BuiltinContext } from '../builtin/types';
 import type { FS } from '../fs/fs';
 import type { Record as ShellRecord } from '../record';
 import type { Stream } from '../stream';
+import { evaluateExpandedSinglePath, resolvePathFromCwd } from './path';
 import { formatRecord } from './records';
 
 const textEncoder = new TextEncoder();
@@ -14,21 +12,50 @@ export type ExecuteResult =
 	| { kind: 'stream'; value: Stream<ShellRecord> }
 	| { kind: 'sink'; value: Promise<void> };
 
-export function getRedirectPath(
+function getRedirect(
 	redirections: RedirectionIR[] | undefined,
 	kind: RedirectionIR['kind']
-): string | null {
+): RedirectionIR | null {
 	if (!redirections) {
 		return null;
 	}
 
-	let redirectedPath: string | null = null;
+	let redirect: RedirectionIR | null = null;
 	for (const redirection of redirections) {
 		if (redirection.kind === kind) {
-			redirectedPath = expandedWordToString(redirection.target);
+			redirect = redirection;
 		}
 	}
-	return redirectedPath;
+	return redirect;
+}
+
+export function hasRedirect(
+	redirections: RedirectionIR[] | undefined,
+	kind: RedirectionIR['kind']
+): boolean {
+	return getRedirect(redirections, kind) !== null;
+}
+
+export async function resolveRedirectPath(
+	command: string,
+	redirections: RedirectionIR[] | undefined,
+	kind: RedirectionIR['kind'],
+	fs: FS,
+	context: BuiltinContext
+): Promise<string | null> {
+	const redirect = getRedirect(redirections, kind);
+	if (!redirect) {
+		return null;
+	}
+
+	const targetPath = await evaluateExpandedSinglePath(
+		command,
+		'redirection target must expand to exactly 1 path',
+		redirect.target,
+		fs,
+		context
+	);
+	return resolvePathFromCwd(context.cwd, targetPath);
 }
 
 export function withInputRedirect(
@@ -44,25 +71,57 @@ export function withInputRedirect(
 export function applyOutputRedirect(
 	result: ExecuteResult,
 	step: StepIR,
-	fs: FS
+	fs: FS,
+	context: BuiltinContext,
+	resolvedOutputPath?: string
 ): ExecuteResult {
-	const outputPath = getRedirectPath(step.redirections, 'output');
-	if (!outputPath) {
+	if (!hasRedirect(step.redirections, 'output')) {
 		return result;
 	}
 
 	if (result.kind === 'stream') {
 		return {
 			kind: 'sink',
-			value: writeStreamToFile(result.value, outputPath, fs),
+			value: (async () => {
+				const outputPath =
+					resolvedOutputPath ??
+					(await resolveRedirectPath(
+						step.cmd,
+						step.redirections,
+						'output',
+						fs,
+						context
+					));
+				if (!outputPath) {
+					throw new Error(
+						`${step.cmd}: output redirection missing target`
+					);
+				}
+				await writeStreamToFile(result.value, outputPath, fs);
+			})(),
 		};
 	}
 
 	return {
 		kind: 'sink',
-		value: result.value.then(async () => {
+		value: (async () => {
+			const outputPath =
+				resolvedOutputPath ??
+				(await resolveRedirectPath(
+					step.cmd,
+					step.redirections,
+					'output',
+					fs,
+					context
+				));
+			if (!outputPath) {
+				throw new Error(
+					`${step.cmd}: output redirection missing target`
+				);
+			}
+			await result.value;
 			await fs.writeFile(outputPath, textEncoder.encode(''));
-		}),
+		})(),
 	};
 }
 

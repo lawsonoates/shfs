@@ -58,3 +58,12 @@ test('readdir throws for non-directory paths and glob-like strings', async () =>
 		'No such file or directory: /**/*'
 	);
 });
+
+test('writeFile rejects existing directory paths', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/docs', true);
+
+	await expect(
+		fs.writeFile('/docs', new TextEncoder().encode('content'))
+	).rejects.toThrow('Is a directory: /docs');
+});

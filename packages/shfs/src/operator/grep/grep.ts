@@ -17,7 +17,7 @@ import {
 	resolvePathFromCwd,
 } from '../../execute/path';
 import { toLineStream } from '../../execute/records';
-import { getRedirectPath } from '../../execute/redirection';
+import { resolveRedirectPath } from '../../execute/redirection';
 import type { FS } from '../../fs/fs';
 import type { Record as ShellRecord } from '../../record';
 import type { Stream } from '../../stream';
@@ -120,6 +120,7 @@ interface RunGrepCommandOptions {
 	input: Stream<ShellRecord> | null;
 	parsed: GrepArgsIR;
 	redirections: RedirectionIR[] | undefined;
+	resolvedOutputRedirectPath?: string;
 }
 
 export interface RunGrepCommandResult {
@@ -197,13 +198,30 @@ async function runGrepCommandInner(
 		return { lines: [], status: hadError ? 2 : 1 };
 	}
 
+	const inputRedirectPath = await resolveRedirectPath(
+		'grep',
+		options.redirections,
+		'input',
+		options.fs,
+		options.context
+	);
+	const outputRedirectPath =
+		options.resolvedOutputRedirectPath ??
+		(await resolveRedirectPath(
+			'grep',
+			options.redirections,
+			'output',
+			options.fs,
+			options.context
+		));
+
 	if (
 		hasInputOutputConflict(
 			normalized.fileOperands,
 			normalized.readsFromStdin,
 			options.context.cwd,
-			getRedirectPath(options.redirections, 'input'),
-			getRedirectPath(options.redirections, 'output')
+			inputRedirectPath,
+			outputRedirectPath
 		) &&
 		!allowsSameInputOutputPath(parsed.options)
 	) {
@@ -222,12 +240,7 @@ async function runGrepCommandInner(
 	hadError ||= searchTargets.hadError;
 
 	const stdinBytes = normalized.readsFromStdin
-		? await readStdinBytes(
-				options.fs,
-				options.context.cwd,
-				options.input,
-				getRedirectPath(options.redirections, 'input')
-			)
+		? await readStdinBytes(options.fs, options.input, inputRedirectPath)
 		: null;
 
 	const displayFilename = shouldDisplayFilename(
@@ -678,13 +691,12 @@ function toDisplayPath(
 
 async function readStdinBytes(
 	fs: FS,
-	cwd: string,
 	input: Stream<ShellRecord> | null,
 	inputRedirect: string | null
 ): Promise<Uint8Array> {
 	if (inputRedirect !== null) {
 		try {
-			return await fs.readFile(resolvePathFromCwd(cwd, inputRedirect));
+			return await fs.readFile(inputRedirect);
 		} catch {
 			return new Uint8Array();
 		}
@@ -712,7 +724,7 @@ function hasInputOutputConflict(
 	if (outputRedirect === null) {
 		return false;
 	}
-	const outputPath = resolvePathFromCwd(cwd, outputRedirect);
+	const outputPath = outputRedirect;
 	const inputPaths = new Set<string>();
 
 	for (const operand of fileOperands) {
@@ -722,7 +734,7 @@ function hasInputOutputConflict(
 		inputPaths.add(resolvePathFromCwd(cwd, operand));
 	}
 	if (readsFromStdin && inputRedirect !== null) {
-		inputPaths.add(resolvePathFromCwd(cwd, inputRedirect));
+		inputPaths.add(inputRedirect);
 	}
 	return inputPaths.has(outputPath);
 }

@@ -152,6 +152,194 @@ test('creates an empty output file when redirecting sink commands', async () => 
 	expect(textDecoder.decode(await fs.readFile('logs.txt'))).toBe('');
 });
 
+test('variable-expanded output redirection resolves relative to cwd', async () => {
+	const fs = new MemoryFS();
+	const context = {
+		cwd: '/workspace',
+		globalVars: new Map<string, string>([['LOGFILE', 'logs.txt']]),
+	};
+
+	const result = execute(
+		compile(parse('echo hello > $LOGFILE')),
+		fs,
+		context
+	);
+	expect(result.kind).toBe('sink');
+	if (result.kind !== 'sink') {
+		throw new Error('Expected sink result');
+	}
+	await result.value;
+
+	expect(textDecoder.decode(await fs.readFile('/workspace/logs.txt'))).toBe(
+		'hello'
+	);
+});
+
+test('variable-expanded input redirection resolves relative to cwd', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/input.txt', 'alpha\nbeta\ngamma');
+
+	const result = execute(compile(parse('head -n 1 < $INPUTFILE')), fs, {
+		cwd: '/workspace',
+		globalVars: new Map<string, string>([['INPUTFILE', 'input.txt']]),
+	});
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lineRecords = records.filter(
+		(record): record is LineRecord => record.kind === 'line'
+	);
+	expect(lineRecords.map((record) => record.text)).toEqual(['alpha']);
+});
+
+test('command substitution can produce an output redirection target', async () => {
+	const fs = new MemoryFS();
+
+	const result = execute(compile(parse('echo hello > (echo out.txt)')), fs, {
+		cwd: '/workspace',
+	});
+	expect(result.kind).toBe('sink');
+	if (result.kind !== 'sink') {
+		throw new Error('Expected sink result');
+	}
+	await result.value;
+
+	expect(textDecoder.decode(await fs.readFile('/workspace/out.txt'))).toBe(
+		'hello'
+	);
+});
+
+test('redirect target expansion failures stop sink commands before side effects', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace/dir-a', true);
+	await fs.mkdir('/workspace/dir-b', true);
+
+	const result = execute(compile(parse('touch created.txt > dir-*')), fs, {
+		cwd: '/workspace',
+	});
+	expect(result.kind).toBe('sink');
+	if (result.kind !== 'sink') {
+		throw new Error('Expected sink result');
+	}
+
+	await expect(result.value).rejects.toThrow(
+		'touch: redirection target must expand to exactly 1 path, got 2'
+	);
+	expect(await fs.exists('/workspace/created.txt')).toBe(false);
+});
+
+test('empty-expanded redirect targets fail before resolving cwd', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace', true);
+
+	const result = execute(compile(parse('echo hello > "$UNSET"')), fs, {
+		cwd: '/workspace',
+	});
+	expect(result.kind).toBe('sink');
+	if (result.kind !== 'sink') {
+		throw new Error('Expected sink result');
+	}
+
+	await expect(result.value).rejects.toThrow(
+		'echo: redirection target must expand to exactly 1 path, got empty path'
+	);
+	expect((await fs.stat('/workspace')).isDirectory).toBe(true);
+
+	const workspaceEntries: string[] = [];
+	for await (const entry of fs.readdir('/workspace')) {
+		workspaceEntries.push(entry);
+	}
+	expect(workspaceEntries).toEqual([]);
+});
+
+test('empty-expanded single-path destinations fail deterministically', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/source.txt', 'from source');
+	fs.setFile('/workspace/move-me.txt', 'move me');
+
+	const copyResult = execute(
+		compile(parse('cp /workspace/source.txt "$UNSET"')),
+		fs,
+		{
+			cwd: '/workspace',
+		}
+	);
+	expect(copyResult.kind).toBe('sink');
+	if (copyResult.kind !== 'sink') {
+		throw new Error('Expected sink result');
+	}
+	await expect(copyResult.value).rejects.toThrow(
+		'cp: destination must expand to exactly 1 path, got empty path'
+	);
+
+	const moveResult = execute(
+		compile(parse('mv /workspace/move-me.txt "$UNSET"')),
+		fs,
+		{
+			cwd: '/workspace',
+		}
+	);
+	expect(moveResult.kind).toBe('sink');
+	if (moveResult.kind !== 'sink') {
+		throw new Error('Expected sink result');
+	}
+	await expect(moveResult.value).rejects.toThrow(
+		'mv: destination must expand to exactly 1 path, got empty path'
+	);
+
+	expect(textDecoder.decode(await fs.readFile('/workspace/source.txt'))).toBe(
+		'from source'
+	);
+	expect(
+		textDecoder.decode(await fs.readFile('/workspace/move-me.txt'))
+	).toBe('move me');
+});
+
+// Grep should resolve side-effecting redirect targets once and reuse that path.
+test('grep reuses a resolved output redirect target for conflict checks and writes', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/input.txt', 'match\nmiss');
+	fs.setFile('/workspace/which.txt', 'first.txt');
+	fs.setFile('/workspace/which-next.txt', 'second.txt');
+	fs.setFile('/workspace/which-third.txt', 'third.txt');
+
+	const result = execute(
+		compile(
+			parse(
+				'grep match /workspace/input.txt > (cat /workspace/which.txt; cp -f /workspace/which-next.txt /workspace/which.txt; cp -f /workspace/which-third.txt /workspace/which-next.txt)'
+			)
+		),
+		fs,
+		{
+			cwd: '/workspace',
+		}
+	);
+	expect(result.kind).toBe('sink');
+	if (result.kind !== 'sink') {
+		throw new Error('Expected sink result');
+	}
+
+	await result.value;
+
+	expect(textDecoder.decode(await fs.readFile('/workspace/first.txt'))).toBe(
+		'match'
+	);
+	expect(textDecoder.decode(await fs.readFile('/workspace/which.txt'))).toBe(
+		'second.txt'
+	);
+	expect(
+		textDecoder.decode(await fs.readFile('/workspace/which-next.txt'))
+	).toBe('third.txt');
+	await expect(fs.readFile('/workspace/second.txt')).rejects.toThrow(
+		'File not found'
+	);
+	await expect(fs.readFile('/workspace/third.txt')).rejects.toThrow(
+		'File not found'
+	);
+});
+
 test('executes multi-step stream pipelines end-to-end', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('input.txt', 'alpha\nbeta\ngamma');

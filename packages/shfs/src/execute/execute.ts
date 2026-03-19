@@ -26,8 +26,8 @@ import { touch } from '../operator/touch/touch';
 import type { Record as ShellRecord } from '../record';
 import type { Stream } from '../stream';
 import {
-	evaluateExpandedPathWord,
 	evaluateExpandedPathWords,
+	evaluateExpandedSinglePath,
 	normalizeCwd,
 	resolvePathsFromCwd,
 } from './path';
@@ -35,8 +35,9 @@ import { files } from './producers';
 import { toLineStream } from './records';
 import {
 	applyOutputRedirect,
-	getRedirectPath,
+	hasRedirect,
 	type ExecuteResult as RedirectExecuteResult,
+	resolveRedirectPath,
 	withInputRedirect,
 } from './redirection';
 
@@ -60,6 +61,11 @@ type StreamStep = Exclude<StepIR, EffectStep>;
 
 const EFFECT_COMMANDS = new Set(['cd', 'cp', 'mkdir', 'mv', 'rm', 'touch']);
 const ROOT_DIRECTORY = '/';
+const TEXT_ENCODER = new TextEncoder();
+
+interface StreamExecutionOptions {
+	finalGrepOutputRedirectPath?: string;
+}
 
 function isEffectStep(step: StepIR): step is EffectStep {
 	return EFFECT_COMMANDS.has(step.cmd);
@@ -105,8 +111,7 @@ function isPipelineSink(pipeline: PipelineIR): boolean {
 	}
 
 	return (
-		isEffectStep(finalStep) ||
-		getRedirectPath(finalStep.redirections, 'output') !== null
+		isEffectStep(finalStep) || hasRedirect(finalStep.redirections, 'output')
 	);
 }
 
@@ -234,15 +239,74 @@ function executePipeline(
 			}
 		}
 
-		const sink = executePipelineToSink(ir.steps, fs, context);
-		return applyOutputRedirect(
-			{
+		if (hasRedirect(lastStep.redirections, 'output')) {
+			return {
 				kind: 'sink',
-				value: sink,
-			},
-			lastStep,
-			fs
-		);
+				value: (async () => {
+					const outputPath = await resolveRedirectPath(
+						lastStep.cmd,
+						lastStep.redirections,
+						'output',
+						fs,
+						context
+					);
+					if (!outputPath) {
+						throw new Error(
+							`${lastStep.cmd}: output redirection missing target`
+						);
+					}
+					await executePipelineToSink(ir.steps, fs, context);
+					await fs.writeFile(outputPath, TEXT_ENCODER.encode(''));
+				})(),
+			};
+		}
+
+		return {
+			kind: 'sink',
+			value: executePipelineToSink(ir.steps, fs, context),
+		};
+	}
+
+	if (
+		lastStep.cmd === 'grep' &&
+		hasRedirect(lastStep.redirections, 'output')
+	) {
+		return {
+			kind: 'sink',
+			value: (async () => {
+				const outputPath = await resolveRedirectPath(
+					lastStep.cmd,
+					lastStep.redirections,
+					'output',
+					fs,
+					context
+				);
+				if (!outputPath) {
+					throw new Error(
+						`${lastStep.cmd}: output redirection missing target`
+					);
+				}
+
+				const redirectedResult = applyOutputRedirect(
+					{
+						kind: 'stream',
+						value: executePipelineToStream(ir.steps, fs, context, {
+							finalGrepOutputRedirectPath: outputPath,
+						}),
+					},
+					lastStep,
+					fs,
+					context,
+					outputPath
+				);
+				if (redirectedResult.kind !== 'sink') {
+					throw new Error(
+						`${lastStep.cmd}: output redirection did not produce a sink`
+					);
+				}
+				await redirectedResult.value;
+			})(),
+		};
 	}
 
 	const stream = executePipelineToStream(ir.steps, fs, context);
@@ -252,24 +316,34 @@ function executePipeline(
 			value: stream,
 		},
 		lastStep,
-		fs
+		fs,
+		context
 	);
 }
 
 function executePipelineToStream(
 	steps: StepIR[],
 	fs: FS,
-	context: NormalizedExecuteContext
+	context: NormalizedExecuteContext,
+	options: StreamExecutionOptions = {}
 ): Stream<ShellRecord> {
 	return (async function* () {
 		let stream: Stream<ShellRecord> | null = null;
-		for (const step of steps) {
+		for (const [index, step] of steps.entries()) {
 			if (isEffectStep(step)) {
 				throw new Error(
 					`Unsupported pipeline: "${step.cmd}" requires being the final command`
 				);
 			}
-			stream = executeStreamStep(step, fs, stream, context);
+			stream = executeStreamStep(
+				step,
+				fs,
+				stream,
+				context,
+				index === steps.length - 1
+					? options.finalGrepOutputRedirectPath
+					: undefined
+			);
 		}
 
 		if (!stream) {
@@ -303,7 +377,8 @@ function executeStreamStep(
 	step: StreamStep,
 	fs: FS,
 	input: Stream<ShellRecord> | null,
-	context: NormalizedExecuteContext
+	context: NormalizedExecuteContext,
+	resolvedOutputRedirectPath?: string
 ): Stream<ShellRecord> {
 	const builtinRuntime = createBuiltinRuntime(fs, context, input);
 
@@ -319,7 +394,13 @@ function executeStreamStep(
 					showTabs: step.args.showTabs,
 					squeezeBlank: step.args.squeezeBlank,
 				};
-				const inputPath = getRedirectPath(step.redirections, 'input');
+				const inputPath = await resolveRedirectPath(
+					step.cmd,
+					step.redirections,
+					'input',
+					fs,
+					context
+				);
 				const filePaths = withInputRedirect(
 					resolvePathsFromCwd(
 						context.cwd,
@@ -355,6 +436,7 @@ function executeStreamStep(
 						typeof runGrepCommand
 					>[0]['parsed'],
 					redirections: step.redirections,
+					resolvedOutputRedirectPath,
 				});
 				context.status = result.status;
 				for (const text of result.lines) {
@@ -367,7 +449,13 @@ function executeStreamStep(
 		}
 		case 'head': {
 			return (async function* (): Stream<ShellRecord> {
-				const inputPath = getRedirectPath(step.redirections, 'input');
+				const inputPath = await resolveRedirectPath(
+					step.cmd,
+					step.redirections,
+					'input',
+					fs,
+					context
+				);
 				const filePaths = withInputRedirect(
 					resolvePathsFromCwd(
 						context.cwd,
@@ -420,7 +508,13 @@ function executeStreamStep(
 		}
 		case 'tail': {
 			return (async function* (): Stream<ShellRecord> {
-				const inputPath = getRedirectPath(step.redirections, 'input');
+				const inputPath = await resolveRedirectPath(
+					step.cmd,
+					step.redirections,
+					'input',
+					fs,
+					context
+				);
 				const filePaths = withInputRedirect(
 					resolvePathsFromCwd(
 						context.cwd,
@@ -498,20 +592,15 @@ async function executeEffectStep(
 					context
 				)
 			);
-			const destinationPaths = resolvePathsFromCwd(
-				context.cwd,
-				await evaluateExpandedPathWord(
+			const destinationPaths = resolvePathsFromCwd(context.cwd, [
+				await evaluateExpandedSinglePath(
 					'cp',
+					'destination must expand to exactly 1 path',
 					step.args.dest,
 					fs,
 					context
-				)
-			);
-			if (destinationPaths.length !== 1) {
-				throw new Error(
-					`cp: destination must expand to exactly 1 path, got ${destinationPaths.length}`
-				);
-			}
+				),
+			]);
 			const destinationPath = destinationPaths.at(0);
 			if (destinationPath === undefined) {
 				throw new Error('cp: destination missing after expansion');
@@ -552,20 +641,15 @@ async function executeEffectStep(
 					context
 				)
 			);
-			const destinationPaths = resolvePathsFromCwd(
-				context.cwd,
-				await evaluateExpandedPathWord(
+			const destinationPaths = resolvePathsFromCwd(context.cwd, [
+				await evaluateExpandedSinglePath(
 					'mv',
+					'destination must expand to exactly 1 path',
 					step.args.dest,
 					fs,
 					context
-				)
-			);
-			if (destinationPaths.length !== 1) {
-				throw new Error(
-					`mv: destination must expand to exactly 1 path, got ${destinationPaths.length}`
-				);
-			}
+				),
+			]);
 			const destinationPath = destinationPaths.at(0);
 			if (destinationPath === undefined) {
 				throw new Error('mv: destination missing after expansion');

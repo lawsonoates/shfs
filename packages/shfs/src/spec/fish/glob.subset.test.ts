@@ -163,6 +163,25 @@ test('glob subset (boundary): single-target path commands enforce post-expansion
 	).rejects.toThrow('mv: destination must expand to exactly 1 path, got 2');
 });
 
+test('glob subset (boundary): redirection targets enforce shared single-target expansion errors', async () => {
+	await run('mkdir -p /workspace');
+	await run('mkdir /workspace/dir-a /workspace/dir-b');
+	await run('cd /workspace');
+
+	await expect(run('echo hi > dir-*')).rejects.toThrow(
+		'echo: redirection target must expand to exactly 1 path, got 2'
+	);
+});
+
+test('glob subset (boundary): unmatched redirection globs report deterministic failures', async () => {
+	await run('mkdir -p /workspace');
+	await run('cd /workspace');
+
+	await expect(run('echo hi > missing*')).rejects.toThrow(
+		'echo: no matches found: missing*'
+	);
+});
+
 test('glob subset (boundary): multi-target path commands consume expanded glob arguments', async () => {
 	await run('mkdir -p /workspace');
 	await run('touch /workspace/src-a.txt /workspace/src-b.txt');
