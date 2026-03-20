@@ -36,6 +36,10 @@ export class TursoAgentFS implements FS {
 		await this.agent.fs.writeFile(path, buffer);
 	}
 
+	async rename(src: string, dest: string): Promise<void> {
+		await this.agent.fs.rename(src, dest);
+	}
+
 	async deleteFile(path: string): Promise<void> {
 		await this.agent.fs.deleteFile(path);
 	}
