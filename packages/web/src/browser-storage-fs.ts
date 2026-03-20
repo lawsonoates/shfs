@@ -102,6 +102,70 @@ export class BrowserStorageFS implements FS {
 		this.persist();
 	}
 
+	async rename(src: string, dest: string): Promise<void> {
+		const normalizedSourcePath = normalizePath(src);
+		const normalizedDestinationPath = normalizePath(dest);
+
+		if (normalizedSourcePath === '/' || normalizedDestinationPath === '/') {
+			throw new Error('Cannot rename the root path');
+		}
+
+		const sourceIsDirectory =
+			this.state.directories.has(normalizedSourcePath);
+		const sourceIsFile = this.state.files.has(normalizedSourcePath);
+		if (!(sourceIsDirectory || sourceIsFile)) {
+			throw new Error(`No such file or directory: ${src}`);
+		}
+
+		if (normalizedSourcePath === normalizedDestinationPath) {
+			return;
+		}
+
+		const destinationParentPath =
+			normalizedDestinationPath.slice(
+				0,
+				normalizedDestinationPath.lastIndexOf('/')
+			) || '/';
+		if (!this.state.directories.has(destinationParentPath)) {
+			throw new Error(
+				`No such file or directory: ${destinationParentPath}`
+			);
+		}
+
+		if (
+			sourceIsDirectory &&
+			normalizedDestinationPath.startsWith(
+				`${normalizedSourcePath}/`
+			)
+		) {
+			throw new Error(`Cannot rename a directory into itself: ${dest}`);
+		}
+
+		if (this.state.files.has(normalizedDestinationPath)) {
+			if (sourceIsDirectory) {
+				throw new Error(
+					`Cannot replace file with directory: ${normalizedDestinationPath}`
+				);
+			}
+		}
+		if (this.state.directories.has(normalizedDestinationPath)) {
+			throw new Error(
+				`Cannot replace directory: ${normalizedDestinationPath}`
+			);
+		}
+
+		if (sourceIsDirectory) {
+			this.renameDirectory(
+				normalizedSourcePath,
+				normalizedDestinationPath
+			);
+		} else {
+			this.renameFile(normalizedSourcePath, normalizedDestinationPath);
+		}
+
+		this.persist();
+	}
+
 	async deleteFile(path: string): Promise<void> {
 		const normalizedPath = normalizePath(path);
 		if (!this.state.files.has(normalizedPath)) {
@@ -259,6 +323,79 @@ export class BrowserStorageFS implements FS {
 			this.state.files.has(normalizedPath) ||
 			this.state.directories.has(normalizedPath)
 		);
+	}
+
+	private renameFile(sourcePath: string, destinationPath: string): void {
+		const content = this.state.files.get(sourcePath);
+		const metadata = this.state.metadata.get(sourcePath);
+		if (!(content && metadata)) {
+			throw new Error(`No such file or directory: ${sourcePath}`);
+		}
+
+		this.state.files.delete(sourcePath);
+		this.state.metadata.delete(sourcePath);
+
+		if (this.state.files.has(destinationPath)) {
+			this.state.files.delete(destinationPath);
+			this.state.metadata.delete(destinationPath);
+		}
+
+		this.state.files.set(destinationPath, content);
+		this.state.metadata.set(destinationPath, metadata);
+	}
+
+	private renameDirectory(
+		sourcePath: string,
+		destinationPath: string
+	): void {
+		const sourcePrefix = `${sourcePath}/`;
+
+		const directoryEntries = Array.from(this.state.directories)
+			.filter(
+				(dirPath) =>
+					dirPath === sourcePath || dirPath.startsWith(sourcePrefix)
+			)
+			.map((dirPath) => ({
+				path: dirPath,
+				metadata: this.state.metadata.get(dirPath) ?? {
+					isDirectory: true,
+					mtime: new Date(),
+				},
+			}));
+
+		const fileEntries = Array.from(this.state.files.keys())
+			.filter((filePath) => filePath.startsWith(sourcePrefix))
+			.map((filePath) => ({
+				path: filePath,
+				content: this.state.files.get(filePath)!,
+				metadata: this.state.metadata.get(filePath) ?? {
+					isDirectory: false,
+					mtime: new Date(),
+				},
+			}));
+
+		for (const entry of directoryEntries) {
+			this.state.directories.delete(entry.path);
+			this.state.metadata.delete(entry.path);
+		}
+		for (const entry of fileEntries) {
+			this.state.files.delete(entry.path);
+			this.state.metadata.delete(entry.path);
+		}
+
+		for (const entry of directoryEntries) {
+			const newPath =
+				entry.path === sourcePath
+					? destinationPath
+					: `${destinationPath}${entry.path.slice(sourcePath.length)}`;
+			this.state.directories.add(newPath);
+			this.state.metadata.set(newPath, entry.metadata);
+		}
+		for (const entry of fileEntries) {
+			const newPath = `${destinationPath}${entry.path.slice(sourcePath.length)}`;
+			this.state.files.set(newPath, entry.content);
+			this.state.metadata.set(newPath, entry.metadata);
+		}
 	}
 
 	private ensureParentDirectories(path: string): void {
