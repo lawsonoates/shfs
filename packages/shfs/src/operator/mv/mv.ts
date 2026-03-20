@@ -92,13 +92,7 @@ export function mv(fs: FS): Effect<MvArgs> {
 				force,
 				interactive
 			);
-			await moveFile(fs, src, targetPath);
+			await fs.rename(src, targetPath);
 		}
 	};
-}
-
-async function moveFile(fs: FS, src: string, dest: string): Promise<void> {
-	const content = await fs.readFile(src);
-	await fs.writeFile(dest, content);
-	await fs.deleteFile(src);
 }
