@@ -3,7 +3,7 @@ import { compile, parse, type ScriptIR } from '@shfs/compiler';
 import { collect } from '../consumer/consumer';
 import { type ExecuteResult, execute } from '../execute/execute';
 import type { FS } from '../fs/fs';
-import type { Record } from '../record';
+import { formatRecord, type Record } from '../record';
 import { lazy } from '../util/lazy';
 
 const ROOT_DIRECTORY = '/';
@@ -176,20 +176,7 @@ export class Shell {
 
 			async text(): Promise<string> {
 				const records = await runWithContext();
-				return records
-					.map((r) => {
-						if (r.kind === 'line') {
-							return r.text;
-						}
-						if (r.kind === 'file') {
-							return r.path;
-						}
-						if (r.kind === 'json') {
-							return JSON.stringify(r.value);
-						}
-						return '';
-					})
-					.join('\n');
+				return records.map((record) => formatRecord(record)).join('\n');
 			},
 		};
 

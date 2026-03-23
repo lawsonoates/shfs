@@ -1,5 +1,9 @@
 import type { FS } from '../fs/fs';
-import type { LineRecord, Record as ShellRecord } from '../record';
+import {
+	formatRecord as formatShellRecord,
+	type LineRecord,
+	type Record as ShellRecord,
+} from '../record';
 import type { Stream } from '../stream';
 
 export async function* toLineStream(
@@ -31,14 +35,5 @@ export async function* toLineStream(
 }
 
 export function formatRecord(record: ShellRecord): string {
-	switch (record.kind) {
-		case 'line':
-			return record.text;
-		case 'file':
-			return record.path;
-		case 'json':
-			return JSON.stringify(record.value);
-		default:
-			throw new Error('Unknown record kind');
-	}
+	return formatShellRecord(record);
 }

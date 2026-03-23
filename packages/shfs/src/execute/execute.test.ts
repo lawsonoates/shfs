@@ -380,6 +380,97 @@ test('executes multi-step stream pipelines end-to-end', async () => {
 	expect(lineRecords.map((record) => record.text)).toEqual(['gamma']);
 });
 
+test('find pipelines file records into downstream cat consumers', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/dir/first.txt', 'first');
+	fs.setFile('/workspace/dir/second.txt', 'second');
+
+	const ir: PipelineIR = {
+		firstCommand: {
+			name: literal('find'),
+			args: [literal('dir'), literal('-name'), literal('*.txt')],
+			redirections: [],
+		},
+		source: { kind: 'fs', glob: 'dir' },
+		steps: [
+			{
+				cmd: 'find',
+				args: {
+					action: {
+						explicit: false,
+						kind: 'print',
+					},
+					diagnostics: [],
+					predicates: [
+						{
+							kind: 'name',
+							pattern: literal('*.txt'),
+						},
+					],
+					startPaths: [literal('dir')],
+					traversal: {
+						depth: false,
+						maxdepth: null,
+						mindepth: 0,
+					},
+					usageError: false,
+				},
+			},
+			{
+				cmd: 'cat',
+				args: {
+					files: [],
+					numberLines: false,
+					numberNonBlank: false,
+					showAll: false,
+					showEnds: false,
+					showNonprinting: false,
+					showTabs: false,
+					squeezeBlank: false,
+				},
+			},
+		],
+	};
+
+	const result = execute(ir, fs, { cwd: '/workspace' });
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lineRecords = records.filter(
+		(record): record is LineRecord => record.kind === 'line'
+	);
+	expect(lineRecords.map((record) => record.text)).toEqual([
+		'first',
+		'second',
+	]);
+});
+
+test('find pipelines matching file records into grep', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/dir/first.txt', 'first');
+	fs.setFile('/workspace/dir/second.txt', 'second');
+
+	const result = execute(
+		compile(parse("find dir -name '*.txt' | grep second")),
+		fs,
+		{
+			cwd: '/workspace',
+		}
+	);
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+
+	const records = await collect<ShellRecord>()(result.value);
+	const lineRecords = records.filter(
+		(record): record is LineRecord => record.kind === 'line'
+	);
+	expect(lineRecords.map((record) => record.text)).toEqual(['second']);
+});
+
 test('cat/head/tail expand glob file arguments relative to cwd', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/workspace/logs/a.txt', 'a1\na2\n');

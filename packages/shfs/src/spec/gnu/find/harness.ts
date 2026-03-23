@@ -61,9 +61,7 @@ export function createFindHarness(): FindHarness {
 	};
 
 	const runWithStderr = async (command: string): Promise<CommandResult> => {
-		const text = await run(
-			`${command} 2>&1; echo "${STATUS_PREFIX}$status"`
-		);
+		const text = await run(`${command}; echo "${STATUS_PREFIX}$status"`);
 		return parseStatus(text);
 	};
 
