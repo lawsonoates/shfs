@@ -343,6 +343,7 @@ function toErrorLine(error: unknown): LineRecord {
 function toFileRecord(entry: FindEntry): FileRecord {
 	return {
 		displayPath: entry.displayPath,
+		isDirectory: entry.isDirectory,
 		kind: 'file',
 		path: entry.absolutePath,
 	};

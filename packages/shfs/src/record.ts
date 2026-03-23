@@ -1,5 +1,6 @@
 export interface FileRecord {
 	kind: 'file';
+	isDirectory?: boolean;
 	path: string;
 	displayPath?: string;
 }

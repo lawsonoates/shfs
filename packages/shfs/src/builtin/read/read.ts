@@ -1,5 +1,6 @@
 import type { ReadStep } from '@shfs/compiler';
 import { evaluateExpandedWord } from '../../execute/path';
+import { isDirectoryRecord } from '../../execute/records';
 import type { Record as ShellRecord } from '../../record';
 import type { Builtin, BuiltinRuntime } from '../types';
 
@@ -13,7 +14,7 @@ async function readFirstValue(runtime: BuiltinRuntime): Promise<string | null> {
 	let firstValue: string | null = null;
 	for await (const record of runtime.input) {
 		const value = await recordToText(runtime, record);
-		if (firstValue === null) {
+		if (value !== null && firstValue === null) {
 			firstValue = value;
 		}
 	}
@@ -23,11 +24,14 @@ async function readFirstValue(runtime: BuiltinRuntime): Promise<string | null> {
 async function recordToText(
 	runtime: BuiltinRuntime,
 	record: ShellRecord
-): Promise<string> {
+): Promise<string | null> {
 	if (record.kind === 'line') {
 		return record.text;
 	}
 	if (record.kind === 'file') {
+		if (await isDirectoryRecord(runtime.fs, record)) {
+			return null;
+		}
 		for await (const line of runtime.fs.readLines(record.path)) {
 			return line;
 		}

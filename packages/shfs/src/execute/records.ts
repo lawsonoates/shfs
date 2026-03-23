@@ -1,5 +1,6 @@
 import type { FS } from '../fs/fs';
 import {
+	type FileRecord,
 	formatRecord as formatShellRecord,
 	type LineRecord,
 	type Record as ShellRecord,
@@ -16,21 +17,47 @@ export async function* toLineStream(
 			continue;
 		}
 		if (record.kind === 'file') {
-			let lineNum = 1;
-			for await (const text of fs.readLines(record.path)) {
-				yield {
-					kind: 'line',
-					text,
-					file: record.path,
-					lineNum: lineNum++,
-				};
-			}
+			yield* fileRecordToLines(fs, record);
 			continue;
 		}
 		yield {
 			kind: 'line',
 			text: JSON.stringify(record.value),
 		};
+	}
+}
+
+export async function* fileRecordToLines(
+	fs: FS,
+	record: FileRecord
+): Stream<LineRecord> {
+	if (await isDirectoryRecord(fs, record)) {
+		return;
+	}
+
+	let lineNum = 1;
+	for await (const text of fs.readLines(record.path)) {
+		yield {
+			kind: 'line',
+			text,
+			file: record.path,
+			lineNum: lineNum++,
+		};
+	}
+}
+
+export async function isDirectoryRecord(
+	fs: FS,
+	record: FileRecord
+): Promise<boolean> {
+	if (record.isDirectory !== undefined) {
+		return record.isDirectory;
+	}
+
+	try {
+		return (await fs.stat(record.path)).isDirectory;
+	} catch {
+		return false;
 	}
 }
 
