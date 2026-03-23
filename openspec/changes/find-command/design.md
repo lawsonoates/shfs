@@ -1,24 +1,24 @@
 ## Context
 
-SHFS implements a fish shell subset for agent filesystem sandboxing. Commands follow a two-layer architecture: a compiler handler parses arguments into IR types, and a runtime operator executes them over async record streams. The `find` command needs to fit this existing pattern. An extensive GNU find test suite already exists on the `find` branch covering name/path matching, type filtering, time predicates, traversal control, actions, and error handling.
+SHFS implements a fish-inspired subset for agent filesystem sandboxing. Commands follow a two-layer architecture: a compiler handler parses arguments into IR types, and a runtime operator executes them over async record streams. The `find` command needs to fit this existing pattern while staying inside the SHFS subset boundary. A GNU-derived test corpus already exists on the `find` branch, but only the parts covering in-scope traversal, filtering, and deterministic errors should drive this change.
 
 ## Goals / Non-Goals
 
 **Goals:**
 - Implement `find` as a transducer that emits `FileRecord` streams, composable with pipes
-- Support core GNU find predicates: `-name`, `-path`, `-type`, `-mtime`, `-atime`, `-ctime`, `-newer`
+- Support subset predicates: `-name`, `-path`, `-type`
 - Support traversal controls: `-maxdepth`, `-mindepth`, `-depth`
-- Support actions: `-print`, `-exec`, `-execdir`, `-printf`
-- Support special inputs: `-files0-from`
-- Support metadata predicates: `-inum`, `-uid`, `-gid`, `-user`, `-group`
-- Pass the existing GNU find test suite
+- Support default and explicit `-print`
+- Keep error handling deterministic for unsupported predicates, unsupported options, invalid arguments, and missing starting paths
+- Pass the narrowed GNU-derived SHFS subset test suite
 
 **Non-Goals:**
-- Symlink handling (excluded from SHFS scope)
-- `-prune` action (complex interaction with traversal order)
-- `-regex` predicate (GNU extension, not needed for core use)
-- `-ok` interactive confirmation action
-- `-delete` action (agents should use `rm` explicitly)
+- Full GNU/POSIX `find` compatibility
+- Symlink handling and symlink-focused predicates or behavior
+- Time and metadata predicates such as `-mtime`, `-atime`, `-ctime`, `-newer`, `-inum`, `-uid`, `-gid`, `-user`, and `-group`
+- GNU-specific input and formatting features such as `-files0-from` and `-printf`
+- Command-execution and interactive actions such as `-exec`, `-execdir`, `-ok`, and `-okdir`
+- Advanced expression features such as `-or`, grouping with `(` and `)`, and `,`
 
 ## Decisions
 
@@ -30,13 +30,13 @@ SHFS implements a fish shell subset for agent filesystem sandboxing. Commands fo
 
 ### 2. Predicate composition uses AND logic with short-circuit evaluation
 
-All predicates are combined with implicit AND, matching GNU find behavior. Predicates are evaluated left-to-right and short-circuit on first failure. This is the standard GNU find semantics.
+All predicates are combined with implicit AND. Predicates are evaluated left-to-right and short-circuit on first failure.
 
-**Alternative considered**: Supporting `-or` and grouping with `\(`. Deferred to a future change — AND-only covers the vast majority of use cases.
+**Alternative considered**: Supporting `-or` and grouping with `\(`. Rejected for this change because the SHFS boundary explicitly keeps advanced `find` expressions out of scope.
 
-### 3. Compiler produces a FindStep IR with structured predicate/action arrays
+### 3. Compiler produces a FindStep IR with structured predicate and traversal data
 
-The `FindStep` IR contains: starting paths, an ordered array of predicates (each with type and parameters), traversal options, and an action. The compiler parses the positional argument grammar of `find` (paths before first predicate, then predicate/action tokens).
+The `FindStep` IR contains: starting paths, an ordered array of predicates (each with type and parameters), traversal options, and print behavior. The compiler parses the positional argument grammar of `find` (paths before first predicate, then predicate/action tokens), while only accepting the in-scope subset.
 
 **Alternative considered**: Passing raw args to the operator for runtime parsing. Rejected because it violates the compiler/runtime separation — all argument parsing belongs in the compiler layer.
 
@@ -46,14 +46,14 @@ The `FindStep` IR contains: starting paths, an ordered array of predicates (each
 
 ### 5. Recursive traversal uses existing FS.readdir() + FS.stat()
 
-No new FS interface methods needed. Recursive descent uses `readdir()` to list children and `stat()` to check types and metadata. Depth tracking is handled internally by the operator.
+No new FS interface methods are needed. Recursive descent uses `readdir()` to list children and `stat()` to check entry type. Depth tracking is handled internally by the operator.
 
-### 6. `-exec` runs commands via the existing execution engine
+### 6. Unsupported `find` features fail deterministically
 
-`-exec cmd {} \;` and `-exec cmd {} +` substitute paths into command templates. Since SHFS already has a command execution pipeline, `-exec` delegates to it. `-execdir` changes cwd to the file's parent directory before execution.
+Unsupported predicates and options should produce stable, deterministic SHFS errors instead of attempting partial GNU compatibility. This keeps the subset boundary crisp and prevents accidental expansion into out-of-scope host or compatibility behavior.
 
 ## Risks / Trade-offs
 
 - **[Performance on deep trees]** → Recursive traversal with stat per entry could be slow on very large trees. Mitigation: `-maxdepth` limits traversal; stat results are not cached (kept simple, optimize later if needed).
-- **[FS.stat() limitations]** → Current stat returns `{ isDirectory, size, mtime }` but not atime/ctime/uid/gid/inum. Mitigation: metadata predicates (`-inum`, `-uid`, etc.) will need FS.stat() to be extended, or these predicates return stub/simulated values. The test suite checks for these — design the IR to support them even if initial runtime is limited.
-- **[`-exec` security]** → Command injection via path names. Mitigation: paths are substituted as literal arguments, not parsed as shell code.
+- **[Subset vs. GNU expectations]** → Contributors may assume broader GNU coverage from the command name alone. Mitigation: keep proposal, spec, tasks, boundary docs, and tests aligned on the narrower SHFS contract.
+- **[Path matching semantics]** → `-name` and `-path` are easy to conflate. Mitigation: keep dedicated tests showing basename-only matching for `-name` and full-path matching for `-path`.
