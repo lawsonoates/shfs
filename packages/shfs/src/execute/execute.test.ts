@@ -380,6 +380,115 @@ test('executes multi-step stream pipelines end-to-end', async () => {
 	expect(lineRecords.map((record) => record.text)).toEqual(['gamma']);
 });
 
+// Condition: cat should skip directory records emitted before readable file records.
+test('find pipelines file records into downstream cat consumers', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/dir/first.txt', 'first');
+	fs.setFile('/workspace/dir/second.txt', 'second');
+
+	const ir: PipelineIR = {
+		firstCommand: {
+			name: literal('find'),
+			args: [literal('dir')],
+			redirections: [],
+		},
+		source: { kind: 'fs', glob: 'dir' },
+		steps: [
+			{
+				cmd: 'find',
+				args: {
+					action: {
+						explicit: false,
+						kind: 'print',
+					},
+					diagnostics: [],
+					predicates: [],
+					startPaths: [literal('dir')],
+					traversal: {
+						depth: false,
+						maxdepth: null,
+						mindepth: 0,
+					},
+					usageError: false,
+				},
+			},
+			{
+				cmd: 'cat',
+				args: {
+					files: [],
+					numberLines: false,
+					numberNonBlank: false,
+					showAll: false,
+					showEnds: false,
+					showNonprinting: false,
+					showTabs: false,
+					squeezeBlank: false,
+				},
+			},
+		],
+	};
+
+	const result = execute(ir, fs, { cwd: '/workspace' });
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lineRecords = records.filter(
+		(record): record is LineRecord => record.kind === 'line'
+	);
+	expect(lineRecords.map((record) => record.text)).toEqual([
+		'first',
+		'second',
+	]);
+});
+
+// Condition: grep should ignore directory records emitted before matching files.
+test('find pipelines matching file records into grep', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/dir/first.txt', 'first');
+	fs.setFile('/workspace/dir/second.txt', 'second');
+
+	const result = execute(compile(parse('find dir | grep second')), fs, {
+		cwd: '/workspace',
+	});
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+
+	const records = await collect<ShellRecord>()(result.value);
+	const lineRecords = records.filter(
+		(record): record is LineRecord => record.kind === 'line'
+	);
+	expect(lineRecords.map((record) => record.text)).toEqual(['second']);
+});
+
+// Condition: read should skip directory records and capture the first file line.
+test('find pipelines file records into read after skipping directories', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/dir/first.txt', 'first');
+	fs.setFile('/workspace/dir/second.txt', 'second');
+
+	const result = execute(
+		compile(parse('find dir | read value; echo $value')),
+		fs,
+		{
+			cwd: '/workspace',
+		}
+	);
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+
+	const records = await collect<ShellRecord>()(result.value);
+	const lineRecords = records.filter(
+		(record): record is LineRecord => record.kind === 'line'
+	);
+	expect(lineRecords.map((record) => record.text)).toEqual(['first']);
+});
+
 test('cat/head/tail expand glob file arguments relative to cwd', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/workspace/logs/a.txt', 'a1\na2\n');

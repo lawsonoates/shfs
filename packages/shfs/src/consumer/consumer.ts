@@ -1,4 +1,4 @@
-import type { Record } from '../record';
+import { formatRecord, type Record } from '../record';
 import type { Stream } from '../stream';
 
 /**
@@ -28,20 +28,7 @@ export function collect<T>(): Consumer<T, T[]> {
 export function stdout(): Consumer<Record> {
 	return async (input) => {
 		for await (const record of input) {
-			process.stdout.write(`${format(record)}\n`);
+			process.stdout.write(`${formatRecord(record)}\n`);
 		}
 	};
-}
-
-function format(record: Record): string {
-	switch (record.kind) {
-		case 'line':
-			return record.text;
-		case 'json':
-			return JSON.stringify(record.value);
-		case 'file':
-			return record.path;
-		default:
-			throw new Error('Unknown record kind');
-	}
 }

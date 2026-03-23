@@ -1,5 +1,10 @@
 import type { FS } from '../fs/fs';
-import type { LineRecord, Record as ShellRecord } from '../record';
+import {
+	type FileRecord,
+	formatRecord as formatShellRecord,
+	type LineRecord,
+	type Record as ShellRecord,
+} from '../record';
 import type { Stream } from '../stream';
 
 export async function* toLineStream(
@@ -12,15 +17,7 @@ export async function* toLineStream(
 			continue;
 		}
 		if (record.kind === 'file') {
-			let lineNum = 1;
-			for await (const text of fs.readLines(record.path)) {
-				yield {
-					kind: 'line',
-					text,
-					file: record.path,
-					lineNum: lineNum++,
-				};
-			}
+			yield* fileRecordToLines(fs, record);
 			continue;
 		}
 		yield {
@@ -30,15 +27,40 @@ export async function* toLineStream(
 	}
 }
 
-export function formatRecord(record: ShellRecord): string {
-	switch (record.kind) {
-		case 'line':
-			return record.text;
-		case 'file':
-			return record.path;
-		case 'json':
-			return JSON.stringify(record.value);
-		default:
-			throw new Error('Unknown record kind');
+export async function* fileRecordToLines(
+	fs: FS,
+	record: FileRecord
+): Stream<LineRecord> {
+	if (await isDirectoryRecord(fs, record)) {
+		return;
 	}
+
+	let lineNum = 1;
+	for await (const text of fs.readLines(record.path)) {
+		yield {
+			kind: 'line',
+			text,
+			file: record.path,
+			lineNum: lineNum++,
+		};
+	}
+}
+
+export async function isDirectoryRecord(
+	fs: FS,
+	record: FileRecord
+): Promise<boolean> {
+	if (record.isDirectory !== undefined) {
+		return record.isDirectory;
+	}
+
+	try {
+		return (await fs.stat(record.path)).isDirectory;
+	} catch {
+		return false;
+	}
+}
+
+export function formatRecord(record: ShellRecord): string {
+	return formatShellRecord(record);
 }

@@ -1,3 +1,4 @@
+import { isDirectoryRecord } from '../../execute/records';
 import type { FS } from '../../fs/fs';
 import type { FileRecord, LineRecord } from '../../record';
 import type { Transducer } from '../types';
@@ -18,6 +19,9 @@ export function headLines(n: number): Transducer<LineRecord, LineRecord> {
 export function head(fs: FS): Transducer<FileRecord, LineRecord> {
 	return async function* (input) {
 		for await (const file of input) {
+			if (await isDirectoryRecord(fs, file)) {
+				continue;
+			}
 			let lineNum = 0;
 			for await (const text of fs.readLines(file.path)) {
 				if (lineNum >= 10) {
@@ -40,6 +44,9 @@ export function headWithN(
 ): Transducer<FileRecord, LineRecord> {
 	return async function* (input) {
 		for await (const file of input) {
+			if (await isDirectoryRecord(fs, file)) {
+				continue;
+			}
 			let lineNum = 0;
 			for await (const text of fs.readLines(file.path)) {
 				if (lineNum >= n) {

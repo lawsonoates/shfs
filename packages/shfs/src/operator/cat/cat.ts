@@ -1,5 +1,6 @@
+import { isDirectoryRecord } from '../../execute/records';
 import type { FS } from '../../fs/fs';
-import type { LineRecord, Record } from '../../record';
+import type { FileRecord, LineRecord, Record } from '../../record';
 import type { Transducer } from '../types';
 
 export interface CatOptions {
@@ -132,19 +133,23 @@ async function* emitJsonRecord(
 
 async function* emitFileLines(
 	fs: FS,
-	path: string,
+	record: FileRecord,
 	state: CatState,
 	options: Required<CatOptions>
 ): AsyncIterable<LineRecord> {
+	if (await isDirectoryRecord(fs, record)) {
+		return;
+	}
+
 	let sourceLineNum = 1;
-	for await (const rawText of fs.readLines(path)) {
+	for await (const rawText of fs.readLines(record.path)) {
 		const rendered = nextRenderedLine(rawText, state, options);
 		if (rendered.isSkipped) {
 			continue;
 		}
 
 		yield {
-			file: path,
+			file: record.path,
 			kind: 'line',
 			lineNum: sourceLineNum++,
 			text: renderLineText(rendered.text, rendered.lineNumber, options),
@@ -172,7 +177,7 @@ export function cat(
 				yield* emitJsonRecord(record.value, state, normalized);
 				continue;
 			}
-			yield* emitFileLines(fs, record.path, state, normalized);
+			yield* emitFileLines(fs, record, state, normalized);
 		}
 	};
 }

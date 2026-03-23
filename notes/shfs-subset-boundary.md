@@ -18,6 +18,14 @@ It is not a full fish shell and does not target host OS parity.
   - `test`, `echo`, `read`, `string`
 - Core path semantics:
   - `cd` / `pwd` with `.`, `..`, absolute and relative path handling
+- Recursive file discovery with `find`:
+  - starting paths or default current directory
+  - deterministic recursive traversal over the virtual filesystem
+  - predicates: `-name`, `-path`, `-type` (`f`, `d`)
+  - traversal controls: `-maxdepth`, `-mindepth`, `-depth`
+  - default `-print` action
+  - deterministic errors for invalid predicates and arguments
+  - pipeline-friendly behavior (`find ... | ...`)
 - Globbing and wildcard expansion (fish-style):
   - full pattern support for `*`, `?`, `[ ... ]`, and `**`
   - recursive glob behavior and trailing-slash directory matching semantics
@@ -34,6 +42,12 @@ It is not a full fish shell and does not target host OS parity.
 - `CDPATH`
 - Symlink support and symlink-focused commands/behavior
   - this remains out of scope even when a glob would otherwise match/traverse symlinks
+- Full GNU/POSIX `find` compatibility
+  - metadata and host-identity predicates such as `-inum`, `-uid`, `-gid`, `-user`, `-group`, `-links`
+  - GNU-specific input and formatting features such as `-files0-from` and `-printf`
+  - command-execution and interactive actions such as `-execdir`, `-ok`, and `-okdir`
+  - host/compatibility flags and warning modes such as `-warn`, `-nowarn`, `-D`, `POSIXLY_CORRECT`, and `-ignore_readdir_race`
+  - advanced expression features such as grouping with `(` and `)`, `,`, and full boolean-expression compatibility
 - Permission model beyond basic virtual FS behavior
 - `env KEY=... cmd` scoped environment injection
 - Interactive shell features:

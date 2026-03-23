@@ -14,6 +14,7 @@ import type { BuiltinContext, BuiltinRuntime } from '../builtin/types';
 import type { FS } from '../fs/fs';
 import { cat } from '../operator/cat/cat';
 import { cp } from '../operator/cp/cp';
+import { find } from '../operator/find/find';
 import { runGrepCommand } from '../operator/grep/grep';
 import { headLines, headWithN } from '../operator/head/head';
 import { ls } from '../operator/ls/ls';
@@ -446,6 +447,9 @@ function executeStreamStep(
 					};
 				}
 			})();
+		}
+		case 'find': {
+			return find(fs, context, step.args);
 		}
 		case 'head': {
 			return (async function* (): Stream<ShellRecord> {

@@ -10,7 +10,7 @@ import {
 import picomatch from 'picomatch';
 import type { BuiltinContext } from '../builtin/types';
 import type { FS } from '../fs/fs';
-import type { Record as ShellRecord } from '../record';
+import { formatRecord, type Record as ShellRecord } from '../record';
 
 interface FsEntry {
 	path: string;
@@ -26,19 +26,6 @@ const ROOT_DIRECTORY = '/';
 const TRAILING_SLASH_REGEX = /\/+$/;
 const VARIABLE_REFERENCE_REGEX = /\$([A-Za-z_][A-Za-z0-9_]*)/g;
 const NO_GLOB_MATCH_MESSAGE = 'no matches found';
-
-function formatRecord(record: ShellRecord): string {
-	switch (record.kind) {
-		case 'line':
-			return record.text;
-		case 'file':
-			return record.path;
-		case 'json':
-			return JSON.stringify(record.value);
-		default:
-			throw new Error('Unknown record kind');
-	}
-}
 
 async function collectOutputRecords(
 	result: NestedExecuteResult

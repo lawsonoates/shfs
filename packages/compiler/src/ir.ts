@@ -189,6 +189,62 @@ export interface EchoStep {
 	};
 }
 
+export interface FindDiagnosticIR {
+	code:
+		| 'invalid-value'
+		| 'missing-value'
+		| 'unexpected-operand'
+		| 'unknown-predicate';
+	message: string;
+	token: string;
+	tokenIndex: number;
+}
+
+export type FindTypeIR = 'd' | 'f';
+
+export type FindPredicateIR =
+	| {
+			kind: 'name';
+			pattern: ExpandedWord;
+	  }
+	| {
+			kind: 'path';
+			pattern: ExpandedWord;
+	  }
+	| {
+			kind: 'type';
+			types: FindTypeIR[];
+	  };
+
+export interface FindActionIR {
+	explicit: boolean;
+	kind: 'print';
+}
+
+export interface FindTraversalIR {
+	depth: boolean;
+	maxdepth: number | null;
+	mindepth: number;
+}
+
+export interface FindArgsIR {
+	action: FindActionIR;
+	diagnostics: FindDiagnosticIR[];
+	predicates: FindPredicateIR[];
+	startPaths: ExpandedWord[];
+	traversal: FindTraversalIR;
+	usageError: boolean;
+}
+
+/**
+ * Find step.
+ */
+export interface FindStep {
+	cmd: 'find';
+	redirections?: RedirectionIR[];
+	args: FindArgsIR;
+}
+
 export type GrepRegexMode = 'bre' | 'ere' | 'fixed' | 'pcre';
 export type GrepFilenameMode = 'always' | 'default' | 'never';
 export type GrepDirectoriesMode = 'read' | 'skip';
@@ -306,6 +362,7 @@ export type StepIR =
 	| CatStep
 	| CpStep
 	| EchoStep
+	| FindStep
 	| GrepStep
 	| HeadStep
 	| LsStep
