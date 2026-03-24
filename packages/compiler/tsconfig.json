@@ -3,9 +3,10 @@
 	"extends": "@tsconfig/bun/tsconfig.json",
 	"compilerOptions": {
 		"strictNullChecks": true,
-		"baseUrl": ".",
+		"types": ["bun"],
 		"paths": {
-			"@/*": ["./src/*"]
+			"@/*": ["./src/*"],
+			"*": ["./*"]
 		}
 	}
 }
