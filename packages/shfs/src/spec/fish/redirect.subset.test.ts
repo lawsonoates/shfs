@@ -83,9 +83,7 @@ test('redirect subset: redirected content can include command substitution', asy
 // Directly tests the original bug scenario.
 test('redirect subset: double-quoted content with parens redirected to dotted filename', async () => {
 	await run('mkdir -p /project/tests');
-	await run(
-		"echo \"console.log('test')\" > /project/tests/index.test.ts"
-	);
+	await run('echo "console.log(\'test\')" > /project/tests/index.test.ts');
 	expect(await run('cat /project/tests/index.test.ts')).toBe(
 		"console.log('test')"
 	);
@@ -98,4 +96,3 @@ test('redirect subset: redirection to a relative path respects cwd', async () =>
 	await run('echo relative > result.txt');
 	expect(await run('cat /workspace/output/result.txt')).toBe('relative');
 });
-

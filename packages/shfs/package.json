@@ -1,13 +1,12 @@
 {
 	"author": "Lawson Oates (https://github.com/lawsonoates)",
 	"dependencies": {
-		"@shfs/compiler": "workspace:*",
-		"picomatch": "^4.0.3",
-		"remeda": "^2.33.1"
+		"picomatch": "^4.0.3"
 	},
 	"description": "A library of simulated fish commands",
 	"devDependencies": {
 		"@tsconfig/bun": "catalog:",
+		"@shfs/compiler": "workspace:*",
 		"@types/bun": "catalog:",
 		"@types/picomatch": "^4.0.2",
 		"@typescript/native-preview": "catalog:",

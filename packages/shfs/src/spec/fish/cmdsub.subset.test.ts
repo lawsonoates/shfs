@@ -111,7 +111,7 @@ test('cmdsub subset: bare parentheses inside double quotes are literal', async (
 });
 
 test('cmdsub subset: function-call-like syntax inside double quotes is literal', async () => {
-	expect(await run("echo \"console.log('test')\"")).toBe(
+	expect(await run('echo "console.log(\'test\')"')).toBe(
 		"console.log('test')"
 	);
 });
@@ -141,7 +141,7 @@ test('cmdsub subset: deeply nested command substitution', async () => {
 
 // Command substitution as argument to another command.
 test('cmdsub subset: command substitution as set value', async () => {
-	expect(
-		await run('set -g result (echo computed); echo $result')
-	).toBe('computed');
+	expect(await run('set -g result (echo computed); echo $result')).toBe(
+		'computed'
+	);
 });

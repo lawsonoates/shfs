@@ -59,11 +59,9 @@
     },
     "packages/shfs": {
       "name": "shfs",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
-        "@shfs/compiler": "workspace:*",
         "picomatch": "^4.0.3",
-        "remeda": "^2.33.1",
       },
       "devDependencies": {
         "@tsconfig/bun": "catalog:",
@@ -79,7 +77,7 @@
     },
     "packages/web": {
       "name": "@shfs/web",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "bun-plugin-tailwind": "^0.1.2",
         "picomatch": "^4.0.3",
@@ -831,8 +829,6 @@
     "react-dom": ["react-dom@19.2.4", "", { "dependencies": { "scheduler": "^0.27.0" }, "peerDependencies": { "react": "^19.2.4" } }, "sha512-AXJdLo8kgMbimY95O2aKQqsz2iWi9jMgKJhRBAxECE4IFxfcazB2LmzloIoibJI3C12IlY20+KFaLv+71bUJeQ=="],
 
     "readable-stream": ["readable-stream@2.3.8", "", { "dependencies": { "core-util-is": "~1.0.0", "inherits": "~2.0.3", "isarray": "~1.0.0", "process-nextick-args": "~2.0.0", "safe-buffer": "~5.1.1", "string_decoder": "~1.1.1", "util-deprecate": "~1.0.1" } }, "sha512-8p0AUk4XODgIewSi0l8Epjs+EVnWiK7NoDIEGU0HhE7+ZyY8D1IMY7odu5lRrFXGg71L15KG8QrPmum45RTtdA=="],
-
-    "remeda": ["remeda@2.33.6", "", {}, "sha512-tazDGH7s75kUPGBKLvhgBEHMgW+TdDFhjUAMdQj57IoWz6HsGa5D2RX5yDUz6IIqiRRvZiaEHzCzWdTeixc/Kg=="],
 
     "resolve-pkg-maps": ["resolve-pkg-maps@1.0.0", "", {}, "sha512-seS2Tj26TBVOC2NIc2rOe2y2ZO7efxITtLZcGSOnHHNOQ7CkiUBfw0Iw2ck6xkIhPwLhKNLS8BO+hEpngQlqzw=="],
 

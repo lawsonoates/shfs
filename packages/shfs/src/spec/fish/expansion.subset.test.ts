@@ -47,7 +47,7 @@ test('expansion subset: unquoted prefix with empty variable keeps prefix', async
 
 // expansion.fish: set -l foo ''; expansion "$foo"; expansion $foo
 test('expansion subset: double-quoted variable set to empty string expands to empty', async () => {
-	expect(await run("set -l foo ''; echo \"$foo\"")).toBe('');
+	expect(await run('set -l foo \'\'; echo "$foo"')).toBe('');
 });
 
 test('expansion subset: unquoted variable set to empty string expands to empty', async () => {
@@ -56,7 +56,7 @@ test('expansion subset: unquoted variable set to empty string expands to empty',
 
 // expansion.fish: set -l foo ''; expansion "prefix$foo"; expansion prefix$foo
 test('expansion subset: prefix with variable set to empty string keeps prefix', async () => {
-	expect(await run("set -l foo ''; echo \"prefix$foo\"")).toBe('prefix');
+	expect(await run('set -l foo \'\'; echo "prefix$foo"')).toBe('prefix');
 });
 
 // expansion.fish: set -l foo bar; set -l bar baz; expansion "$$foo"
@@ -76,16 +76,14 @@ test('expansion subset: variable expansion concatenated with suffix', async () =
 
 test('expansion subset: variable expansion in double quotes with surrounding text', async () => {
 	await run('set -g greeting hello');
-	expect(await run('echo "say $greeting please"')).toBe(
-		'say hello please'
-	);
+	expect(await run('echo "say $greeting please"')).toBe('say hello please');
 });
 
 // Variable set via command substitution, then expanded.
 test('expansion subset: variable assigned from command substitution expands correctly', async () => {
-	expect(
-		await run('set -l val (echo dynamic); echo "result: $val"')
-	).toBe('result: dynamic');
+	expect(await run('set -l val (echo dynamic); echo "result: $val"')).toBe(
+		'result: dynamic'
+	);
 });
 
 // Multiple variables in one expansion.

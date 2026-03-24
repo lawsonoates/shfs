@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import {
 	type ExpandedWord,
 	expandedWordHasCommandSub,
