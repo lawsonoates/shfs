@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve, dirname } from 'node:path';
 import {
 	type ExpandedWord,
 	expandedWordHasCommandSub,
@@ -1626,12 +1625,8 @@ function getCorpusEntries(): CorpusEntry[] {
 
 	const entries: CorpusEntry[] = [];
 	const testsDirectory = resolve(
-		fileURLToPath(
-			new URL(
-				'../../../../../opensrc/repos/github.com/Distrotech/grep/tests',
-				import.meta.url
-			)
-		)
+		dirname(import.meta.filename),
+		'../../../../../opensrc/repos/github.com/Distrotech/grep/tests'
 	);
 	if (!existsSync(testsDirectory)) {
 		corpusEntries = [];
