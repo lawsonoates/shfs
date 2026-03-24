@@ -79,7 +79,7 @@ export class WordParser {
 				: [
 						{
 							escaped: false,
-							kind: 'literal',
+							kind: 'literal' as const,
 							quote: 'none' as const,
 							span: token.span,
 							text: token.spelling,

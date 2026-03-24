@@ -52,7 +52,7 @@ export class StatementParser {
 
 			const sawSeparator = this.consumeSeparatorsAndComments();
 			if (
-				this.parser.currentToken.kind !== TokenKind.EOF &&
+				(this.parser.currentToken.kind as TokenKind) !== TokenKind.EOF &&
 				!sawSeparator
 			) {
 				this.parser.syntacticError(

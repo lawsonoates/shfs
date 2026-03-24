@@ -82,6 +82,7 @@ Filesystem/path commands:
 - cat
 - cd
 - cp
+- find
 - grep
 - head
 - ls
@@ -118,17 +119,27 @@ shfs is designed to be a tool used by agents to enable the benefits of a filesys
 ## Grammar
 
 ```ebnf
-program      ::= statement (separator statement)* separator?
-separator    ::= ";" | NEWLINE
-statement    ::= chain_prefix? pipeline
-chain_prefix ::= "and" | "or"
-pipeline     ::= command ("|" command)*
-command      ::= word+
-word         ::= quoted | unquoted | substitution | variable
-quoted       ::= "'" .* "'" | '"' .* '"'
-substitution ::= "(" program ")"
-variable     ::= "$" NAME
+program        ::= separator* statement (separator+ statement)* separator*
+separator      ::= ";" | NEWLINE | COMMENT
+statement      ::= chain_prefix? pipeline
+chain_prefix   ::= "and" | "or"
+pipeline       ::= command ("|" NEWLINE* command)*
+command        ::= word command_part*
+command_part   ::= word | redirection
+redirection    ::= "<" word | ">" word | ">>" word
+word           ::= word_part+
+word_part      ::= literal | glob | substitution
+substitution   ::= "(" program ")"
+literal        ::= bare_text | single_quoted | double_quoted
+single_quoted  ::= "'" single_quoted_text "'"
+double_quoted  ::= '"' double_quoted_part* '"'
+double_quoted_part ::= double_quoted_text | substitution
+glob           ::= "*" | "?" | bracket_glob | "**"
 ```
+
+Notes:
+- words can mix literal text, glob parts, and command substitution in one token (for example `foo(echo bar)baz`)
+- `$var` and `$status` are documented runtime expansion forms; they are preserved through parsing and expanded during execution
 
 ## License
 
