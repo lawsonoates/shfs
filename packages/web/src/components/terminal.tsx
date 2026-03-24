@@ -1,9 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Shell } from 'shfs';
-import { BrowserStorageFS } from '../browser-storage-fs';
+import { MemoryFS } from 'shfs/fs';
 import { TerminalInput } from './terminal-input';
 
-const TERMINAL_STORAGE_KEY = 'shfs-web-terminal-fs';
 const TITLE = 'lawsonoates@macbook-pro: fish';
 
 const BANNER = `
@@ -35,8 +34,7 @@ function formatError(error: unknown): string {
 
 export const Terminal = () => {
 	const shell = useMemo(() => {
-		const fs = new BrowserStorageFS(TERMINAL_STORAGE_KEY);
-		return new Shell(fs);
+		return new Shell(new MemoryFS());
 	}, []);
 
 	const [historyLines, setHistoryLines] = useState<string[]>(INTRO_LINES);

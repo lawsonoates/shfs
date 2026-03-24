@@ -52,4 +52,21 @@ await $`git commit -am "release: shfs v${version}"`;
 await $`git tag v${version}`;
 await $`git push --follow-tags`;
 
+// 5. Merge release back into dev
+console.log('\n=== merging master into dev ===\n');
+await $`git checkout dev`;
+try {
+	await $`git merge master -m "chore: merge release v${version} into dev"`;
+	await $`git push`;
+	console.log('dev is now up to date with master');
+} catch {
+	await $`git merge --abort`;
+	console.error(
+		'⚠ merge conflict: run `git checkout dev && git merge master` and resolve manually'
+	);
+	process.exit(1);
+} finally {
+	await $`git checkout master`;
+}
+
 console.log(`\n=== done: shfs v${version} ===\n`);
