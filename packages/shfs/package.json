@@ -1,6 +1,7 @@
 {
 	"author": "Lawson Oates (https://github.com/lawsonoates)",
 	"dependencies": {
+		"@shfs/compiler": "workspace:*",
 		"picomatch": "^4.0.3",
 		"remeda": "^2.33.1"
 	},
