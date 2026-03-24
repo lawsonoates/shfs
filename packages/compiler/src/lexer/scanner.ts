@@ -285,8 +285,8 @@ export class Scanner {
 			return this.handleEscape(start);
 		}
 
-		// Command substitution: (...) - only outside single quotes
-		if (c === '(' && !this.stateCtx.inSingleQuote) {
+		// Command substitution: (...) - only outside quotes
+		if (c === '(' && !this.stateCtx.inQuotes) {
 			return this.readCommandSubstitution(start);
 		}
 
