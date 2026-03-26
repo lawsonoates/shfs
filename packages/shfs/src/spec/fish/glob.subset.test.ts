@@ -7,7 +7,6 @@ import { beforeEach, expect, test } from 'bun:test';
 
 import { MemoryFS } from '../../fs/memory';
 import { Shell } from '../../shell/shell';
-import { formatStderr } from '../../stderr';
 
 let shell!: Shell;
 const WHITESPACE_REGEX = /\s+/;
@@ -23,16 +22,10 @@ async function run(command: string): Promise<string> {
 async function runWithStatus(
 	command: string
 ): Promise<{ output: string; stderr: string; status: number }> {
-	const result = await shell.$`${command}`.result();
+	const result = await shell.$`${command}`.nothrow();
 	return {
-		output: result.stdout
-			.map((record) =>
-				record.kind === 'line'
-					? record.text
-					: (record.displayPath ?? record.path)
-			)
-			.join('\n'),
-		stderr: formatStderr(result.stderr),
+		output: result.text(),
+		stderr: result.stderr.toString(),
 		status: result.exitCode,
 	};
 }

@@ -19,6 +19,10 @@ async function run(command: string): Promise<string> {
 	return await shell.$`${command}`.text();
 }
 
+async function runNothrow(command: string): Promise<string> {
+	return await shell.$`${command}`.nothrow().text();
+}
+
 test('read subset: captures pipeline input into a variable for later statements in the same run', async () => {
 	expect(await run('echo /workspace | read target; echo $target')).toBe(
 		'/workspace'
@@ -48,7 +52,7 @@ test('read subset: stores values in local scope for one run only', async () => {
 });
 
 test('read subset: reports failure status when no input stream is provided', async () => {
-	await run('read missing');
+	await runNothrow('read missing');
 	expect(await run('echo $status')).toBe('1');
 	expect(await run('read missing; and echo pass; or echo fail')).toBe('fail');
 });

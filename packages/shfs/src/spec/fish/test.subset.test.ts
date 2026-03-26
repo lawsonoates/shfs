@@ -19,6 +19,10 @@ async function run(command: string): Promise<string> {
 	return await shell.$`${command}`.text();
 }
 
+async function runNothrow(command: string): Promise<string> {
+	return await shell.$`${command}`.nothrow().text();
+}
+
 test('test subset: supports one-operand truthiness checks', async () => {
 	expect(await run('test fish; and echo pass; or echo fail')).toBe('pass');
 	expect(await run('test ""; and echo pass; or echo fail')).toBe('fail');
@@ -28,7 +32,7 @@ test('test subset: exposes test result through $status as 0/1', async () => {
 	await run('test fish');
 	expect(await run('echo $status')).toBe('0');
 
-	await run('test ""');
+	await runNothrow('test ""');
 	expect(await run('echo $status')).toBe('1');
 });
 
@@ -58,7 +62,7 @@ test('test subset: supports variable and command substitution in operands', asyn
 
 test('test subset: test command itself emits no output', async () => {
 	expect(await run('test alpha = alpha')).toBe('');
-	expect(await run('test alpha = beta')).toBe('');
+	expect(await runNothrow('test alpha = beta')).toBe('');
 });
 
 test('test subset: requires at least one operand', async () => {

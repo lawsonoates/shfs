@@ -18,6 +18,10 @@ async function run(command: string): Promise<string> {
 	return await shell.$`${command}`.text();
 }
 
+async function runNothrow(command: string): Promise<string> {
+	return await shell.$`${command}`.nothrow().text();
+}
+
 test('cd/pwd: supports absolute and relative navigation with . and ..', async () => {
 	await run('mkdir -p /workspace/app/src');
 	await run('cd /workspace');
@@ -114,7 +118,7 @@ test('$status: reflects success and failure as 0/1', async () => {
 	await run('test 1 = 1');
 	expect(await run('echo $status')).toBe('0');
 
-	await run('test 1 = 2');
+	await runNothrow('test 1 = 2');
 	expect(await run('echo $status')).toBe('1');
 });
 

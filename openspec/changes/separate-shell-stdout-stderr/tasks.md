@@ -23,3 +23,11 @@
 - [x] 4.2 Add or update diagnostic end-to-end tests proving diagnostics appear on stderr and not in stdout pipeline output
 - [x] 4.3 Add or update `$status` tests proving non-zero diagnostic exit codes are preserved
 - [x] 4.4 Run affected compiler and SHFS test suites and fix regressions from the channel separation
+
+## 5. Bun API Alignment
+
+- [x] 5.1 Replace bespoke shell result helpers with a Bun-like awaitable command that resolves to a `ShellOutput`-style object
+- [x] 5.2 Remove public stderr-only/result-wrapper methods that Bun.$ does not provide, while keeping stdout readers Bun-like
+- [x] 5.3 Add Bun-like throw behavior for non-zero exit codes with `ShellError` and throw-control helpers
+- [x] 5.4 Update shell and harness tests to use Bun-like awaiting/error inspection instead of `result()` or stderr helper methods
+- [x] 5.5 Run affected SHFS test suites and verify the Bun-aligned API passes

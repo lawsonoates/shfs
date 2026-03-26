@@ -1,30 +1,35 @@
 ## ADDED Requirements
 
 ### Requirement: Shell command results expose explicit output channels
-The programmatic shell API SHALL expose command results with separate `stdout`, `stderr`, and `exitCode` fields.
-Stdout SHALL contain pipelineable command output records only, and stderr SHALL contain user-facing error output lines.
+The programmatic shell API SHALL expose command results with separate `stdout`, `stderr`, and `exitCode` fields through a Bun-like awaitable command object.
+Stdout SHALL contain pipelineable command output records only internally, and the public awaited output SHALL expose stdout/stderr using Bun-like output objects rather than a bespoke result-wrapper method.
 
-#### Scenario: Successful command returns stdout without stderr
+#### Scenario: Successful command await returns stdout without stderr
 - **WHEN** a caller runs a command that succeeds without diagnostics
-- **THEN** the shell API returns stdout records for the command output
+- **THEN** awaiting the command returns an output object with separate `stdout`, `stderr`, and `exitCode`
 - **AND** stderr is empty
 - **AND** `exitCode` is `0`
 
-#### Scenario: Diagnostic command returns stderr without polluting stdout
+#### Scenario: Diagnostic command throws with stderr without polluting stdout
 - **WHEN** a caller runs a command that fails with a formatted diagnostic
-- **THEN** the shell API returns the diagnostic text in stderr
+- **THEN** awaiting the command throws a `ShellError`-like error that exposes the diagnostic text in stderr
 - **AND** stdout does not contain that diagnostic as ordinary pipeline output
 - **AND** `exitCode` is the command's deterministic non-zero exit code
 
-### Requirement: Shell convenience helpers make channel intent explicit
-The shell API SHALL provide convenience helpers whose names make stdout vs stderr access explicit, and SHALL expose the command's completion state as `exitCode` in programmatic result objects.
+### Requirement: Shell syntax remains close to Bun.$
+The shell API SHALL avoid public helper methods that Bun.$ does not provide when an equivalent Bun-style syntax exists.
 
-#### Scenario: Caller retrieves stdout and stderr separately
-- **WHEN** a caller requests stdout text and stderr text for one command invocation
-- **THEN** the API provides separate stdout-only and stderr-only access paths
-- **AND** retrieving one channel does not implicitly merge in the other
+#### Scenario: Caller inspects completion state directly from awaited output
+- **WHEN** a caller awaits a successful command
+- **THEN** the resolved output includes an `exitCode` field
+- **AND** the caller does not need a separate `result()` method to inspect it
 
-#### Scenario: Caller inspects exit code directly
-- **WHEN** a caller requests structured command output
-- **THEN** the result includes an `exitCode` field
-- **AND** the caller does not need to infer completion state from combined output text
+#### Scenario: Caller reads stdout via Bun-style helpers
+- **WHEN** a caller requests `text()`, `json()`, or `lines()`
+- **THEN** those helpers read stdout only
+- **AND** stderr is accessed through the awaited output object or thrown error, not through bespoke public methods like `stderrLines()`
+
+#### Scenario: Caller suppresses throwing for non-zero exits
+- **WHEN** a caller opts into non-throwing execution
+- **THEN** a non-zero command resolves with an output object instead of throwing
+- **AND** the output still exposes `stdout`, `stderr`, and `exitCode`
