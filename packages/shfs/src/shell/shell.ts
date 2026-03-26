@@ -7,12 +7,14 @@ import {
 
 import { collect } from '../consumer/consumer';
 import {
-	diagnosticsToLineRecords,
 	isShellDiagnosticError,
+	writeDiagnosticsToStderr,
 } from '../diagnostics';
 import { type ExecuteResult, execute } from '../execute/execute';
 import type { FS } from '../fs/fs';
+import type { ShellCommandResult } from '../output-channels';
 import { formatRecord, type Record } from '../record';
+import { formatStderr } from '../stderr';
 import { lazy } from '../util/lazy';
 
 const ROOT_DIRECTORY = '/';
@@ -28,8 +30,13 @@ export interface ShellCommand {
 	json(): Promise<unknown[]>;
 	lines(): Promise<string[]>;
 	raw(): Promise<Record[]>;
+	result(): Promise<ShellCommandResult>;
+	stderrLines(): Promise<string[]>;
+	stderrText(): Promise<string>;
 	stdout(): Promise<void>;
 	text(): Promise<string>;
+	stdoutLines(): Promise<string[]>;
+	stdoutText(): Promise<string>;
 }
 
 function normalizeAbsolutePath(path: string): string {
@@ -61,7 +68,7 @@ function normalizeCwd(cwd: string): string {
 	return trimmed === '' ? ROOT_DIRECTORY : trimmed;
 }
 
-async function collectRecords(result: ExecuteResult): Promise<Record[]> {
+async function collectStdoutRecords(result: ExecuteResult): Promise<Record[]> {
 	if (result.kind === 'sink') {
 		await result.value;
 		return [];
@@ -96,20 +103,32 @@ export class Shell {
 		const source = String.raw(strings, ...exprs);
 		const fs = this.fs;
 		let cwdOverride: string | undefined;
-		const runWithContext = async (): Promise<Record[]> => {
+		const runWithContext = async (): Promise<ShellCommandResult> => {
 			const commandStartCwd = normalizeCwd(
 				cwdOverride ?? this.currentCwd
 			);
 			const context = {
 				cwd: commandStartCwd,
 				status: this.currentStatus,
+				stderr: [] as string[],
 				globalVars: this.globalVars,
 				localVars: new Map<string, string>(),
 			};
 			try {
-				return await collectRecords(execute(ir(), fs, context));
+				return {
+					stdout: await collectStdoutRecords(
+						execute(ir(), fs, context)
+					),
+					stderr: [...context.stderr],
+					exitCode: context.status,
+				};
 			} catch (error) {
-				return handleDiagnosticFailure(error, context);
+				handleDiagnosticFailure(error, context);
+				return {
+					stdout: [],
+					stderr: [...context.stderr],
+					exitCode: context.status ?? 1,
+				};
 			} finally {
 				this.currentStatus = context.status ?? this.currentStatus;
 				if (
@@ -121,39 +140,9 @@ export class Shell {
 			}
 		};
 		const runStdoutWithContext = async (): Promise<void> => {
-			const commandStartCwd = normalizeCwd(
-				cwdOverride ?? this.currentCwd
-			);
-			const context = {
-				cwd: commandStartCwd,
-				status: this.currentStatus,
-				globalVars: this.globalVars,
-				localVars: new Map<string, string>(),
-			};
-			try {
-				const result = execute(ir(), fs, context);
-				if (result.kind === 'sink') {
-					await result.value;
-					return;
-				}
-				for await (const r of result.value) {
-					if (r.kind === 'line') {
-						process.stdout.write(`${r.text}\n`);
-					}
-				}
-			} catch (error) {
-				const records = handleDiagnosticFailure(error, context);
-				for (const record of records) {
-					process.stdout.write(`${record.text}\n`);
-				}
-			} finally {
-				this.currentStatus = context.status ?? this.currentStatus;
-				if (
-					cwdOverride === undefined ||
-					context.cwd !== commandStartCwd
-				) {
-					this.currentCwd = context.cwd;
-				}
+			const result = await runWithContext();
+			for (const record of result.stdout) {
+				process.stdout.write(`${formatRecord(record)}\n`);
 			}
 		};
 
@@ -169,30 +158,55 @@ export class Shell {
 			},
 
 			async json(): Promise<unknown[]> {
-				const records = await runWithContext();
-				return records
+				const result = await runWithContext();
+				return result.stdout
 					.filter((r) => r.kind === 'json')
 					.map((r) => r.value);
 			},
 
 			async lines(): Promise<string[]> {
-				const records = await runWithContext();
-				return records
-					.filter((r) => r.kind === 'line')
-					.map((r) => r.text);
+				return await command.stdoutLines();
 			},
 
 			async raw(): Promise<Record[]> {
+				const result = await runWithContext();
+				return [...result.stdout];
+			},
+
+			async result(): Promise<ShellCommandResult> {
 				return await runWithContext();
+			},
+
+			async stderrLines(): Promise<string[]> {
+				const result = await runWithContext();
+				return [...result.stderr];
+			},
+
+			async stderrText(): Promise<string> {
+				const result = await runWithContext();
+				return formatStderr(result.stderr);
 			},
 
 			async stdout(): Promise<void> {
 				await runStdoutWithContext();
 			},
 
+			async stdoutLines(): Promise<string[]> {
+				const result = await runWithContext();
+				return result.stdout
+					.filter((r) => r.kind === 'line')
+					.map((r) => r.text);
+			},
+
 			async text(): Promise<string> {
-				const records = await runWithContext();
-				return records.map((record) => formatRecord(record)).join('\n');
+				return await command.stdoutText();
+			},
+
+			async stdoutText(): Promise<string> {
+				const result = await runWithContext();
+				return result.stdout
+					.map((record) => formatRecord(record))
+					.join('\n');
 			},
 		};
 
@@ -204,15 +218,18 @@ function handleDiagnosticFailure(
 	error: unknown,
 	context: {
 		status?: number;
+		stderr: string[];
 	}
-): Record[] {
+): void {
 	if (error instanceof ParseSyntaxError) {
 		context.status = 1;
-		return diagnosticsToLineRecords([error.diagnostic]);
+		writeDiagnosticsToStderr(context, [error.diagnostic]);
+		return;
 	}
 	if (isShellDiagnosticError(error)) {
-		context.status = error.status;
-		return diagnosticsToLineRecords(error.diagnostics);
+		context.status = error.exitCode;
+		writeDiagnosticsToStderr(context, error.diagnostics);
+		return;
 	}
 	context.status = 1;
 	throw error;

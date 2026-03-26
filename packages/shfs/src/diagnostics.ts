@@ -1,16 +1,16 @@
 import type { DiagnosticLocation, ShellDiagnostic } from '@shfs/compiler';
 
-import type { LineRecord } from './record';
+import { appendStderrLines, type StderrSink } from './stderr';
 
 const FIRST_ARGUMENT_NUMBER = 1;
 
 export class ShellDiagnosticError extends Error {
 	readonly diagnostics: readonly ShellDiagnostic[];
-	readonly status: number;
+	readonly exitCode: number;
 
 	constructor(
 		diagnostics: readonly ShellDiagnostic[],
-		status = statusForDiagnostics(diagnostics)
+		exitCode = exitCodeForDiagnostics(diagnostics)
 	) {
 		super(
 			diagnostics
@@ -19,18 +19,22 @@ export class ShellDiagnosticError extends Error {
 		);
 		this.name = 'ShellDiagnosticError';
 		this.diagnostics = diagnostics;
-		this.status = status;
+		this.exitCode = exitCode;
+	}
+
+	get status(): number {
+		return this.exitCode;
 	}
 }
 
 export function createDiagnosticError(
 	diagnostics: readonly ShellDiagnostic[] | ShellDiagnostic,
-	status?: number
+	exitCode?: number
 ): ShellDiagnosticError {
 	const normalizedDiagnostics = Array.isArray(diagnostics)
 		? diagnostics
 		: [diagnostics];
-	return new ShellDiagnosticError(normalizedDiagnostics, status);
+	return new ShellDiagnosticError(normalizedDiagnostics, exitCode);
 }
 
 export function formatDiagnostic(diagnostic: ShellDiagnostic): string {
@@ -45,13 +49,17 @@ export function formatDiagnostics(
 	return diagnostics.map((diagnostic) => formatDiagnostic(diagnostic));
 }
 
-export function diagnosticsToLineRecords(
+export function diagnosticsToStderrLines(
 	diagnostics: readonly ShellDiagnostic[]
-): LineRecord[] {
-	return formatDiagnostics(diagnostics).map((text) => ({
-		kind: 'line',
-		text,
-	}));
+): string[] {
+	return formatDiagnostics(diagnostics);
+}
+
+export function writeDiagnosticsToStderr(
+	context: StderrSink,
+	diagnostics: readonly ShellDiagnostic[]
+): void {
+	appendStderrLines(context, diagnosticsToStderrLines(diagnostics));
 }
 
 export function isShellDiagnosticError(
@@ -60,18 +68,20 @@ export function isShellDiagnosticError(
 	return error instanceof ShellDiagnosticError;
 }
 
-export function statusForDiagnostics(
+export function exitCodeForDiagnostics(
 	diagnostics: readonly ShellDiagnostic[]
 ): number {
-	let status = 0;
+	let exitCode = 0;
 	for (const diagnostic of diagnostics) {
 		if (diagnostic.severity !== 'error') {
 			continue;
 		}
-		status = Math.max(status, statusForDiagnostic(diagnostic));
+		exitCode = Math.max(exitCode, exitCodeForDiagnostic(diagnostic));
 	}
-	return status;
+	return exitCode;
 }
+
+export const statusForDiagnostics = exitCodeForDiagnostics;
 
 function formatLocation(location: DiagnosticLocation): string {
 	const segments: string[] = [];
@@ -94,7 +104,7 @@ function formatLocation(location: DiagnosticLocation): string {
 	return segments.join(' ');
 }
 
-function statusForDiagnostic(diagnostic: ShellDiagnostic): number {
+function exitCodeForDiagnostic(diagnostic: ShellDiagnostic): number {
 	if (
 		diagnostic.phase === 'compile' &&
 		diagnostic.location.command === 'grep'

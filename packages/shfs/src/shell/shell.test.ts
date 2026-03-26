@@ -91,13 +91,32 @@ test('shell formats syntax, usage, and expansion failures through one diagnostic
 	await fs.mkdir('/workspace/b', true);
 	const shell = new Shell(fs, { cwd: '/workspace' });
 
-	const syntax = await shell.$`echo )`.text();
-	const usage = await shell.$`grep -e`.text();
-	const expansion = await shell.$`echo hello > *`.text();
+	const syntax = await shell.$`echo )`.stderrText();
+	const usage = await shell.$`grep -e`.stderrText();
+	const expansion = await shell.$`echo hello > *`.stderrText();
 
 	expect(syntax).toContain('error[parse:unexpected-token]');
 	expect(usage).toContain('error[compile:missing-value]');
 	expect(expansion).toContain('error[expansion:invalid-path-count]');
+});
+
+test('shell command results expose explicit stdout, stderr, and exitCode channels', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace/a', true);
+	await fs.mkdir('/workspace/b', true);
+	const shell = new Shell(fs, { cwd: '/workspace' });
+
+	const success = await shell.$`pwd`.result();
+	expect(success.stdout).toHaveLength(1);
+	expect(success.stderr).toEqual([]);
+	expect(success.exitCode).toBe(0);
+
+	const failure = await shell.$`echo hello > *`.result();
+	expect(failure.stdout).toEqual([]);
+	expect(failure.stderr.join('\n')).toContain(
+		'error[expansion:invalid-path-count]'
+	);
+	expect(failure.exitCode).toBe(1);
 });
 
 test('shell preserves deterministic non-zero status for diagnostics', async () => {

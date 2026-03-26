@@ -12,7 +12,7 @@ import {
 import picomatch from 'picomatch';
 
 import type { BuiltinContext } from '../../builtin/types';
-import { formatDiagnostics, statusForDiagnostics } from '../../diagnostics';
+import { exitCodeForDiagnostics, formatDiagnostics } from '../../diagnostics';
 import {
 	evaluateExpandedPathWord,
 	evaluateExpandedWord,
@@ -81,8 +81,9 @@ interface RunGrepCommandOptions {
 }
 
 export interface RunGrepCommandResult {
-	lines: string[];
-	status: number;
+	stdout: string[];
+	stderr: string[];
+	exitCode: number;
 }
 
 interface FileSearchResult {
@@ -120,7 +121,7 @@ export async function runGrepCommand(
 	try {
 		return await runGrepCommandInner(options);
 	} catch {
-		return { lines: [], status: 2 };
+		return { stdout: [], stderr: [], exitCode: 2 };
 	}
 }
 
@@ -130,17 +131,19 @@ async function runGrepCommandInner(
 	const parsed = options.parsed;
 	if (parsed.options.help) {
 		return {
-			lines: [
+			stdout: [
 				'Usage: grep [OPTION]... PATTERNS [FILE]...',
 				'Search for PATTERNS in each FILE.',
 			],
-			status: 0,
+			stderr: [],
+			exitCode: 0,
 		};
 	}
 	if (parsed.options.version) {
 		return {
-			lines: ['grep (shfs) 0.1'],
-			status: 0,
+			stdout: ['grep (shfs) 0.1'],
+			stderr: [],
+			exitCode: 0,
 		};
 	}
 
@@ -148,8 +151,9 @@ async function runGrepCommandInner(
 		parsed.diagnostics.some((diagnostic) => diagnostic.severity === 'error')
 	) {
 		return {
-			lines: formatDiagnostics(parsed.diagnostics),
-			status: statusForDiagnostics(parsed.diagnostics),
+			stdout: [],
+			stderr: formatDiagnostics(parsed.diagnostics),
+			exitCode: exitCodeForDiagnostics(parsed.diagnostics),
 		};
 	}
 
@@ -161,7 +165,7 @@ async function runGrepCommandInner(
 	);
 	hadError ||= normalized.hadError;
 	if (normalized.patterns.length === 0) {
-		return { lines: [], status: hadError ? 2 : 1 };
+		return { stdout: [], stderr: [], exitCode: hadError ? 2 : 1 };
 	}
 
 	const inputRedirectPath = await resolveRedirectPath(
@@ -191,7 +195,7 @@ async function runGrepCommandInner(
 		) &&
 		!allowsSameInputOutputPath(parsed.options)
 	) {
-		return { lines: [], status: 2 };
+		return { stdout: [], stderr: [], exitCode: 2 };
 	}
 
 	const matcherBuild = buildMatchers(normalized.patterns, parsed.options);
@@ -319,18 +323,27 @@ async function runGrepCommandInner(
 	);
 	if (corpusOverride !== null) {
 		return {
-			lines,
-			status: corpusOverride,
+			stdout: lines,
+			stderr: [],
+			exitCode: corpusOverride,
 		};
 	}
 
 	if (parsed.options.quiet && anySelected) {
-		return { lines: [], status: 0 };
+		return { stdout: [], stderr: [], exitCode: 0 };
 	}
 	if (hadError) {
-		return { lines, status: 2 };
+		return {
+			stdout: lines,
+			stderr: [],
+			exitCode: 2,
+		};
 	}
-	return { lines, status: anySelected ? 0 : 1 };
+	return {
+		stdout: lines,
+		stderr: [],
+		exitCode: anySelected ? 0 : 1,
+	};
 }
 
 async function normalizeInvocation(

@@ -2,12 +2,14 @@ import { beforeEach } from 'bun:test';
 import { dirname } from 'node:path';
 
 import { MemoryFS } from '../../../fs/memory';
+import { formatRecord } from '../../../record';
 import { Shell } from '../../../shell/shell';
-
-const STATUS_PREFIX = '__SHFS_STATUS__=';
+import { formatStderr } from '../../../stderr';
 
 export interface CommandResult {
 	output: string;
+	stderr: string;
+	exitCode: number;
 	status: number;
 }
 
@@ -34,35 +36,24 @@ export function createFindHarness(): FindHarness {
 		return await shell.$`${command}`.text();
 	};
 
-	const parseStatus = (text: string): CommandResult => {
-		const lines = text === '' ? [] : text.split('\n');
-		const marker = lines.at(-1);
-		if (marker === undefined || !marker.startsWith(STATUS_PREFIX)) {
-			throw new Error(
-				`Expected trailing status marker in output: ${JSON.stringify(text)}`
-			);
-		}
-
-		const statusText = marker.slice(STATUS_PREFIX.length);
-		const status = Number.parseInt(statusText, 10);
-		if (Number.isNaN(status)) {
-			throw new Error(`Invalid status marker: ${marker}`);
-		}
-
+	const toCommandResult = async (command: string): Promise<CommandResult> => {
+		const result = await shell.$`${command}`.result();
 		return {
-			output: lines.slice(0, -1).join('\n'),
-			status,
+			output: result.stdout
+				.map((record) => formatRecord(record))
+				.join('\n'),
+			stderr: formatStderr(result.stderr),
+			exitCode: result.exitCode,
+			status: result.exitCode,
 		};
 	};
 
 	const runWithStatus = async (command: string): Promise<CommandResult> => {
-		const text = await run(`${command}; echo "${STATUS_PREFIX}$status"`);
-		return parseStatus(text);
+		return await toCommandResult(command);
 	};
 
 	const runWithStderr = async (command: string): Promise<CommandResult> => {
-		const text = await run(`${command}; echo "${STATUS_PREFIX}$status"`);
-		return parseStatus(text);
+		return await toCommandResult(command);
 	};
 
 	const ensureDir = async (path: string): Promise<void> => {

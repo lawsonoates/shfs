@@ -18,7 +18,7 @@ test('type_list: empty -type argument is rejected', async () => {
 		"find /work/dir -mindepth 1 -type ''"
 	);
 	expect(result.status).toBe(1);
-	expect(result.output).toContain(
+	expect(result.stderr).toContain(
 		'Arguments to -type should contain at least one letter'
 	);
 });
@@ -30,7 +30,7 @@ test('type_list: non-separated type arguments (e.g. fd) are rejected', async () 
 		'find /work/dir -mindepth 1 -type fd'
 	);
 	expect(result.status).toBe(1);
-	expect(result.output).toContain(
+	expect(result.stderr).toContain(
 		'Must separate multiple arguments to -type'
 	);
 });
@@ -42,7 +42,7 @@ test('type_list: trailing comma in type list is rejected', async () => {
 		"find /work/dir -mindepth 1 -type 'f,'"
 	);
 	expect(result.status).toBe(1);
-	expect(result.output).toContain(
+	expect(result.stderr).toContain(
 		'Last file type in list argument to -type is missing'
 	);
 });
@@ -54,7 +54,7 @@ test('type_list: duplicate entries in type list are rejected', async () => {
 		"find /work/dir -mindepth 1 -type 'f,f'"
 	);
 	expect(result.status).toBe(1);
-	expect(result.output).toContain('Duplicate file type');
+	expect(result.stderr).toContain('Duplicate file type');
 });
 
 // --- Positive tests: -type with in-scope file types ---

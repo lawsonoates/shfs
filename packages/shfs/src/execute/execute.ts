@@ -47,6 +47,7 @@ export type { ExecuteResult } from './redirection';
 export interface ExecuteContext {
 	cwd: string;
 	status?: number;
+	stderr?: string[];
 	globalVars?: Map<string, string>;
 	localVars?: Map<string, string>;
 }
@@ -439,8 +440,9 @@ function executeStreamStep(
 					redirections: step.redirections,
 					resolvedOutputRedirectPath,
 				});
-				context.status = result.status;
-				for (const text of result.lines) {
+				context.status = result.exitCode;
+				context.stderr.push(...result.stderr);
+				for (const text of result.stdout) {
 					yield {
 						kind: 'line',
 						text,
@@ -756,6 +758,7 @@ function resolveLsPath(path: string, cwd: string): string {
 function normalizeContext(context: ExecuteContext): NormalizedExecuteContext {
 	context.cwd = normalizeCwd(context.cwd);
 	context.status ??= 0;
+	context.stderr ??= [];
 	context.globalVars ??= new Map<string, string>();
 	context.localVars ??= new Map<string, string>();
 	return context as NormalizedExecuteContext;

@@ -7,9 +7,9 @@ import { beforeEach, expect, test } from 'bun:test';
 
 import { MemoryFS } from '../../fs/memory';
 import { Shell } from '../../shell/shell';
+import { formatStderr } from '../../stderr';
 
 let shell!: Shell;
-const STATUS_PREFIX = '__SHFS_STATUS__=';
 const WHITESPACE_REGEX = /\s+/;
 
 beforeEach(() => {
@@ -22,21 +22,18 @@ async function run(command: string): Promise<string> {
 
 async function runWithStatus(
 	command: string
-): Promise<{ output: string; status: number }> {
-	const output = await run(command);
-	const marker = await run(`echo "${STATUS_PREFIX}$status"`);
-	if (!marker.startsWith(STATUS_PREFIX)) {
-		throw new Error(`Invalid status marker: ${marker}`);
-	}
-
-	const status = Number.parseInt(marker.slice(STATUS_PREFIX.length), 10);
-	if (Number.isNaN(status)) {
-		throw new Error(`Invalid status marker: ${marker}`);
-	}
-
+): Promise<{ output: string; stderr: string; status: number }> {
+	const result = await shell.$`${command}`.result();
 	return {
-		output,
-		status,
+		output: result.stdout
+			.map((record) =>
+				record.kind === 'line'
+					? record.text
+					: (record.displayPath ?? record.path)
+			)
+			.join('\n'),
+		stderr: formatStderr(result.stderr),
+		status: result.exitCode,
 	};
 }
 
@@ -161,13 +158,13 @@ test('glob subset (boundary): unmatched wildcard reports deterministic error', a
 	await run('cd /workspace');
 
 	const lsResult = await runWithStatus('ls missing*');
-	expect(lsResult.output).toContain('error[expansion:no-match]');
-	expect(lsResult.output).toContain('missing*');
+	expect(lsResult.stderr).toContain('error[expansion:no-match]');
+	expect(lsResult.stderr).toContain('missing*');
 	expect(lsResult.status).toBe(1);
 
 	const touchResult = await runWithStatus('touch missing*');
-	expect(touchResult.output).toContain('error[expansion:no-match]');
-	expect(touchResult.output).toContain('missing*');
+	expect(touchResult.stderr).toContain('error[expansion:no-match]');
+	expect(touchResult.stderr).toContain('missing*');
 	expect(touchResult.status).toBe(1);
 });
 
@@ -177,8 +174,8 @@ test('glob subset (boundary): single-target path commands enforce post-expansion
 	await run('touch /workspace/file.txt');
 
 	const cdResult = await runWithStatus('cd /workspace/dir-*');
-	expect(cdResult.output).toContain('error[expansion:invalid-path-count]');
-	expect(cdResult.output).toContain(
+	expect(cdResult.stderr).toContain('error[expansion:invalid-path-count]');
+	expect(cdResult.stderr).toContain(
 		'expected exactly 1 path after expansion'
 	);
 	expect(cdResult.status).toBe(1);
@@ -186,8 +183,8 @@ test('glob subset (boundary): single-target path commands enforce post-expansion
 	const cpResult = await runWithStatus(
 		'cp /workspace/file.txt /workspace/dir-*'
 	);
-	expect(cpResult.output).toContain('error[expansion:invalid-path-count]');
-	expect(cpResult.output).toContain(
+	expect(cpResult.stderr).toContain('error[expansion:invalid-path-count]');
+	expect(cpResult.stderr).toContain(
 		'destination must expand to exactly 1 path'
 	);
 	expect(cpResult.status).toBe(1);
@@ -195,8 +192,8 @@ test('glob subset (boundary): single-target path commands enforce post-expansion
 	const mvResult = await runWithStatus(
 		'mv /workspace/file.txt /workspace/dir-*'
 	);
-	expect(mvResult.output).toContain('error[expansion:invalid-path-count]');
-	expect(mvResult.output).toContain(
+	expect(mvResult.stderr).toContain('error[expansion:invalid-path-count]');
+	expect(mvResult.stderr).toContain(
 		'destination must expand to exactly 1 path'
 	);
 	expect(mvResult.status).toBe(1);
@@ -208,8 +205,8 @@ test('glob subset (boundary): redirection targets enforce shared single-target e
 	await run('cd /workspace');
 
 	const result = await runWithStatus('echo hi > dir-*');
-	expect(result.output).toContain('error[expansion:invalid-path-count]');
-	expect(result.output).toContain(
+	expect(result.stderr).toContain('error[expansion:invalid-path-count]');
+	expect(result.stderr).toContain(
 		'redirection target must expand to exactly 1 path'
 	);
 	expect(result.status).toBe(1);
@@ -220,8 +217,8 @@ test('glob subset (boundary): unmatched redirection globs report deterministic f
 	await run('cd /workspace');
 
 	const result = await runWithStatus('echo hi > missing*');
-	expect(result.output).toContain('error[expansion:no-match]');
-	expect(result.output).toContain('missing*');
+	expect(result.stderr).toContain('error[expansion:no-match]');
+	expect(result.stderr).toContain('missing*');
 	expect(result.status).toBe(1);
 });
 
@@ -244,14 +241,14 @@ test('glob subset (boundary): multi-target path commands consume expanded glob a
 
 	await run('rm /workspace/moved/src-*.txt');
 	const echoResult = await runWithStatus('echo /workspace/moved/src-*.txt');
-	expect(echoResult.output).toContain('error[expansion:no-match]');
-	expect(echoResult.output).toContain('/workspace/moved/src-*.txt');
+	expect(echoResult.stderr).toContain('error[expansion:no-match]');
+	expect(echoResult.stderr).toContain('/workspace/moved/src-*.txt');
 	expect(echoResult.status).toBe(1);
 
 	await run('mkdir /workspace/group-a /workspace/group-b');
 	const mkdirResult = await runWithStatus('mkdir /workspace/group-*/nested');
-	expect(mkdirResult.output).toContain('error[expansion:no-match]');
-	expect(mkdirResult.output).toContain('/workspace/group-*/nested');
+	expect(mkdirResult.stderr).toContain('error[expansion:no-match]');
+	expect(mkdirResult.stderr).toContain('/workspace/group-*/nested');
 	expect(mkdirResult.status).toBe(1);
 	await run('touch /workspace/group-a/note.txt /workspace/group-b/note.txt');
 	await run('touch /workspace/group-*/note.txt');
