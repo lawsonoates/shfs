@@ -5,11 +5,14 @@ import {
 	expandedWordHasCommandSub,
 	expandedWordParts,
 	expandedWordToString,
+	type GrepArgsIR,
+	type GrepOptionsIR,
 	type RedirectionIR,
 } from '@shfs/compiler';
 import picomatch from 'picomatch';
 
 import type { BuiltinContext } from '../../builtin/types';
+import { formatDiagnostics, statusForDiagnostics } from '../../diagnostics';
 import {
 	evaluateExpandedPathWord,
 	evaluateExpandedWord,
@@ -22,51 +25,6 @@ import type { Record as ShellRecord } from '../../record';
 import type { Stream } from '../../stream';
 
 type RegexMode = 'bre' | 'ere' | 'fixed' | 'pcre';
-
-interface GrepOptionsIR {
-	afterContext: number;
-	beforeContext: number;
-	binaryWithoutMatch: boolean;
-	byteOffset: boolean;
-	countOnly: boolean;
-	directories: 'read' | 'skip';
-	excludeDir: string[];
-	excludeFiles: string[];
-	filenameMode: 'always' | 'default' | 'never';
-	help: boolean;
-	ignoreCase: boolean;
-	includeFiles: string[];
-	invertMatch: boolean;
-	lineNumber: boolean;
-	lineRegexp: boolean;
-	listFilesWithMatches: boolean;
-	listFilesWithoutMatch: boolean;
-	maxCount: number | null;
-	mode: RegexMode;
-	noMessages: boolean;
-	nullData: boolean;
-	onlyMatching: boolean;
-	quiet: boolean;
-	recursive: boolean;
-	textMode: boolean;
-	version: boolean;
-	wordRegexp: boolean;
-}
-
-interface GrepArgsIR {
-	diagnostics: ReadonlyArray<{
-		code: 'invalid-value' | 'missing-value' | 'unknown-option';
-		message: string;
-		token: string;
-		tokenIndex: number;
-	}>;
-	explicitPatterns: ExpandedWord[];
-	fileOperands: ExpandedWord[];
-	noPatternsYet: boolean;
-	options: GrepOptionsIR;
-	patternFiles: ExpandedWord[];
-	usageError: boolean;
-}
 
 interface PatternSpec {
 	text: string;
@@ -186,7 +144,16 @@ async function runGrepCommandInner(
 		};
 	}
 
-	let hadError = parsed.usageError;
+	if (
+		parsed.diagnostics.some((diagnostic) => diagnostic.severity === 'error')
+	) {
+		return {
+			lines: formatDiagnostics(parsed.diagnostics),
+			status: statusForDiagnostics(parsed.diagnostics),
+		};
+	}
+
+	let hadError = false;
 	const normalized = await normalizeInvocation(
 		parsed,
 		options.fs,

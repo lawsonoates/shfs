@@ -4,22 +4,34 @@
  * Includes position information for error reporting.
  */
 
+import { createParserDiagnostic, type ShellDiagnostic } from '../diagnostic';
 import type { SourceSpan } from '../lexer/position';
 
 /**
  * Exception thrown when a syntax error is encountered during parsing.
  */
 export class ParseSyntaxError extends Error {
+	readonly diagnostic: ShellDiagnostic;
 	/** The source span where the error occurred */
 	readonly span: SourceSpan;
 	/** Additional context about the error */
 	readonly context?: string;
 
-	constructor(message: string, span: SourceSpan, context?: string) {
-		super(ParseSyntaxError.formatMessage(message, span, context));
+	constructor(
+		message: string,
+		span: SourceSpan,
+		options: {
+			code?: string;
+			context?: string;
+		} = {}
+	) {
+		super(ParseSyntaxError.formatMessage(message, span, options.context));
 		this.name = 'ParseSyntaxError';
+		this.diagnostic = createParserDiagnostic(message, span, {
+			code: options.code,
+		});
 		this.span = span;
-		this.context = context;
+		this.context = options.context;
 
 		// Maintain proper stack trace in V8 environments
 		if (Error.captureStackTrace) {
@@ -60,7 +72,9 @@ export class ParseSyntaxError extends Error {
  */
 export class UnexpectedEOFError extends ParseSyntaxError {
 	constructor(expected: string, span: SourceSpan) {
-		super(`Unexpected end of input, expected ${expected}`, span);
+		super(`Unexpected end of input, expected ${expected}`, span, {
+			code: 'unexpected-eof',
+		});
 		this.name = 'UnexpectedEOFError';
 	}
 }
@@ -73,7 +87,9 @@ export class UnexpectedTokenError extends ParseSyntaxError {
 	readonly expected: string;
 
 	constructor(found: string, expected: string, span: SourceSpan) {
-		super(`Unexpected token '${found}', expected ${expected}`, span);
+		super(`Unexpected token '${found}', expected ${expected}`, span, {
+			code: 'unexpected-token',
+		});
 		this.name = 'UnexpectedTokenError';
 		this.found = found;
 		this.expected = expected;
@@ -85,7 +101,9 @@ export class UnexpectedTokenError extends ParseSyntaxError {
  */
 export class UnmatchedParenError extends ParseSyntaxError {
 	constructor(span: SourceSpan) {
-		super('Unmatched parenthesis', span);
+		super('Unmatched parenthesis', span, {
+			code: 'unmatched-parenthesis',
+		});
 		this.name = 'UnmatchedParenError';
 	}
 }
@@ -99,7 +117,10 @@ export class UnterminatedQuoteError extends ParseSyntaxError {
 	constructor(quoteChar: string, span: SourceSpan) {
 		super(
 			`Unterminated ${quoteChar === '"' ? 'double' : 'single'} quote`,
-			span
+			span,
+			{
+				code: 'unterminated-quote',
+			}
 		);
 		this.name = 'UnterminatedQuoteError';
 		this.quoteChar = quoteChar;

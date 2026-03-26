@@ -1,3 +1,4 @@
+import { createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
 	expandedWordToString,
@@ -20,6 +21,7 @@ const CONTEXT_SHORTHAND_REGEX = /^-[0-9]+$/;
 const UNKNOWN_FLAG_PREFIX = 'Unknown flag:';
 
 type ParsedGrepWords = ParseWordsResult<ExpandedWord>;
+type GrepDiagnosticCode = 'invalid-value' | 'missing-value' | 'unknown-option';
 
 interface ValueFlagOccurrence {
 	order: number;
@@ -677,15 +679,13 @@ function splitLongOption(token: string): string {
 }
 
 function makeDiagnostic(
-	code: GrepDiagnosticIR['code'],
+	code: GrepDiagnosticCode,
 	token: string,
 	tokenIndex: number,
 	message: string
 ): GrepDiagnosticIR {
-	return {
-		code,
-		message,
+	return createCommandDiagnostic('grep', code, message, {
 		token,
 		tokenIndex,
-	};
+	});
 }

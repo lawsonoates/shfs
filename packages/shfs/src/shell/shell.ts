@@ -1,6 +1,15 @@
-import { compile, parse, type ScriptIR } from '@shfs/compiler';
+import {
+	compile,
+	ParseSyntaxError,
+	parse,
+	type ScriptIR,
+} from '@shfs/compiler';
 
 import { collect } from '../consumer/consumer';
+import {
+	diagnosticsToLineRecords,
+	isShellDiagnosticError,
+} from '../diagnostics';
 import { type ExecuteResult, execute } from '../execute/execute';
 import type { FS } from '../fs/fs';
 import { formatRecord, type Record } from '../record';
@@ -99,6 +108,8 @@ export class Shell {
 			};
 			try {
 				return await collectRecords(execute(ir(), fs, context));
+			} catch (error) {
+				return handleDiagnosticFailure(error, context);
 			} finally {
 				this.currentStatus = context.status ?? this.currentStatus;
 				if (
@@ -129,6 +140,11 @@ export class Shell {
 					if (r.kind === 'line') {
 						process.stdout.write(`${r.text}\n`);
 					}
+				}
+			} catch (error) {
+				const records = handleDiagnosticFailure(error, context);
+				for (const record of records) {
+					process.stdout.write(`${record.text}\n`);
 				}
 			} finally {
 				this.currentStatus = context.status ?? this.currentStatus;
@@ -182,4 +198,22 @@ export class Shell {
 
 		return command;
 	}
+}
+
+function handleDiagnosticFailure(
+	error: unknown,
+	context: {
+		status?: number;
+	}
+): Record[] {
+	if (error instanceof ParseSyntaxError) {
+		context.status = 1;
+		return diagnosticsToLineRecords([error.diagnostic]);
+	}
+	if (isShellDiagnosticError(error)) {
+		context.status = error.status;
+		return diagnosticsToLineRecords(error.diagnostics);
+	}
+	context.status = 1;
+	throw error;
 }

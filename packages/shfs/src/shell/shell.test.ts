@@ -84,3 +84,34 @@ test('shell executes semicolon-separated statements in one invocation', async ()
 
 	expect(output).toBe('/workspace/project');
 });
+
+test('shell formats syntax, usage, and expansion failures through one diagnostic style', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace/a', true);
+	await fs.mkdir('/workspace/b', true);
+	const shell = new Shell(fs, { cwd: '/workspace' });
+
+	const syntax = await shell.$`echo )`.text();
+	const usage = await shell.$`grep -e`.text();
+	const expansion = await shell.$`echo hello > *`.text();
+
+	expect(syntax).toContain('error[parse:unexpected-token]');
+	expect(usage).toContain('error[compile:missing-value]');
+	expect(expansion).toContain('error[expansion:invalid-path-count]');
+});
+
+test('shell preserves deterministic non-zero status for diagnostics', async () => {
+	const fs = new MemoryFS();
+	await fs.mkdir('/workspace/a', true);
+	await fs.mkdir('/workspace/b', true);
+	const shell = new Shell(fs, { cwd: '/workspace' });
+
+	await shell.$`echo |`.text();
+	expect(await shell.$`echo $status`.text()).toBe('1');
+
+	await shell.$`grep -e`.text();
+	expect(await shell.$`echo $status`.text()).toBe('2');
+
+	await shell.$`echo hello > *`.text();
+	expect(await shell.$`echo $status`.text()).toBe('1');
+});

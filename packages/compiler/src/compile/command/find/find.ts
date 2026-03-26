@@ -1,3 +1,4 @@
+import { createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
 	expandedWordToString,
@@ -11,6 +12,12 @@ import {
 	type SimpleCommandIR,
 	type StepIR,
 } from '../../../ir';
+
+type FindDiagnosticCode =
+	| 'invalid-value'
+	| 'missing-value'
+	| 'unexpected-operand'
+	| 'unknown-predicate';
 
 const DEFAULT_ACTION: FindActionIR = {
 	explicit: false,
@@ -71,17 +78,15 @@ export function parseFindArgs(argv: ExpandedWord[]): FindArgsIR {
 }
 
 function createDiagnostic(
-	code: FindDiagnosticIR['code'],
+	code: FindDiagnosticCode,
 	token: string,
 	tokenIndex: number,
 	message: string
 ): FindDiagnosticIR {
-	return {
-		code,
-		message,
+	return createCommandDiagnostic('find', code, message, {
 		token,
 		tokenIndex,
-	};
+	});
 }
 
 function createMissingValueDiagnostic(

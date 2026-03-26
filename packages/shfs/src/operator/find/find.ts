@@ -1,11 +1,17 @@
-import type {
-	FindDiagnosticIR,
-	FindPredicateIR,
-	FindStep,
+import {
+	createRuntimeDiagnostic,
+	type FindPredicateIR,
+	type FindStep,
+	hasErrorDiagnostics,
 } from '@shfs/compiler';
 import picomatch from 'picomatch';
 
 import type { BuiltinContext } from '../../builtin/types';
+import {
+	diagnosticsToLineRecords,
+	isShellDiagnosticError,
+	statusForDiagnostics,
+} from '../../diagnostics';
 import {
 	evaluateExpandedPathWord,
 	evaluateExpandedWord,
@@ -52,9 +58,9 @@ export async function* find(
 	context: BuiltinContext,
 	args: FindStep['args']
 ): Stream<ShellRecord> {
-	if (args.usageError) {
-		context.status = 1;
-		yield* diagnosticsToLines(args.diagnostics);
+	if (hasErrorDiagnostics(args.diagnostics)) {
+		context.status = statusForDiagnostics(args.diagnostics);
+		yield* diagnosticsToLineRecords(args.diagnostics);
 		return;
 	}
 
@@ -66,8 +72,8 @@ export async function* find(
 			context
 		);
 	} catch (error) {
-		context.status = 1;
-		yield toErrorLine(error);
+		context.status = diagnosticStatus(error);
+		yield* errorToLines(error);
 		return;
 	}
 
@@ -75,8 +81,8 @@ export async function* find(
 	try {
 		startPaths = await resolveStartPaths(fs, context, args.startPaths);
 	} catch (error) {
-		context.status = 1;
-		yield toErrorLine(error);
+		context.status = diagnosticStatus(error);
+		yield* errorToLines(error);
 		return;
 	}
 
@@ -90,10 +96,16 @@ export async function* find(
 			startStat = await fs.stat(startPath.absolutePath);
 		} catch {
 			state.hadError = true;
-			yield {
-				kind: 'line',
-				text: `find: ${startPath.displayPath}: No such file or directory`,
-			};
+			yield* diagnosticsToLineRecords([
+				createRuntimeDiagnostic(
+					'find',
+					'missing-path',
+					'No such file or directory',
+					{
+						path: startPath.displayPath,
+					}
+				),
+			]);
 			continue;
 		}
 
@@ -138,10 +150,16 @@ async function* walkEntry(
 			childPaths = await readChildren(fs, entry.absolutePath);
 		} catch {
 			state.hadError = true;
-			yield {
-				kind: 'line',
-				text: `find: ${entry.displayPath}: Unable to read directory`,
-			};
+			yield* diagnosticsToLineRecords([
+				createRuntimeDiagnostic(
+					'find',
+					'unreadable-directory',
+					'Unable to read directory',
+					{
+						path: entry.displayPath,
+					}
+				),
+			]);
 			childPaths = [];
 		}
 
@@ -151,10 +169,19 @@ async function* walkEntry(
 				childStat = await fs.stat(childAbsolutePath);
 			} catch {
 				state.hadError = true;
-				yield {
-					kind: 'line',
-					text: `find: ${appendDisplayPath(entry.displayPath, basename(childAbsolutePath))}: No such file or directory`,
-				};
+				yield* diagnosticsToLineRecords([
+					createRuntimeDiagnostic(
+						'find',
+						'missing-path',
+						'No such file or directory',
+						{
+							path: appendDisplayPath(
+								entry.displayPath,
+								basename(childAbsolutePath)
+							),
+						}
+					),
+				]);
 				continue;
 			}
 
@@ -320,21 +347,19 @@ function basename(path: string): string {
 	return normalized.slice(slashIndex + 1);
 }
 
-function diagnosticsToLines(
-	diagnostics: FindDiagnosticIR[]
-): AsyncIterable<LineRecord> {
-	return (async function* (): Stream<LineRecord> {
-		for (const diagnostic of diagnostics) {
-			yield {
-				kind: 'line',
-				text: diagnostic.message,
-			};
-		}
-	})();
+function diagnosticStatus(error: unknown): number {
+	if (isShellDiagnosticError(error)) {
+		return error.status;
+	}
+	return 1;
 }
 
-function toErrorLine(error: unknown): LineRecord {
-	return {
+function* errorToLines(error: unknown): Generator<LineRecord> {
+	if (isShellDiagnosticError(error)) {
+		yield* diagnosticsToLineRecords(error.diagnostics);
+		return;
+	}
+	yield {
 		kind: 'line',
 		text: error instanceof Error ? error.message : String(error),
 	};

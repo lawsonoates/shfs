@@ -212,21 +212,27 @@ export class Parser {
 	 * @param expected What was expected (for error context)
 	 * @throws SyntaxError always
 	 */
-	syntacticError(message: string, expected: string): never {
+	syntacticError(_message: string, expected: string): never {
 		const span = this._currentToken.span;
 
-		this.errorReporter.reportError(message, span);
-
 		if (this._currentToken.kind === TokenKind.EOF) {
+			this.errorReporter.reportError(
+				`Unexpected end of input, expected ${expected}`,
+				span,
+				'unexpected-eof'
+			);
 			throw new UnexpectedEOFError(expected, span);
 		}
 
-		throw new UnexpectedTokenError(
+		const found =
 			this._currentToken.spelling ||
-				Token.kindName(this._currentToken.kind),
-			expected,
-			span
+			Token.kindName(this._currentToken.kind);
+		this.errorReporter.reportError(
+			`Unexpected token '${found}', expected ${expected}`,
+			span,
+			'unexpected-token'
 		);
+		throw new UnexpectedTokenError(found, expected, span);
 	}
 
 	// ─────────────────────────────────────────────────────────
@@ -255,7 +261,10 @@ export class Parser {
 		if (this.substitutionDepth >= Parser.MAX_SUBSTITUTION_DEPTH) {
 			throw new ParseSyntaxError(
 				'Maximum command substitution depth exceeded',
-				this._currentToken.span
+				this._currentToken.span,
+				{
+					code: 'max-substitution-depth',
+				}
 			);
 		}
 
