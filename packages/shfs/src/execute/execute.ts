@@ -33,7 +33,7 @@ import {
 	resolvePathsFromCwd,
 } from './path';
 import { files } from './producers';
-import { toLineStream } from './records';
+import { toFormattedLineStream, toLineStream } from './records';
 import {
 	applyOutputRedirect,
 	hasRedirect,
@@ -480,7 +480,7 @@ function executeStreamStep(
 					return;
 				}
 				if (input) {
-					yield* headLines(step.args.n)(toLineStream(fs, input));
+					yield* headLines(step.args.n)(toFormattedLineStream(input));
 				}
 				context.status = 0;
 			})();
@@ -541,7 +541,7 @@ function executeStreamStep(
 					return;
 				}
 				if (input) {
-					yield* tail(step.args.n)(toLineStream(fs, input));
+					yield* tail(step.args.n)(toFormattedLineStream(input));
 				}
 				context.status = 0;
 			})();

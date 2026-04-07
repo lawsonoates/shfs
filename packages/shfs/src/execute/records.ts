@@ -27,6 +27,28 @@ export async function* toLineStream(
 	}
 }
 
+/**
+ * Converts any ShellRecord stream into LineRecords by formatting each record
+ * as its display text. Unlike `toLineStream`, this does NOT read file contents —
+ * FileRecords are rendered as their path, which is the correct behavior for
+ * line-oriented transducers (tail, head) receiving piped input from commands
+ * like `find` that produce path listings.
+ */
+export async function* toFormattedLineStream(
+	input: Stream<ShellRecord>
+): Stream<LineRecord> {
+	for await (const record of input) {
+		if (record.kind === 'line') {
+			yield record;
+			continue;
+		}
+		yield {
+			kind: 'line',
+			text: formatShellRecord(record),
+		};
+	}
+}
+
 export async function* fileRecordToLines(
 	fs: FS,
 	record: FileRecord
