@@ -15,25 +15,25 @@ const harness = createFindHarness();
 test('opt-numeric-arg (adapted): -maxdepth without argument reports missing argument', async () => {
 	const result = await harness.runWithStderr('find -maxdepth');
 	expect(result.status).toBe(1);
-	expect(result.output).toContain('missing argument');
+	expect(result.stderr).toContain('missing argument');
 });
 
 test('opt-numeric-arg (adapted): -maxdepth with non-numeric argument reports error', async () => {
 	const result = await harness.runWithStderr('find -maxdepth foo');
 	expect(result.status).toBe(1);
-	expect(result.output).toContain('non-numeric argument');
+	expect(result.stderr).toContain('non-numeric argument');
 });
 
 test('opt-numeric-arg (adapted): -mindepth without argument reports missing argument', async () => {
 	const result = await harness.runWithStderr('find -mindepth');
 	expect(result.status).toBe(1);
-	expect(result.output).toContain('missing argument');
+	expect(result.stderr).toContain('missing argument');
 });
 
 test('opt-numeric-arg (adapted): -mindepth with non-numeric argument reports error', async () => {
 	const result = await harness.runWithStderr('find -mindepth foo');
 	expect(result.status).toBe(1);
-	expect(result.output).toContain('non-numeric argument');
+	expect(result.stderr).toContain('non-numeric argument');
 });
 
 // refuse-noop: Verify that find refuses the internal -noop / ---noop option.
@@ -42,13 +42,13 @@ test('opt-numeric-arg (adapted): -mindepth with non-numeric argument reports err
 test('refuse-noop: find -noop is rejected as unknown predicate', async () => {
 	const result = await harness.runWithStderr('find -noop');
 	expect(result.status).toBe(1);
-	expect(result.output).toContain('unknown predicate');
-	expect(result.output).toContain('-noop');
+	expect(result.stderr).toContain('unknown predicate');
+	expect(result.stderr).toContain('-noop');
 });
 
 test('refuse-noop: find ---noop is rejected as unknown predicate', async () => {
 	const result = await harness.runWithStderr('find ---noop');
 	expect(result.status).toBe(1);
-	expect(result.output).toContain('unknown predicate');
-	expect(result.output).toContain('---noop');
+	expect(result.stderr).toContain('unknown predicate');
+	expect(result.stderr).toContain('---noop');
 });

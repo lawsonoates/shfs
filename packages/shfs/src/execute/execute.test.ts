@@ -464,6 +464,47 @@ test('find pipelines matching file records into grep', async () => {
 	expect(lineRecords.map((record) => record.text)).toEqual(['second']);
 });
 
+// Condition: line-oriented commands (tail, head) should see paths from find, not file contents.
+test('find piped to tail outputs paths, not file contents', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/dir/a.txt', 'content-a');
+	fs.setFile('/workspace/dir/b.txt', 'content-b');
+
+	const result = execute(compile(parse('find dir -type f | tail -10')), fs, {
+		cwd: '/workspace',
+	});
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lineRecords = records.filter(
+		(record): record is LineRecord => record.kind === 'line'
+	);
+	const lines = lineRecords.map((record) => record.text);
+	expect(lines).not.toContain('content-a');
+	expect(lines).not.toContain('content-b');
+	expect(lines.sort()).toEqual(['dir/a.txt', 'dir/b.txt']);
+});
+
+test('find piped to head outputs paths, not file contents', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/dir/x.txt', 'some data');
+
+	const result = execute(compile(parse('find dir -type f | head -1')), fs, {
+		cwd: '/workspace',
+	});
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+	const records = await collect<ShellRecord>()(result.value);
+	const lineRecords = records.filter(
+		(record): record is LineRecord => record.kind === 'line'
+	);
+	expect(lineRecords.map((record) => record.text)).toEqual(['dir/x.txt']);
+});
+
 // Condition: read should skip directory records and capture the first file line.
 test('find pipelines file records into read after skipping directories', async () => {
 	const fs = new MemoryFS();

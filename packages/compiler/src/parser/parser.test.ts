@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
-import { parse } from './parser';
+import { Parser, parse } from './parser';
+import { ParseSyntaxError } from './syntax-error';
 
 test('parse supports newline-separated statements', () => {
 	const program = parse('pwd\ncd /tmp');
@@ -144,4 +145,49 @@ test('parse records chain metadata for and/or statements', () => {
 		'and',
 		'or',
 	]);
+});
+
+test('unexpected token syntax failures surface through shared parse diagnostics', () => {
+	const parser = new Parser('echo )');
+
+	try {
+		parser.parse();
+		throw new Error('Expected parse failure');
+	} catch (error) {
+		if (!(error instanceof ParseSyntaxError)) {
+			throw error;
+		}
+
+		expect(error.diagnostic).toMatchObject({
+			code: 'unexpected-token',
+			message: "Unexpected token ')', expected newline or ;",
+			phase: 'parse',
+			severity: 'error',
+		});
+		expect(error.diagnostic.location.span?.start.line).toBe(1);
+		expect(parser.getErrorReporter().getDiagnostics()[0]).toMatchObject({
+			code: 'unexpected-token',
+			phase: 'parse',
+		});
+	}
+});
+
+test('unexpected EOF syntax failures surface through shared parse diagnostics', () => {
+	const parser = new Parser('cat <');
+
+	try {
+		parser.parse();
+		throw new Error('Expected parse failure');
+	} catch (error) {
+		if (!(error instanceof ParseSyntaxError)) {
+			throw error;
+		}
+
+		expect(error.diagnostic).toMatchObject({
+			code: 'unexpected-eof',
+			phase: 'parse',
+			severity: 'error',
+		});
+		expect(error.diagnostic.message).toContain('Unexpected end of input');
+	}
 });

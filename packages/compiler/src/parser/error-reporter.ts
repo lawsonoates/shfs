@@ -4,22 +4,13 @@
  * Collects errors and warnings during parsing for reporting to the user.
  */
 
+import { createParserDiagnostic, type ShellDiagnostic } from '../diagnostic';
 import type { SourceSpan } from '../lexer/position';
-
-/**
- * Severity level for diagnostic messages.
- */
-export type DiagnosticSeverity = 'error' | 'warning' | 'info';
 
 /**
  * A diagnostic message with position and severity.
  */
-export interface Diagnostic {
-	readonly severity: DiagnosticSeverity;
-	readonly message: string;
-	readonly span: SourceSpan;
-	readonly code?: string;
-}
+export type Diagnostic = ShellDiagnostic;
 
 /**
  * Error reporter for collecting parser diagnostics.
@@ -35,12 +26,12 @@ export class ErrorReporter {
 	 * Report an error.
 	 */
 	reportError(message: string, span: SourceSpan, code?: string): void {
-		this.diagnostics.push({
-			severity: 'error',
-			message,
-			span,
-			code,
-		});
+		this.diagnostics.push(
+			createParserDiagnostic(message, span, {
+				code,
+				severity: 'error',
+			})
+		);
 		this.errorCount++;
 	}
 
@@ -48,12 +39,12 @@ export class ErrorReporter {
 	 * Report a warning.
 	 */
 	reportWarning(message: string, span: SourceSpan, code?: string): void {
-		this.diagnostics.push({
-			severity: 'warning',
-			message,
-			span,
-			code,
-		});
+		this.diagnostics.push(
+			createParserDiagnostic(message, span, {
+				code,
+				severity: 'warning',
+			})
+		);
 		this.warningCount++;
 	}
 
@@ -61,12 +52,12 @@ export class ErrorReporter {
 	 * Report an informational message.
 	 */
 	reportInfo(message: string, span: SourceSpan, code?: string): void {
-		this.diagnostics.push({
-			severity: 'info',
-			message,
-			span,
-			code,
-		});
+		this.diagnostics.push(
+			createParserDiagnostic(message, span, {
+				code,
+				severity: 'info',
+			})
+		);
 	}
 
 	/**
@@ -133,7 +124,9 @@ export class ErrorReporter {
 	format(): string {
 		return this.diagnostics
 			.map((d) => {
-				const loc = `${d.span.start.line}:${d.span.start.column}`;
+				const loc = d.location.span
+					? `${d.location.span.start.line}:${d.location.span.start.column}`
+					: 'unknown';
 				let prefix: string;
 				if (d.severity === 'error') {
 					prefix = 'Error';

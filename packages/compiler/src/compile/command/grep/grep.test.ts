@@ -72,12 +72,17 @@ test('compileGrep records diagnostics for missing value options', () => {
 	expect(step.args.usageError).toBe(true);
 	expect(step.args.noPatternsYet).toBe(true);
 	expect(step.args.diagnostics).toEqual([
-		{
+		expect.objectContaining({
 			code: 'missing-value',
+			location: expect.objectContaining({
+				command: 'grep',
+				token: '-e',
+				tokenIndex: 0,
+			}),
 			message: 'Option -e requires a value.',
-			token: '-e',
-			tokenIndex: 0,
-		},
+			phase: 'compile',
+			severity: 'error',
+		}),
 	]);
 });
 
@@ -89,7 +94,11 @@ test('compileGrep records diagnostics for unknown options', () => {
 	expect(step.args.usageError).toBe(true);
 	expect(step.args.diagnostics[0]).toMatchObject({
 		code: 'unknown-option',
-		token: '--does-not-exist',
-		tokenIndex: 0,
+		location: expect.objectContaining({
+			command: 'grep',
+			token: '--does-not-exist',
+			tokenIndex: 0,
+		}),
+		phase: 'compile',
 	});
 });

@@ -19,6 +19,10 @@ async function run(command: string): Promise<string> {
 	return await shell.$`${command}`.text();
 }
 
+async function runNothrow(command: string): Promise<string> {
+	return await shell.$`${command}`.nothrow().text();
+}
+
 test('string subset: replace transforms matching text', async () => {
 	expect(await run('string replace is was "blue is my favorite"')).toBe(
 		'blue was my favorite'
@@ -53,7 +57,7 @@ test('string subset: match status is exposed through $status', async () => {
 	await run('string match "a*" alpha');
 	expect(await run('echo $status')).toBe('0');
 
-	await run('string match "a*" beta');
+	await runNothrow('string match "a*" beta');
 	expect(await run('echo $status')).toBe('1');
 });
 

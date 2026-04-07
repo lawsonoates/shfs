@@ -93,6 +93,16 @@ test('compileFind records deterministic diagnostics for invalid arguments', () =
 		'find: unknown predicate: -noop',
 		'find: unexpected argument: tailing-operand',
 	]);
+	expect(step.args.diagnostics[0]).toMatchObject({
+		code: 'invalid-value',
+		location: expect.objectContaining({
+			command: 'find',
+			token: 'f,f',
+			tokenIndex: 1,
+		}),
+		phase: 'compile',
+		severity: 'error',
+	});
 });
 
 test('compileFind records missing and non-numeric traversal arguments', () => {

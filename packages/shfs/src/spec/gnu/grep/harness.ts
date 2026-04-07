@@ -10,8 +10,6 @@ const GNU_GREP_TESTS_DIR = new URL(
 	import.meta.url
 );
 
-const STATUS_PREFIX = '__SHFS_STATUS__=';
-
 export interface CommandResult {
 	output: string;
 	status: number;
@@ -47,24 +45,10 @@ export function createGrepHarness(): GrepHarness {
 	};
 
 	const runWithStatus = async (command: string): Promise<CommandResult> => {
-		const text = await run(`${command}; echo "${STATUS_PREFIX}$status"`);
-		const lines = text === '' ? [] : text.split('\n');
-		const marker = lines.at(-1);
-		if (marker === undefined || !marker.startsWith(STATUS_PREFIX)) {
-			throw new Error(
-				`Expected trailing status marker for command: ${command}`
-			);
-		}
-
-		const statusText = marker.slice(STATUS_PREFIX.length);
-		const status = Number.parseInt(statusText, 10);
-		if (Number.isNaN(status)) {
-			throw new Error(`Invalid status marker: ${marker}`);
-		}
-
+		const result = await shell.$`${command}`.nothrow();
 		return {
-			output: lines.slice(0, -1).join('\n'),
-			status,
+			output: result.text(),
+			status: result.exitCode,
 		};
 	};
 

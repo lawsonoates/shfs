@@ -1,3 +1,5 @@
+import type { ShellDiagnostic } from './diagnostic';
+
 // ─────────────────────────────────────────────────────────
 // Word Expansion Types (for new AST-based parser)
 // ─────────────────────────────────────────────────────────
@@ -189,16 +191,7 @@ export interface EchoStep {
 	};
 }
 
-export interface FindDiagnosticIR {
-	code:
-		| 'invalid-value'
-		| 'missing-value'
-		| 'unexpected-operand'
-		| 'unknown-predicate';
-	message: string;
-	token: string;
-	tokenIndex: number;
-}
+export type FindDiagnosticIR = ShellDiagnostic;
 
 export type FindTypeIR = 'd' | 'f';
 
@@ -249,12 +242,7 @@ export type GrepRegexMode = 'bre' | 'ere' | 'fixed' | 'pcre';
 export type GrepFilenameMode = 'always' | 'default' | 'never';
 export type GrepDirectoriesMode = 'read' | 'skip';
 
-export interface GrepDiagnosticIR {
-	code: 'invalid-value' | 'missing-value' | 'unknown-option';
-	message: string;
-	token: string;
-	tokenIndex: number;
-}
+export type GrepDiagnosticIR = ShellDiagnostic;
 
 export interface GrepOptionsIR {
 	afterContext: number;

@@ -19,6 +19,17 @@ async function run(command: string): Promise<string> {
 	return await shell.$`${command}`.text();
 }
 
+async function runWithStatus(
+	command: string
+): Promise<{ output: string; stderr: string; status: number }> {
+	const result = await shell.$`${command}`.nothrow();
+	return {
+		output: result.text(),
+		stderr: result.stderr.toString(),
+		status: result.exitCode,
+	};
+}
+
 function sortedWords(output: string): string[] {
 	const trimmed = output.trim();
 	if (trimmed === '') {
@@ -139,12 +150,15 @@ test('glob subset (boundary): unmatched wildcard reports deterministic error', a
 	await run('mkdir -p /workspace');
 	await run('cd /workspace');
 
-	await expect(run('ls missing*')).rejects.toThrow(
-		'ls: no matches found: missing*'
-	);
-	await expect(run('touch missing*')).rejects.toThrow(
-		'touch: no matches found: missing*'
-	);
+	const lsResult = await runWithStatus('ls missing*');
+	expect(lsResult.stderr).toContain('error[expansion:no-match]');
+	expect(lsResult.stderr).toContain('missing*');
+	expect(lsResult.status).toBe(1);
+
+	const touchResult = await runWithStatus('touch missing*');
+	expect(touchResult.stderr).toContain('error[expansion:no-match]');
+	expect(touchResult.stderr).toContain('missing*');
+	expect(touchResult.status).toBe(1);
 });
 
 test('glob subset (boundary): single-target path commands enforce post-expansion cardinality', async () => {
@@ -152,15 +166,30 @@ test('glob subset (boundary): single-target path commands enforce post-expansion
 	await run('mkdir /workspace/dir-a /workspace/dir-b');
 	await run('touch /workspace/file.txt');
 
-	await expect(run('cd /workspace/dir-*')).rejects.toThrow(
-		'cd: expected exactly 1 path after expansion, got 2'
+	const cdResult = await runWithStatus('cd /workspace/dir-*');
+	expect(cdResult.stderr).toContain('error[expansion:invalid-path-count]');
+	expect(cdResult.stderr).toContain(
+		'expected exactly 1 path after expansion'
 	);
-	await expect(
-		run('cp /workspace/file.txt /workspace/dir-*')
-	).rejects.toThrow('cp: destination must expand to exactly 1 path, got 2');
-	await expect(
-		run('mv /workspace/file.txt /workspace/dir-*')
-	).rejects.toThrow('mv: destination must expand to exactly 1 path, got 2');
+	expect(cdResult.status).toBe(1);
+
+	const cpResult = await runWithStatus(
+		'cp /workspace/file.txt /workspace/dir-*'
+	);
+	expect(cpResult.stderr).toContain('error[expansion:invalid-path-count]');
+	expect(cpResult.stderr).toContain(
+		'destination must expand to exactly 1 path'
+	);
+	expect(cpResult.status).toBe(1);
+
+	const mvResult = await runWithStatus(
+		'mv /workspace/file.txt /workspace/dir-*'
+	);
+	expect(mvResult.stderr).toContain('error[expansion:invalid-path-count]');
+	expect(mvResult.stderr).toContain(
+		'destination must expand to exactly 1 path'
+	);
+	expect(mvResult.status).toBe(1);
 });
 
 test('glob subset (boundary): redirection targets enforce shared single-target expansion errors', async () => {
@@ -168,18 +197,22 @@ test('glob subset (boundary): redirection targets enforce shared single-target e
 	await run('mkdir /workspace/dir-a /workspace/dir-b');
 	await run('cd /workspace');
 
-	await expect(run('echo hi > dir-*')).rejects.toThrow(
-		'echo: redirection target must expand to exactly 1 path, got 2'
+	const result = await runWithStatus('echo hi > dir-*');
+	expect(result.stderr).toContain('error[expansion:invalid-path-count]');
+	expect(result.stderr).toContain(
+		'redirection target must expand to exactly 1 path'
 	);
+	expect(result.status).toBe(1);
 });
 
 test('glob subset (boundary): unmatched redirection globs report deterministic failures', async () => {
 	await run('mkdir -p /workspace');
 	await run('cd /workspace');
 
-	await expect(run('echo hi > missing*')).rejects.toThrow(
-		'echo: no matches found: missing*'
-	);
+	const result = await runWithStatus('echo hi > missing*');
+	expect(result.stderr).toContain('error[expansion:no-match]');
+	expect(result.stderr).toContain('missing*');
+	expect(result.status).toBe(1);
 });
 
 test('glob subset (boundary): multi-target path commands consume expanded glob arguments', async () => {
@@ -200,14 +233,16 @@ test('glob subset (boundary): multi-target path commands consume expanded glob a
 	]);
 
 	await run('rm /workspace/moved/src-*.txt');
-	await expect(run('echo /workspace/moved/src-*.txt')).rejects.toThrow(
-		'echo: no matches found: /workspace/moved/src-*.txt'
-	);
+	const echoResult = await runWithStatus('echo /workspace/moved/src-*.txt');
+	expect(echoResult.stderr).toContain('error[expansion:no-match]');
+	expect(echoResult.stderr).toContain('/workspace/moved/src-*.txt');
+	expect(echoResult.status).toBe(1);
 
 	await run('mkdir /workspace/group-a /workspace/group-b');
-	await expect(run('mkdir /workspace/group-*/nested')).rejects.toThrow(
-		'mkdir: no matches found: /workspace/group-*/nested'
-	);
+	const mkdirResult = await runWithStatus('mkdir /workspace/group-*/nested');
+	expect(mkdirResult.stderr).toContain('error[expansion:no-match]');
+	expect(mkdirResult.stderr).toContain('/workspace/group-*/nested');
+	expect(mkdirResult.status).toBe(1);
 	await run('touch /workspace/group-a/note.txt /workspace/group-b/note.txt');
 	await run('touch /workspace/group-*/note.txt');
 	expect(sortedWords(await run('echo /workspace/group-*/note.txt'))).toEqual([

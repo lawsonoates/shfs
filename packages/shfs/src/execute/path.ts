@@ -1,5 +1,6 @@
 import {
 	compile,
+	createExpansionDiagnostic,
 	type ExpandedWord,
 	type ExpandedWordPart,
 	expandedWordHasGlob,
@@ -9,6 +10,7 @@ import {
 
 import picomatch from 'picomatch';
 import type { BuiltinContext } from '../builtin/types';
+import { createDiagnosticError } from '../diagnostics';
 import type { FS } from '../fs/fs';
 import { formatRecord, type Record as ShellRecord } from '../record';
 
@@ -248,15 +250,33 @@ function expectSingleExpandedPath(
 	allowEmpty = false
 ): string {
 	if (values.length !== 1) {
-		throw new Error(`${command}: ${expectation}, got ${values.length}`);
+		throw createDiagnosticError(
+			createExpansionDiagnostic(
+				command,
+				'invalid-path-count',
+				`${expectation}, got ${values.length}`
+			)
+		);
 	}
 
 	const resolvedValue = values.at(0);
 	if (resolvedValue === undefined) {
-		throw new Error(`${command}: path missing after expansion`);
+		throw createDiagnosticError(
+			createExpansionDiagnostic(
+				command,
+				'missing-path',
+				'path missing after expansion'
+			)
+		);
 	}
 	if (!allowEmpty && resolvedValue === '') {
-		throw new Error(`${command}: ${expectation}, got empty path`);
+		throw createDiagnosticError(
+			createExpansionDiagnostic(
+				command,
+				'invalid-path-count',
+				`${expectation}, got empty path`
+			)
+		);
 	}
 	return resolvedValue;
 }
@@ -298,7 +318,13 @@ export async function evaluateExpandedPathWord(
 	const pattern = patternSegments.join('');
 	const matches = await expandGlobPattern(pattern, fs, context);
 	if (matches.length === 0) {
-		throw new Error(`${command}: ${NO_GLOB_MATCH_MESSAGE}: ${pattern}`);
+		throw createDiagnosticError(
+			createExpansionDiagnostic(
+				command,
+				'no-match',
+				`${NO_GLOB_MATCH_MESSAGE}: ${pattern}`
+			)
+		);
 	}
 	return matches;
 }

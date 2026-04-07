@@ -19,6 +19,7 @@ export function createBuiltinRuntime(options?: {
 			globalVars: new Map<string, string>(),
 			localVars: new Map<string, string>(),
 			status: 0,
+			stderr: [],
 		},
 		fs,
 		input: options?.input ?? null,

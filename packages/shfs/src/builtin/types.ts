@@ -5,6 +5,7 @@ import type { Stream } from '../stream';
 export interface BuiltinContext {
 	cwd: string;
 	status: number;
+	stderr: string[];
 	globalVars: Map<string, string>;
 	localVars: Map<string, string>;
 }
