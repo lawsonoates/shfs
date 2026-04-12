@@ -33,7 +33,7 @@ import {
 	resolvePathsFromCwd,
 } from './path';
 import { files } from './producers';
-import { toFormattedLineStream, toLineStream } from './records';
+import { toFormattedLineStream } from './records';
 import {
 	applyOutputRedirect,
 	hasRedirect,

@@ -633,7 +633,8 @@ function isKnownDiagnosticToken(
 ): boolean {
 	return diagnostics.some(
 		(diagnostic) =>
-			diagnostic.token === token && diagnostic.tokenIndex === tokenIndex
+			diagnostic.location.token === token &&
+			diagnostic.location.tokenIndex === tokenIndex
 	);
 }
 
