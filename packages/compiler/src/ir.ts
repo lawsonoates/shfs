@@ -223,7 +223,7 @@ export interface FindTraversalIR {
 export interface FindArgsIR {
 	action: FindActionIR;
 	diagnostics: FindDiagnosticIR[];
-	predicates: FindPredicateIR[];
+	predicateBranches: FindPredicateIR[][];
 	startPaths: ExpandedWord[];
 	traversal: FindTraversalIR;
 	usageError: boolean;

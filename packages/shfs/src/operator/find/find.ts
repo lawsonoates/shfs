@@ -61,10 +61,10 @@ export async function* find(
 		return;
 	}
 
-	let resolvedPredicates: ResolvedFindPredicate[];
+	let resolvedPredicateBranches: ResolvedFindPredicate[][];
 	try {
-		resolvedPredicates = await resolvePredicates(
-			args.predicates,
+		resolvedPredicateBranches = await resolvePredicates(
+			args.predicateBranches,
 			fs,
 			context
 		);
@@ -115,7 +115,7 @@ export async function* find(
 				isDirectory: startStat.isDirectory,
 			},
 			args,
-			resolvedPredicates,
+			resolvedPredicateBranches,
 			state
 		);
 	}
@@ -128,12 +128,12 @@ async function* walkEntry(
 	context: BuiltinContext,
 	entry: FindEntry,
 	args: FindStep['args'],
-	predicates: ResolvedFindPredicate[],
+	predicateBranches: ResolvedFindPredicate[][],
 	state: FindTraversalState
 ): Stream<ShellRecord> {
 	const matches =
 		entry.depth >= args.traversal.mindepth &&
-		matchesPredicates(entry, predicates);
+		matchesPredicates(entry, predicateBranches);
 
 	if (!args.traversal.depth && matches) {
 		yield toFileRecord(entry);
@@ -197,7 +197,7 @@ async function* walkEntry(
 					isDirectory: childStat.isDirectory,
 				},
 				args,
-				predicates,
+				predicateBranches,
 				state
 			);
 		}
@@ -209,57 +209,61 @@ async function* walkEntry(
 }
 
 async function resolvePredicates(
-	predicates: FindPredicateIR[],
+	predicateBranches: FindPredicateIR[][],
 	fs: FS,
 	context: BuiltinContext
-): Promise<ResolvedFindPredicate[]> {
-	const resolved: ResolvedFindPredicate[] = [];
-	for (const predicate of predicates) {
-		switch (predicate.kind) {
-			case 'name': {
-				const pattern = await evaluateExpandedWord(
-					predicate.pattern,
-					fs,
-					context
-				);
-				resolved.push({
-					kind: 'name',
-					matcher: picomatch(pattern, {
-						bash: true,
-						dot: true,
-					}),
-				});
-				break;
-			}
-			case 'path': {
-				const pattern = await evaluateExpandedWord(
-					predicate.pattern,
-					fs,
-					context
-				);
-				resolved.push({
-					kind: 'path',
-					matcher: picomatch(pattern, {
-						bash: true,
-						dot: true,
-					}),
-				});
-				break;
-			}
-			case 'type': {
-				resolved.push({
-					kind: 'type',
-					types: new Set(predicate.types),
-				});
-				break;
-			}
-			default: {
-				const _exhaustive: never = predicate;
-				throw new Error(
-					`Unsupported find predicate: ${JSON.stringify(_exhaustive)}`
-				);
+): Promise<ResolvedFindPredicate[][]> {
+	const resolved: ResolvedFindPredicate[][] = [];
+	for (const branch of predicateBranches) {
+		const resolvedBranch: ResolvedFindPredicate[] = [];
+		for (const predicate of branch) {
+			switch (predicate.kind) {
+				case 'name': {
+					const pattern = await evaluateExpandedWord(
+						predicate.pattern,
+						fs,
+						context
+					);
+					resolvedBranch.push({
+						kind: 'name',
+						matcher: picomatch(pattern, {
+							bash: true,
+							dot: true,
+						}),
+					});
+					break;
+				}
+				case 'path': {
+					const pattern = await evaluateExpandedWord(
+						predicate.pattern,
+						fs,
+						context
+					);
+					resolvedBranch.push({
+						kind: 'path',
+						matcher: picomatch(pattern, {
+							bash: true,
+							dot: true,
+						}),
+					});
+					break;
+				}
+				case 'type': {
+					resolvedBranch.push({
+						kind: 'type',
+						types: new Set(predicate.types),
+					});
+					break;
+				}
+				default: {
+					const _exhaustive: never = predicate;
+					throw new Error(
+						`Unsupported find predicate: ${JSON.stringify(_exhaustive)}`
+					);
+				}
 			}
 		}
+		resolved.push(resolvedBranch);
 	}
 	return resolved;
 }
@@ -294,27 +298,47 @@ async function resolveStartPaths(
 
 function matchesPredicates(
 	entry: FindEntry,
-	predicates: ResolvedFindPredicate[]
+	predicateBranches: ResolvedFindPredicate[][]
 ): boolean {
-	for (const predicate of predicates) {
-		if (predicate.kind === 'name') {
-			if (!predicate.matcher(basename(entry.displayPath))) {
-				return false;
-			}
-			continue;
+	if (predicateBranches.length === 0) {
+		return true;
+	}
+
+	const entryType = entry.isDirectory ? 'd' : 'f';
+	for (const branch of predicateBranches) {
+		if (matchesBranch(entry, entryType, branch)) {
+			// Stop at the first matching branch to preserve left-to-right OR semantics.
+			return true;
 		}
-		if (predicate.kind === 'path') {
-			if (!predicate.matcher(entry.displayPath)) {
-				return false;
-			}
-			continue;
-		}
-		const entryType = entry.isDirectory ? 'd' : 'f';
-		if (!predicate.types.has(entryType)) {
+	}
+	return false;
+}
+
+function matchesBranch(
+	entry: FindEntry,
+	entryType: 'd' | 'f',
+	branch: ResolvedFindPredicate[]
+): boolean {
+	for (const predicate of branch) {
+		if (!matchesPredicate(entry, entryType, predicate)) {
 			return false;
 		}
 	}
 	return true;
+}
+
+function matchesPredicate(
+	entry: FindEntry,
+	entryType: 'd' | 'f',
+	predicate: ResolvedFindPredicate
+): boolean {
+	if (predicate.kind === 'name') {
+		return predicate.matcher(basename(entry.displayPath));
+	}
+	if (predicate.kind === 'path') {
+		return predicate.matcher(entry.displayPath);
+	}
+	return predicate.types.has(entryType);
 }
 
 async function readChildren(fs: FS, path: string): Promise<string[]> {

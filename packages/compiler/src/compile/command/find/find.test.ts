@@ -56,21 +56,176 @@ test('compileFind parses start paths and predicates in order', () => {
 	);
 
 	expect(step.args.startPaths).toEqual([literal('src')]);
-	expect(step.args.predicates).toEqual([
-		{
-			kind: 'name',
-			pattern: literal('*.ts'),
-		},
-		{
-			kind: 'type',
-			types: ['f', 'd'],
-		},
+	expect(step.args.predicateBranches).toEqual([
+		[
+			{
+				kind: 'name',
+				pattern: literal('*.ts'),
+			},
+			{
+				kind: 'type',
+				types: ['f', 'd'],
+			},
+		],
 	]);
 	expect(step.args.action).toEqual({
 		explicit: true,
 		kind: 'print',
 	});
 	expect(step.args.usageError).toBe(false);
+});
+
+test('compileFind parses -o into ordered predicate branches', () => {
+	const step = mustBeFindStep(
+		compileFind(
+			findCommand([
+				literal('src'),
+				literal('-name'),
+				literal('*.ts'),
+				literal('-o'),
+				literal('-name'),
+				literal('*.js'),
+			])
+		)
+	);
+
+	expect(step.args.startPaths).toEqual([literal('src')]);
+	expect(step.args.predicateBranches).toEqual([
+		[
+			{
+				kind: 'name',
+				pattern: literal('*.ts'),
+			},
+		],
+		[
+			{
+				kind: 'name',
+				pattern: literal('*.js'),
+			},
+		],
+	]);
+	expect(step.args.usageError).toBe(false);
+});
+
+test('compileFind treats -or as a synonym for -o', () => {
+	const step = mustBeFindStep(
+		compileFind(
+			findCommand([
+				literal('src'),
+				literal('-name'),
+				literal('*.ts'),
+				literal('-or'),
+				literal('-name'),
+				literal('*.js'),
+			])
+		)
+	);
+
+	expect(step.args.startPaths).toEqual([literal('src')]);
+	expect(step.args.predicateBranches).toEqual([
+		[
+			{
+				kind: 'name',
+				pattern: literal('*.ts'),
+			},
+		],
+		[
+			{
+				kind: 'name',
+				pattern: literal('*.js'),
+			},
+		],
+	]);
+	expect(step.args.usageError).toBe(false);
+});
+
+test('compileFind keeps traversal options global while parsing mixed AND/OR branches', () => {
+	const step = mustBeFindStep(
+		compileFind(
+			findCommand([
+				literal('src'),
+				literal('-maxdepth'),
+				literal('1'),
+				literal('-name'),
+				literal('*.ts'),
+				literal('-type'),
+				literal('f'),
+				literal('-o'),
+				literal('-name'),
+				literal('*.test.ts'),
+			])
+		)
+	);
+
+	expect(step.args.predicateBranches).toEqual([
+		[
+			{
+				kind: 'name',
+				pattern: literal('*.ts'),
+			},
+			{
+				kind: 'type',
+				types: ['f'],
+			},
+		],
+		[
+			{
+				kind: 'name',
+				pattern: literal('*.test.ts'),
+			},
+		],
+	]);
+	expect(step.args.traversal).toEqual({
+		depth: false,
+		maxdepth: 1,
+		mindepth: 0,
+	});
+	expect(step.args.usageError).toBe(false);
+});
+
+test('compileFind reports deterministic diagnostics for malformed -o placement', () => {
+	const leading = mustBeFindStep(
+		compileFind(
+			findCommand([literal('-o'), literal('-name'), literal('*.ts')])
+		)
+	);
+	const trailing = mustBeFindStep(
+		compileFind(
+			findCommand([literal('-name'), literal('*.ts'), literal('-o')])
+		)
+	);
+	const repeated = mustBeFindStep(
+		compileFind(
+			findCommand([
+				literal('-name'),
+				literal('*.ts'),
+				literal('-o'),
+				literal('-o'),
+				literal('-name'),
+				literal('*.js'),
+			])
+		)
+	);
+
+	expect(leading.args.usageError).toBe(true);
+	expect(
+		leading.args.diagnostics.map((diagnostic) => diagnostic.message)
+	).toEqual(['find: -o is missing a left predicate expression']);
+	expect(leading.args.diagnostics[0]).toMatchObject({
+		code: 'invalid-expression',
+		location: expect.objectContaining({
+			command: 'find',
+			token: '-o',
+			tokenIndex: 0,
+		}),
+	});
+
+	expect(
+		trailing.args.diagnostics.map((diagnostic) => diagnostic.message)
+	).toEqual(['find: -o is missing a right predicate expression']);
+	expect(
+		repeated.args.diagnostics.map((diagnostic) => diagnostic.message)
+	).toEqual(['find: -o is missing a left predicate expression']);
 });
 
 test('compileFind records deterministic diagnostics for invalid arguments', () => {
