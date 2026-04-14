@@ -25,13 +25,6 @@ function splitText(text: string): string[] {
 	return text.split('\n');
 }
 
-function formatError(error: unknown): string {
-	if (error instanceof Error) {
-		return `error: ${error.message}`;
-	}
-	return 'error: unknown command failure';
-}
-
 export const Terminal = () => {
 	const shell = useMemo(() => {
 		return new Shell(new MemoryFS());
@@ -65,16 +58,17 @@ export const Terminal = () => {
 
 		setIsRunning(true);
 		try {
-			const output = await shell.$`${trimmedCommand}`.text();
-			const outputLines = splitText(output);
-			if (outputLines.length > 0) {
-				setHistoryLines((previous) => [...previous, ...outputLines]);
+			const result = await shell.$`${trimmedCommand}`.nothrow();
+			const stdoutLines = splitText(result.stdout.toString('utf8'));
+			const stderrLines = splitText(result.stderr.toString('utf8'));
+			const combinedLines = [...stdoutLines, ...stderrLines];
+			if (combinedLines.length > 0) {
+				setHistoryLines((previous) => [...previous, ...combinedLines]);
 			}
-		} catch (error) {
-			setHistoryLines((previous) => [...previous, formatError(error)]);
 		} finally {
-			const pwdOutput = await shell.$`pwd`.text();
-			setPath(pwdOutput || '~');
+			const pwdResult = await shell.$`pwd`;
+			const currentPath = pwdResult.stdout.toString('utf8');
+			setPath(currentPath || '~');
 			setIsRunning(false);
 		}
 	};
