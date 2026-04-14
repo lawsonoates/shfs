@@ -26,6 +26,12 @@ It is not a full fish shell and does not target host OS parity.
   - default `-print` action
   - deterministic errors for invalid predicates and arguments
   - pipeline-friendly behavior (`find ... | ...`)
+- Pattern search with `grep` (GNU-derived subset):
+  - supported modes: basic/extended/fixed/PCRE (`-G`, `-E`, `-F`, `-P`)
+  - binary-data handling flags: `--binary-files=binary|text|without-match`, `-a`, `-I`
+  - default binary match reporting (`Binary file <path> matches`)
+  - null-data record mode (`-z` / `--null-data`)
+  - deterministic status behavior for match/no-match/error (`0`/`1`/`2`)
 - Globbing and wildcard expansion (fish-style):
   - full pattern support for `*`, `?`, `[ ... ]`, and `**`
   - recursive glob behavior and trailing-slash directory matching semantics
@@ -48,6 +54,9 @@ It is not a full fish shell and does not target host OS parity.
   - command-execution and interactive actions such as `-execdir`, `-ok`, and `-okdir`
   - host/compatibility flags and warning modes such as `-warn`, `-nowarn`, `-D`, `POSIXLY_CORRECT`, and `-ignore_readdir_race`
   - advanced expression features such as grouping with `(` and `)`, `,`, and full boolean-expression compatibility
+- Full GNU `grep` compatibility
+  - only documented subset behavior is in scope
+  - host/locale-specific edge-case parity beyond covered GNU-derived tests is out of scope
 - Permission model beyond basic virtual FS behavior
 - `env KEY=... cmd` scoped environment injection
 - Interactive shell features:
