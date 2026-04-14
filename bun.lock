@@ -59,7 +59,7 @@
     },
     "packages/shfs": {
       "name": "shfs",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "dependencies": {
         "picomatch": "^4.0.3",
       },
@@ -78,7 +78,7 @@
     },
     "packages/web": {
       "name": "@shfs/web",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "dependencies": {
         "bun-plugin-tailwind": "^0.1.2",
         "picomatch": "^4.0.3",
@@ -954,6 +954,8 @@
     "@octokit/plugin-rest-endpoint-methods/@octokit/types": ["@octokit/types@13.10.0", "", { "dependencies": { "@octokit/openapi-types": "^24.2.0" } }, "sha512-ifLaO34EbbPj0Xgro4G5lP5asESjwHracYJvVaPIyXMuiuXLlhic3S47cBdTb+jfODkTE5YtGCLt3Ay3+J97sA=="],
 
     "@poppinss/dumper/supports-color": ["supports-color@10.2.2", "", {}, "sha512-SS+jx45GF1QjgEXQx4NJZV9ImqmO2NPz5FNsIHrsDjh2YsHnawpan7SNQ1o8NuhrbHZy9AZhIoCUiCeaW/C80g=="],
+
+    "@shfs/web/shfs": ["shfs@0.3.0", "", { "dependencies": { "picomatch": "^4.0.3" }, "peerDependencies": { "typescript": "^5" } }, "sha512-pC/rH59cSBAFQicFGW84iPX1V9ziziZjssrxsClnOZdGZlvM0VH/HRNt2cj6BftPr0gHFoU5Q5TudT2elbTV1A=="],
 
     "alchemy/glob": ["glob@10.5.0", "", { "dependencies": { "foreground-child": "^3.1.0", "jackspeak": "^3.1.2", "minimatch": "^9.0.4", "minipass": "^7.1.2", "package-json-from-dist": "^1.0.0", "path-scurry": "^1.11.1" }, "bin": { "glob": "dist/esm/bin.mjs" } }, "sha512-DfXN8DfhJ7NH3Oe7cFmu3NCu1wKbkReJ8TorzSAFbSKrlNaQSKfIzqYqVY8zlbs2NLBbWpRiU52GX2PbaBVNkg=="],
 
