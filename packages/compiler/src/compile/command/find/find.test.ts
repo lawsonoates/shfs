@@ -183,6 +183,36 @@ test('compileFind keeps traversal options global while parsing mixed AND/OR bran
 	expect(step.args.usageError).toBe(false);
 });
 
+test('compileFind allows option-only sides of -o when traversal options are present', () => {
+	const leftOptionOnly = mustBeFindStep(
+		compileFind(
+			findCommand([
+				literal('.'),
+				literal('-maxdepth'),
+				literal('1'),
+				literal('-o'),
+				literal('-name'),
+				literal('foo'),
+			])
+		)
+	);
+	const rightOptionOnly = mustBeFindStep(
+		compileFind(
+			findCommand([
+				literal('.'),
+				literal('-name'),
+				literal('foo'),
+				literal('-o'),
+				literal('-maxdepth'),
+				literal('1'),
+			])
+		)
+	);
+
+	expect(leftOptionOnly.args.usageError).toBe(false);
+	expect(rightOptionOnly.args.usageError).toBe(false);
+});
+
 test('compileFind reports deterministic diagnostics for malformed -o placement', () => {
 	const leading = mustBeFindStep(
 		compileFind(

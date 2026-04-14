@@ -36,6 +36,7 @@ const NON_NEGATIVE_INTEGER_REGEX = /^\d+$/;
 interface FindParseState {
 	action: FindActionIR;
 	currentBranch: FindPredicateIR[];
+	currentSideAllowsEmptyBranch: boolean;
 	diagnostics: FindDiagnosticIR[];
 	lastOrTokenIndex: number | null;
 	predicateBranches: FindPredicateIR[][];
@@ -54,6 +55,7 @@ export function parseFindArgs(argv: ExpandedWord[]): FindArgsIR {
 	const state: FindParseState = {
 		action: { ...DEFAULT_ACTION },
 		currentBranch: [],
+		currentSideAllowsEmptyBranch: false,
 		diagnostics: [],
 		lastOrTokenIndex: null,
 		predicateBranches: [],
@@ -149,10 +151,12 @@ function parseFindToken(
 	}
 	if (token === '-depth') {
 		state.traversal.depth = true;
+		state.currentSideAllowsEmptyBranch = true;
 		return index + 1;
 	}
 	if (token === '-print') {
 		state.action.explicit = true;
+		state.currentSideAllowsEmptyBranch = true;
 		return index + 1;
 	}
 	if (token.startsWith('-')) {
@@ -185,7 +189,10 @@ function parseOrPredicateSeparator(
 	state.sawOr = true;
 	state.lastOrTokenIndex = index;
 
-	if (state.currentBranch.length === 0) {
+	if (
+		state.currentBranch.length === 0 &&
+		!state.currentSideAllowsEmptyBranch
+	) {
 		state.diagnostics.push(
 			createMissingExpressionDiagnostic('left', index)
 		);
@@ -194,6 +201,7 @@ function parseOrPredicateSeparator(
 
 	state.predicateBranches.push(state.currentBranch);
 	state.currentBranch = [];
+	state.currentSideAllowsEmptyBranch = false;
 	return index + 1;
 }
 
@@ -243,6 +251,10 @@ function finalizePredicateBranches(state: FindParseState): FindPredicateIR[][] {
 	if (state.currentBranch.length > 0) {
 		state.predicateBranches.push(state.currentBranch);
 	} else if (state.sawOr && state.lastOrTokenIndex !== null) {
+		if (state.currentSideAllowsEmptyBranch) {
+			state.predicateBranches.push(state.currentBranch);
+			return state.predicateBranches;
+		}
 		state.diagnostics.push(
 			createMissingExpressionDiagnostic('right', state.lastOrTokenIndex)
 		);
@@ -277,6 +289,7 @@ function parseTraversalOption(
 	} else {
 		state.traversal.mindepth = parsedNumericValue.value;
 	}
+	state.currentSideAllowsEmptyBranch = true;
 	return index + 2;
 }
 
