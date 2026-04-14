@@ -102,3 +102,89 @@ test('compileGrep records diagnostics for unknown options', () => {
 		phase: 'compile',
 	});
 });
+
+test('compileGrep maps --binary-files=without-match to binary suppression mode', () => {
+	const step = mustBeGrepStep(
+		compileGrep(
+			grepCommand([
+				literal('--binary-files=without-match'),
+				literal('needle'),
+				literal('/tmp/in.bin'),
+			])
+		)
+	);
+
+	expect(step.args.usageError).toBe(false);
+	expect(step.args.options.binaryWithoutMatch).toBe(true);
+	expect(step.args.options.textMode).toBe(false);
+});
+
+test('compileGrep maps --binary-files=text and -a to text mode', () => {
+	const longForm = mustBeGrepStep(
+		compileGrep(
+			grepCommand([
+				literal('--binary-files=text'),
+				literal('needle'),
+				literal('/tmp/in.bin'),
+			])
+		)
+	);
+	const shortForm = mustBeGrepStep(
+		compileGrep(
+			grepCommand([
+				literal('-a'),
+				literal('needle'),
+				literal('/tmp/in.bin'),
+			])
+		)
+	);
+
+	expect(longForm.args.usageError).toBe(false);
+	expect(longForm.args.options.textMode).toBe(true);
+	expect(longForm.args.options.binaryWithoutMatch).toBe(false);
+
+	expect(shortForm.args.usageError).toBe(false);
+	expect(shortForm.args.options.textMode).toBe(true);
+	expect(shortForm.args.options.binaryWithoutMatch).toBe(false);
+});
+
+test('compileGrep maps -I to binary without-match mode', () => {
+	const step = mustBeGrepStep(
+		compileGrep(
+			grepCommand([
+				literal('-I'),
+				literal('needle'),
+				literal('/tmp/in.bin'),
+			])
+		)
+	);
+
+	expect(step.args.usageError).toBe(false);
+	expect(step.args.options.binaryWithoutMatch).toBe(true);
+	expect(step.args.options.textMode).toBe(false);
+});
+
+test('compileGrep reports invalid --binary-files value', () => {
+	const step = mustBeGrepStep(
+		compileGrep(
+			grepCommand([
+				literal('--binary-files=not-a-mode'),
+				literal('needle'),
+				literal('/tmp/in.bin'),
+			])
+		)
+	);
+
+	expect(step.args.usageError).toBe(true);
+	expect(step.args.diagnostics).toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({
+				code: 'invalid-value',
+				location: expect.objectContaining({
+					command: 'grep',
+					token: '--binary-files=not-a-mode',
+				}),
+			}),
+		])
+	);
+});

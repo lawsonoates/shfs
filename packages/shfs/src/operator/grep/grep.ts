@@ -226,44 +226,33 @@ async function runGrepCommandInner(
 			lines: [],
 			selectedLineCount: 0,
 		};
+		let binaryInput = false;
+		let targetBytes: Uint8Array | null = null;
 		if (target.stdin) {
+			targetBytes = stdinBytes ?? new Uint8Array();
+		} else {
+			if (target.absolutePath === null) {
+				continue;
+			}
+			try {
+				targetBytes = await options.fs.readFile(target.absolutePath);
+			} catch {
+				hadError = true;
+				continue;
+			}
+		}
+		if (targetBytes === null) {
+			continue;
+		}
+		binaryInput = shouldTreatAsBinaryInput(targetBytes, parsed.options);
+		if (!(binaryInput && parsed.options.binaryWithoutMatch)) {
 			result = searchBuffer(
-				stdinBytes ?? new Uint8Array(),
+				targetBytes,
 				target.displayPath,
 				matcherBuild.patterns,
 				parsed.options,
 				displayFilename
 			);
-		} else {
-			if (target.absolutePath === null) {
-				continue;
-			}
-			let bytes: Uint8Array;
-			try {
-				bytes = await options.fs.readFile(target.absolutePath);
-			} catch {
-				hadError = true;
-				continue;
-			}
-			if (
-				parsed.options.binaryWithoutMatch &&
-				!parsed.options.textMode &&
-				isBinaryBuffer(bytes)
-			) {
-				result = {
-					hasSelectedLine: false,
-					lines: [],
-					selectedLineCount: 0,
-				};
-			} else {
-				result = searchBuffer(
-					bytes,
-					target.displayPath,
-					matcherBuild.patterns,
-					parsed.options,
-					displayFilename
-				);
-			}
 		}
 
 		if (parsed.options.listFilesWithMatches) {
@@ -308,7 +297,17 @@ async function runGrepCommandInner(
 			anySelected = true;
 		}
 		if (!parsed.options.quiet) {
-			lines.push(...result.lines);
+			if (
+				shouldPrintBinaryMatchMessage(
+					binaryInput,
+					result.hasSelectedLine,
+					parsed.options
+				)
+			) {
+				lines.push(`Binary file ${target.displayPath} matches`);
+			} else {
+				lines.push(...result.lines);
+			}
 		}
 		if (parsed.options.quiet && anySelected) {
 			break;
@@ -1541,6 +1540,35 @@ function isValidUtf8(bytes: Uint8Array): boolean {
 
 function isBinaryBuffer(bytes: Uint8Array): boolean {
 	return bytes.includes(0x00);
+}
+
+function shouldTreatAsBinaryInput(
+	bytes: Uint8Array,
+	options: GrepOptionsIR
+): boolean {
+	if (options.textMode || options.nullData) {
+		return false;
+	}
+	return isBinaryBuffer(bytes);
+}
+
+function shouldPrintBinaryMatchMessage(
+	binaryInput: boolean,
+	hasSelectedLine: boolean,
+	options: GrepOptionsIR
+): boolean {
+	if (!(binaryInput && hasSelectedLine)) {
+		return false;
+	}
+	if (
+		options.binaryWithoutMatch ||
+		options.countOnly ||
+		options.listFilesWithMatches ||
+		options.listFilesWithoutMatch
+	) {
+		return false;
+	}
+	return true;
 }
 
 function byteLengthOfPrefix(text: string, charIndex: number): number {

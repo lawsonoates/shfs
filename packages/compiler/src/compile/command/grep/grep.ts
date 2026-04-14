@@ -71,7 +71,9 @@ const DEFAULT_OPTIONS: GrepOptionsIR = {
 const GREP_FLAG_DEFS: Record<string, FlagDef> = {
 	afterContext: grepValueFlag({ long: 'after-context', short: 'A' }),
 	beforeContext: grepValueFlag({ long: 'before-context', short: 'B' }),
+	binaryFiles: grepValueFlag({ long: 'binary-files' }),
 	binaryFile: grepValueFlag({ long: 'binary-file' }),
+	binaryWithoutMatch: grepBooleanFlag({ short: 'I' }),
 	byteOffset: grepBooleanFlag({ long: 'byte-offset', short: 'b' }),
 	context: grepValueFlag({ long: 'context', short: 'C' }),
 	countOnly: grepBooleanFlag({ long: 'count', short: 'c' }),
@@ -144,7 +146,7 @@ export function parseGrepArgs(argv: ExpandedWord[]): GrepArgsIR {
 	applyModeOption(parsed, options);
 	applyFilenameMode(parsed, options);
 	applyFileListingMode(parsed, options);
-	applyBinaryFileOption(parsed, argv, options);
+	applyBinaryFileOption(parsed, argv, options, diagnostics);
 	applyDirectoriesOption(parsed, argv, options);
 	applyMaxCountOption(parsed, argv, options, diagnostics);
 	applyContextOptions(parsed, argv, options, diagnostics);
@@ -278,11 +280,89 @@ function applyFileListingMode(
 function applyBinaryFileOption(
 	parsed: ParsedGrepWords,
 	argv: readonly ExpandedWord[],
-	options: GrepOptionsIR
+	options: GrepOptionsIR,
+	diagnostics: GrepDiagnosticIR[]
 ): void {
-	for (const occurrence of getValueOccurrences(parsed, argv, 'binaryFile')) {
-		options.binaryWithoutMatch = occurrence.value === 'without-match';
+	type BinaryMode = 'binary' | 'text' | 'without-match';
+	interface BinaryModeOccurrence {
+		mode: BinaryMode;
+		order: number;
 	}
+
+	const modeOccurrences: BinaryModeOccurrence[] = [];
+	for (const occurrence of getValueOccurrences(parsed, argv, 'binaryFile')) {
+		const mode = parseBinaryMode(occurrence.value);
+		if (mode === null) {
+			diagnostics.push(
+				makeDiagnostic(
+					'invalid-value',
+					occurrence.token,
+					occurrence.tokenIndex,
+					`Invalid value for option ${splitLongOption(occurrence.token)}.`
+				)
+			);
+			continue;
+		}
+		modeOccurrences.push({
+			mode,
+			order: occurrence.order,
+		});
+	}
+
+	for (const occurrence of getValueOccurrences(parsed, argv, 'binaryFiles')) {
+		const mode = parseBinaryMode(occurrence.value);
+		if (mode === null) {
+			diagnostics.push(
+				makeDiagnostic(
+					'invalid-value',
+					occurrence.token,
+					occurrence.tokenIndex,
+					`Invalid value for option ${splitLongOption(occurrence.token)}.`
+				)
+			);
+			continue;
+		}
+		modeOccurrences.push({
+			mode,
+			order: occurrence.order,
+		});
+	}
+
+	for (const order of parsed.flagOccurrenceOrder.binaryWithoutMatch ?? []) {
+		modeOccurrences.push({
+			mode: 'without-match',
+			order,
+		});
+	}
+
+	modeOccurrences.sort((a, b) => a.order - b.order);
+	for (const occurrence of modeOccurrences) {
+		switch (occurrence.mode) {
+			case 'binary':
+				options.binaryWithoutMatch = false;
+				options.textMode = false;
+				break;
+			case 'text':
+				options.binaryWithoutMatch = false;
+				options.textMode = true;
+				break;
+			case 'without-match':
+				options.binaryWithoutMatch = true;
+				options.textMode = false;
+				break;
+			default:
+				break;
+		}
+	}
+}
+
+function parseBinaryMode(
+	value: string
+): 'binary' | 'text' | 'without-match' | null {
+	if (value === 'binary' || value === 'text' || value === 'without-match') {
+		return value;
+	}
+	return null;
 }
 
 function applyDirectoriesOption(
