@@ -402,7 +402,7 @@ test('find pipelines file records into downstream cat consumers', async () => {
 						kind: 'print',
 					},
 					diagnostics: [],
-					predicates: [],
+					predicateBranches: [],
 					startPaths: [literal('dir')],
 					traversal: {
 						depth: false,
@@ -452,6 +452,31 @@ test('find pipelines matching file records into grep', async () => {
 	const result = execute(compile(parse('find dir | grep second')), fs, {
 		cwd: '/workspace',
 	});
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+
+	const records = await collect<ShellRecord>()(result.value);
+	const lineRecords = records.filter(
+		(record): record is LineRecord => record.kind === 'line'
+	);
+	expect(lineRecords.map((record) => record.text)).toEqual(['second']);
+});
+
+test('find OR expressions compose in pipelines', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/dir/first.txt', 'first');
+	fs.setFile('/workspace/dir/second.md', 'second');
+	fs.setFile('/workspace/dir/third.txt', 'third');
+
+	const result = execute(
+		compile(parse("find dir -name '*.txt' -o -name '*.md' | grep second")),
+		fs,
+		{
+			cwd: '/workspace',
+		}
+	);
 	expect(result.kind).toBe('stream');
 	if (result.kind !== 'stream') {
 		throw new Error('Expected stream result');

@@ -15,6 +15,7 @@ import {
 
 type FindDiagnosticCode =
 	| 'invalid-value'
+	| 'invalid-expression'
 	| 'missing-value'
 	| 'unexpected-operand'
 	| 'unknown-predicate';
@@ -34,8 +35,12 @@ const NON_NEGATIVE_INTEGER_REGEX = /^\d+$/;
 
 interface FindParseState {
 	action: FindActionIR;
+	currentBranch: FindPredicateIR[];
+	currentSideAllowsEmptyBranch: boolean;
 	diagnostics: FindDiagnosticIR[];
-	predicates: FindPredicateIR[];
+	lastOrTokenIndex: number | null;
+	predicateBranches: FindPredicateIR[][];
+	sawOr: boolean;
 	traversal: FindTraversalIR;
 }
 
@@ -49,8 +54,12 @@ export function compileFind(command: SimpleCommandIR): StepIR {
 export function parseFindArgs(argv: ExpandedWord[]): FindArgsIR {
 	const state: FindParseState = {
 		action: { ...DEFAULT_ACTION },
+		currentBranch: [],
+		currentSideAllowsEmptyBranch: false,
 		diagnostics: [],
-		predicates: [],
+		lastOrTokenIndex: null,
+		predicateBranches: [],
+		sawOr: false,
 		traversal: { ...DEFAULT_TRAVERSAL },
 	};
 	const predicateStartIndex = findPredicateStartIndex(argv);
@@ -70,7 +79,7 @@ export function parseFindArgs(argv: ExpandedWord[]): FindArgsIR {
 	return {
 		action: state.action,
 		diagnostics: state.diagnostics,
-		predicates: state.predicates,
+		predicateBranches: finalizePredicateBranches(state),
 		startPaths,
 		traversal: state.traversal,
 		usageError: state.diagnostics.length > 0,
@@ -101,6 +110,18 @@ function createMissingValueDiagnostic(
 	);
 }
 
+function createMissingExpressionDiagnostic(
+	side: 'left' | 'right',
+	tokenIndex: number
+): FindDiagnosticIR {
+	return createDiagnostic(
+		'invalid-expression',
+		'-o',
+		tokenIndex,
+		`find: -o is missing a ${side} predicate expression`
+	);
+}
+
 function findPredicateStartIndex(argv: ExpandedWord[]): number {
 	for (const [index, word] of argv.entries()) {
 		if (expandedWordToString(word).startsWith('-')) {
@@ -122,15 +143,20 @@ function parseFindToken(
 	if (token === '-type') {
 		return parseTypePredicate(argv, index, state);
 	}
+	if (token === '-o' || token === '-or') {
+		return parseOrPredicateSeparator(index, state);
+	}
 	if (token === '-maxdepth' || token === '-mindepth') {
 		return parseTraversalOption(argv, index, token, state);
 	}
 	if (token === '-depth') {
 		state.traversal.depth = true;
+		state.currentSideAllowsEmptyBranch = true;
 		return index + 1;
 	}
 	if (token === '-print') {
 		state.action.explicit = true;
+		state.currentSideAllowsEmptyBranch = true;
 		return index + 1;
 	}
 	if (token.startsWith('-')) {
@@ -156,6 +182,29 @@ function parseFindToken(
 	return index + 1;
 }
 
+function parseOrPredicateSeparator(
+	index: number,
+	state: FindParseState
+): number {
+	state.sawOr = true;
+	state.lastOrTokenIndex = index;
+
+	if (
+		state.currentBranch.length === 0 &&
+		!state.currentSideAllowsEmptyBranch
+	) {
+		state.diagnostics.push(
+			createMissingExpressionDiagnostic('left', index)
+		);
+		return index + 1;
+	}
+
+	state.predicateBranches.push(state.currentBranch);
+	state.currentBranch = [];
+	state.currentSideAllowsEmptyBranch = false;
+	return index + 1;
+}
+
 function parseStringPredicate(
 	argv: ExpandedWord[],
 	index: number,
@@ -168,7 +217,7 @@ function parseStringPredicate(
 		return index + 1;
 	}
 
-	state.predicates.push({
+	state.currentBranch.push({
 		kind: token === '-name' ? 'name' : 'path',
 		pattern: valueWord,
 	});
@@ -190,12 +239,27 @@ function parseTypePredicate(
 	if ('diagnostic' in parsedType) {
 		state.diagnostics.push(parsedType.diagnostic);
 	} else {
-		state.predicates.push({
+		state.currentBranch.push({
 			kind: 'type',
 			types: parsedType.types,
 		});
 	}
 	return index + 2;
+}
+
+function finalizePredicateBranches(state: FindParseState): FindPredicateIR[][] {
+	if (state.currentBranch.length > 0) {
+		state.predicateBranches.push(state.currentBranch);
+	} else if (state.sawOr && state.lastOrTokenIndex !== null) {
+		if (state.currentSideAllowsEmptyBranch) {
+			state.predicateBranches.push(state.currentBranch);
+			return state.predicateBranches;
+		}
+		state.diagnostics.push(
+			createMissingExpressionDiagnostic('right', state.lastOrTokenIndex)
+		);
+	}
+	return state.predicateBranches;
 }
 
 function parseTraversalOption(
@@ -225,6 +289,7 @@ function parseTraversalOption(
 	} else {
 		state.traversal.mindepth = parsedNumericValue.value;
 	}
+	state.currentSideAllowsEmptyBranch = true;
 	return index + 2;
 }
 
