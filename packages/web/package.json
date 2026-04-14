@@ -15,7 +15,7 @@
 		"picomatch": "^4.0.3",
 		"react": "^19",
 		"react-dom": "^19",
-		"shfs": "0.2.2",
+		"shfs": "0.3.0",
 		"tailwindcss": "^4.1.11"
 	},
 	"devDependencies": {
