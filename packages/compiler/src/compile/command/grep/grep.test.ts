@@ -164,6 +164,37 @@ test('compileGrep maps -I to binary without-match mode', () => {
 	expect(step.args.options.textMode).toBe(false);
 });
 
+test('compileGrep applies last binary-related flag when mixing --binary-files and -a', () => {
+	const textWins = mustBeGrepStep(
+		compileGrep(
+			grepCommand([
+				literal('--binary-files=binary'),
+				literal('-a'),
+				literal('needle'),
+				literal('/tmp/in.bin'),
+			])
+		)
+	);
+	const withoutMatchWins = mustBeGrepStep(
+		compileGrep(
+			grepCommand([
+				literal('-a'),
+				literal('-I'),
+				literal('needle'),
+				literal('/tmp/in.bin'),
+			])
+		)
+	);
+
+	expect(textWins.args.usageError).toBe(false);
+	expect(textWins.args.options.binaryWithoutMatch).toBe(false);
+	expect(textWins.args.options.textMode).toBe(true);
+
+	expect(withoutMatchWins.args.usageError).toBe(false);
+	expect(withoutMatchWins.args.options.binaryWithoutMatch).toBe(true);
+	expect(withoutMatchWins.args.options.textMode).toBe(false);
+});
+
 test('compileGrep reports invalid --binary-files value', () => {
 	const step = mustBeGrepStep(
 		compileGrep(

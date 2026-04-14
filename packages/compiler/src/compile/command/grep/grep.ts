@@ -335,6 +335,13 @@ function applyBinaryFileOption(
 		});
 	}
 
+	for (const order of parsed.flagOccurrenceOrder.textMode ?? []) {
+		modeOccurrences.push({
+			mode: 'text',
+			order,
+		});
+	}
+
 	modeOccurrences.sort((a, b) => a.order - b.order);
 	for (const occurrence of modeOccurrences) {
 		switch (occurrence.mode) {
