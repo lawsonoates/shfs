@@ -25,11 +25,11 @@ bun add shfs
 ## Usage
 
 ```typescript
-import { Shell } from 'shfs';
-import { MemoryFS } from 'shfs/fs';
+import { Shell } from "shfs";
+import { MemoryFS } from "shfs/fs";
 
 const fs = new MemoryFS();
-fs.setFile('hello.txt', 'hello world');
+fs.setFile("hello.txt", "hello world");
 
 const { $ } = new Shell(fs);
 
@@ -42,6 +42,7 @@ console.log(content);
 shfs is fish-inspired but intentionally not a full fish shell. It targets deterministic behavior over a virtual filesystem.
 
 Included behavior:
+
 - variable expansion and assignment (`$var`, `set -g`, `set -l`)
 - command substitution (`(cmd)`)
 - multi-statement scripts with newline and `;`
@@ -52,6 +53,7 @@ Included behavior:
 - stable, deterministic error contracts
 
 Explicitly out of scope:
+
 - control-flow blocks and function definitions (`if`/`for`/`function` + `end`)
 - `CDPATH`
 - symlink-focused traversal/compat behavior
@@ -63,22 +65,23 @@ Canonical boundary doc: [notes/shfs-subset-boundary.md](notes/shfs-subset-bounda
 ## Language Features
 
 - variables:
-  - `set -g name value` persists across runs
-  - `set -l name value` is local to one script run
-  - `$status` exposes last command status (`0` success, `1` failure)
+    - `set -g name value` persists across runs
+    - `set -l name value` is local to one script run
+    - `$status` exposes last command status (`0` success, `1` failure)
 - command substitution:
-  - `(echo subdir)` can be used as an argument
-  - nested substitutions are supported
+    - `(echo subdir)` can be used as an argument
+    - nested substitutions are supported
 - script statements:
-  - newline and semicolon statement separators
-  - `and` and `or` chain statements based on previous status
+    - newline and semicolon statement separators
+    - `and` and `or` chain statements based on previous status
 - quoting and expansion:
-  - quoted wildcard text is treated literally
-  - unquoted wildcard text is expanded for in-scope path arguments
+    - quoted wildcard text is treated literally
+    - unquoted wildcard text is expanded for in-scope path arguments
 
 ## Supported Commands
 
 Filesystem/path commands:
+
 - cat
 - cd
 - cp
@@ -92,8 +95,10 @@ Filesystem/path commands:
 - rm
 - tail
 - touch
+- xargs
 
 Script builtins:
+
 - echo
 - read
 - set
@@ -103,6 +108,7 @@ Script builtins:
 ## Globbing Semantics
 
 For in-scope path-taking commands, unquoted wildcard patterns use fish-style expansion:
+
 - supported pattern families: `*`, `?`, `[ ... ]`, `**`
 - hidden files only match when explicitly requested (for example `.*`)
 - trailing slash forms match directories (for example `*/`)
@@ -138,6 +144,7 @@ glob           ::= "*" | "?" | bracket_glob | "**"
 ```
 
 Notes:
+
 - words can mix literal text, glob parts, and command substitution in one token (for example `foo(echo bar)baz`)
 - `$var` and `$status` are documented runtime expansion forms; they are preserved through parsing and expanded during execution
 
