@@ -435,14 +435,77 @@ function compileFindRegexMatcher(
 }
 
 function translateFindRegexPattern(pattern: string): string {
-	return pattern
-		.replaceAll('\\(', '(')
-		.replaceAll('\\)', ')')
-		.replaceAll('\\|', '|')
-		.replaceAll('\\+', '+')
-		.replaceAll('\\?', '?')
-		.replaceAll('\\{', '{')
-		.replaceAll('\\}', '}');
+	let translated = '';
+
+	for (let index = 0; index < pattern.length; index++) {
+		const char = pattern[index];
+		if (char !== '\\') {
+			translated += isEmacsLiteralJsMetaChar(char) ? `\\${char}` : char;
+			continue;
+		}
+
+		const escapedChar = pattern[index + 1];
+		if (escapedChar === undefined) {
+			translated += '\\\\';
+			continue;
+		}
+
+		index += 1;
+		if (isEmacsEscapedOperatorChar(escapedChar)) {
+			translated += escapedChar;
+			continue;
+		}
+
+		translated += escapeJsRegexLiteralChar(escapedChar);
+	}
+
+	return translated;
+}
+
+function isEmacsEscapedOperatorChar(char: string): boolean {
+	return (
+		char === '(' ||
+		char === ')' ||
+		char === '|' ||
+		char === '+' ||
+		char === '?' ||
+		char === '{' ||
+		char === '}'
+	);
+}
+
+function isEmacsLiteralJsMetaChar(char: string): boolean {
+	return (
+		char === '(' ||
+		char === ')' ||
+		char === '|' ||
+		char === '+' ||
+		char === '?' ||
+		char === '{' ||
+		char === '}'
+	);
+}
+
+function escapeJsRegexLiteralChar(char: string): string {
+	if (
+		char === '\\' ||
+		char === '^' ||
+		char === '$' ||
+		char === '.' ||
+		char === '*' ||
+		char === '+' ||
+		char === '?' ||
+		char === '(' ||
+		char === ')' ||
+		char === '[' ||
+		char === ']' ||
+		char === '{' ||
+		char === '}' ||
+		char === '|'
+	) {
+		return `\\${char}`;
+	}
+	return char;
 }
 
 async function readChildren(fs: FS, path: string): Promise<string[]> {

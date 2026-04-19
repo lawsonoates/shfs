@@ -135,3 +135,26 @@ test('-iregex is case-insensitive while -regex remains case-sensitive', async ()
 	expect(iregexResult.status).toBe(0);
 	expect(iregexResult.output).toBe('tmp/d');
 });
+
+test('-regex treats unescaped + as a literal under find default regex syntax', async () => {
+	await setTextFile('/tmp/+', '');
+
+	const literalPlus = await runWithStatus(
+		"find tmp -maxdepth 1 -regex 'tmp/+'"
+	);
+	const lonePlus = await runWithStatus("find tmp -maxdepth 0 -regex '+'");
+
+	expect(literalPlus.status).toBe(0);
+	expect(literalPlus.output).toBe('tmp/+');
+	expect(lonePlus.status).toBe(0);
+	expect(lonePlus.output).toBe('');
+});
+
+test('-regex treats unescaped parentheses as literals under find default regex syntax', async () => {
+	await setTextFile('/tmp/(x)', '');
+
+	const result = await runWithStatus("find tmp -maxdepth 1 -regex 'tmp/(x)'");
+
+	expect(result.status).toBe(0);
+	expect(result.output).toBe('tmp/(x)');
+});
