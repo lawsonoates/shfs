@@ -29,7 +29,7 @@ interface FindGnuCase {
 const FIND_GNU_CASES: readonly FindGnuCase[] = [
 	{
 		name: 'ipath',
-		command: 'find tmp/top -ipath Tmp/TOP/one -print 2>/dev/null',
+		command: 'find tmp/top -ipath Tmp/TOP/one -print',
 		setup: async () => {
 			await harness.ensureDir('/tmp/top/ONE/two');
 		},
@@ -64,14 +64,14 @@ const FIND_GNU_CASES: readonly FindGnuCase[] = [
 	},
 	{
 		name: 'true',
-		command: 'find tmp -depth -print -true -print',
+		command: 'find tmp -depth -true',
 		setup: async () => {
 			await harness.ensureDir('/tmp/fred/jim');
 		},
 	},
 	{
 		name: 'false',
-		command: 'find tmp -depth -print -false -print',
+		command: 'find tmp -depth -false',
 		setup: async () => {
 			await harness.ensureDir('/tmp/fred/jim');
 		},

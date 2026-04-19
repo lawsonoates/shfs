@@ -32,6 +32,17 @@ type ResolvedFindPredicate =
 			matcher: (value: string) => boolean;
 	  }
 	| {
+			kind: 'regex';
+			matcher: (value: string) => boolean;
+	  }
+	| {
+			kind: 'constant';
+			value: boolean;
+	  }
+	| {
+			kind: 'empty';
+	  }
+	| {
 			kind: 'type';
 			types: Set<'d' | 'f'>;
 	  };
@@ -48,6 +59,7 @@ interface FindResolvedPath {
 interface FindEntry extends FindResolvedPath {
 	depth: number;
 	isDirectory: boolean;
+	size: number;
 }
 
 export async function* find(
@@ -86,6 +98,9 @@ export async function* find(
 	const state: FindTraversalState = {
 		hadError: false,
 	};
+	const hasEmptyPredicate = resolvedPredicateBranches.some((branch) =>
+		branch.some((predicate) => predicate.kind === 'empty')
+	);
 
 	for (const startPath of startPaths) {
 		let startStat: Awaited<ReturnType<FS['stat']>>;
@@ -113,10 +128,12 @@ export async function* find(
 				...startPath,
 				depth: 0,
 				isDirectory: startStat.isDirectory,
+				size: startStat.size,
 			},
 			args,
 			resolvedPredicateBranches,
-			state
+			state,
+			hasEmptyPredicate
 		);
 	}
 
@@ -129,22 +146,18 @@ async function* walkEntry(
 	entry: FindEntry,
 	args: FindStep['args'],
 	predicateBranches: ResolvedFindPredicate[][],
-	state: FindTraversalState
+	state: FindTraversalState,
+	hasEmptyPredicate: boolean
 ): Stream<ShellRecord> {
-	const matches =
-		entry.depth >= args.traversal.mindepth &&
-		matchesPredicates(entry, predicateBranches);
-
-	if (!args.traversal.depth && matches) {
-		yield toFileRecord(entry);
-	}
-
-	if (
+	const shouldRecurse =
 		entry.isDirectory &&
 		(args.traversal.maxdepth === null ||
-			entry.depth < args.traversal.maxdepth)
-	) {
-		let childPaths: string[];
+			entry.depth < args.traversal.maxdepth);
+	const shouldReadChildren =
+		shouldRecurse || (entry.isDirectory && hasEmptyPredicate);
+	let childPaths: string[] | null = null;
+
+	if (shouldReadChildren) {
 		try {
 			childPaths = await readChildren(fs, entry.absolutePath);
 		} catch {
@@ -159,9 +172,18 @@ async function* walkEntry(
 					}
 				),
 			]);
-			childPaths = [];
 		}
+	}
 
+	const matches =
+		entry.depth >= args.traversal.mindepth &&
+		matchesPredicates(entry, predicateBranches, childPaths);
+
+	if (!args.traversal.depth && matches) {
+		yield toFileRecord(entry);
+	}
+
+	if (shouldRecurse && childPaths !== null) {
 		for (const childAbsolutePath of childPaths) {
 			let childStat: Awaited<ReturnType<FS['stat']>>;
 			try {
@@ -195,10 +217,12 @@ async function* walkEntry(
 					),
 					depth: entry.depth + 1,
 					isDirectory: childStat.isDirectory,
+					size: childStat.size,
 				},
 				args,
 				predicateBranches,
-				state
+				state,
+				hasEmptyPredicate
 			);
 		}
 	}
@@ -245,6 +269,50 @@ async function resolvePredicates(
 							bash: true,
 							dot: true,
 						}),
+					});
+					break;
+				}
+				case 'ipath': {
+					const pattern = await evaluateExpandedWord(
+						predicate.pattern,
+						fs,
+						context
+					);
+					resolvedBranch.push({
+						kind: 'path',
+						matcher: picomatch(pattern, {
+							bash: true,
+							dot: true,
+							nocase: true,
+						}),
+					});
+					break;
+				}
+				case 'regex': {
+					const pattern = await evaluateExpandedWord(
+						predicate.pattern,
+						fs,
+						context
+					);
+					resolvedBranch.push({
+						kind: 'regex',
+						matcher: compileFindRegexMatcher(
+							pattern,
+							predicate.caseInsensitive
+						),
+					});
+					break;
+				}
+				case 'constant': {
+					resolvedBranch.push({
+						kind: 'constant',
+						value: predicate.value,
+					});
+					break;
+				}
+				case 'empty': {
+					resolvedBranch.push({
+						kind: 'empty',
 					});
 					break;
 				}
@@ -298,7 +366,8 @@ async function resolveStartPaths(
 
 function matchesPredicates(
 	entry: FindEntry,
-	predicateBranches: ResolvedFindPredicate[][]
+	predicateBranches: ResolvedFindPredicate[][],
+	childPaths: string[] | null
 ): boolean {
 	if (predicateBranches.length === 0) {
 		return true;
@@ -306,7 +375,7 @@ function matchesPredicates(
 
 	const entryType = entry.isDirectory ? 'd' : 'f';
 	for (const branch of predicateBranches) {
-		if (matchesBranch(entry, entryType, branch)) {
+		if (matchesBranch(entry, entryType, branch, childPaths)) {
 			// Stop at the first matching branch to preserve left-to-right OR semantics.
 			return true;
 		}
@@ -317,10 +386,11 @@ function matchesPredicates(
 function matchesBranch(
 	entry: FindEntry,
 	entryType: 'd' | 'f',
-	branch: ResolvedFindPredicate[]
+	branch: ResolvedFindPredicate[],
+	childPaths: string[] | null
 ): boolean {
 	for (const predicate of branch) {
-		if (!matchesPredicate(entry, entryType, predicate)) {
+		if (!matchesPredicate(entry, entryType, predicate, childPaths)) {
 			return false;
 		}
 	}
@@ -330,7 +400,8 @@ function matchesBranch(
 function matchesPredicate(
 	entry: FindEntry,
 	entryType: 'd' | 'f',
-	predicate: ResolvedFindPredicate
+	predicate: ResolvedFindPredicate,
+	childPaths: string[] | null
 ): boolean {
 	if (predicate.kind === 'name') {
 		return predicate.matcher(basename(entry.displayPath));
@@ -338,7 +409,40 @@ function matchesPredicate(
 	if (predicate.kind === 'path') {
 		return predicate.matcher(entry.displayPath);
 	}
+	if (predicate.kind === 'regex') {
+		return predicate.matcher(entry.displayPath);
+	}
+	if (predicate.kind === 'constant') {
+		return predicate.value;
+	}
+	if (predicate.kind === 'empty') {
+		if (entryType === 'f') {
+			return entry.size === 0;
+		}
+		return childPaths !== null && childPaths.length === 0;
+	}
 	return predicate.types.has(entryType);
+}
+
+function compileFindRegexMatcher(
+	pattern: string,
+	caseInsensitive: boolean
+): (value: string) => boolean {
+	const translatedPattern = translateFindRegexPattern(pattern);
+	const flags = caseInsensitive ? 'i' : '';
+	const regex = new RegExp(`^(?:${translatedPattern})$`, flags);
+	return (value: string) => regex.test(value);
+}
+
+function translateFindRegexPattern(pattern: string): string {
+	return pattern
+		.replaceAll('\\(', '(')
+		.replaceAll('\\)', ')')
+		.replaceAll('\\|', '|')
+		.replaceAll('\\+', '+')
+		.replaceAll('\\?', '?')
+		.replaceAll('\\{', '{')
+		.replaceAll('\\}', '}');
 }
 
 async function readChildren(fs: FS, path: string): Promise<string[]> {

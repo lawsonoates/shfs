@@ -205,6 +205,22 @@ export type FindPredicateIR =
 			pattern: ExpandedWord;
 	  }
 	| {
+			kind: 'ipath';
+			pattern: ExpandedWord;
+	  }
+	| {
+			kind: 'regex';
+			caseInsensitive: boolean;
+			pattern: ExpandedWord;
+	  }
+	| {
+			kind: 'constant';
+			value: boolean;
+	  }
+	| {
+			kind: 'empty';
+	  }
+	| {
 			kind: 'type';
 			types: FindTypeIR[];
 	  };

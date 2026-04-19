@@ -44,6 +44,25 @@ interface FindParseState {
 	traversal: FindTraversalIR;
 }
 
+type FindPatternPredicateToken =
+	| '-name'
+	| '-path'
+	| '-ipath'
+	| '-wholename'
+	| '-iwholename'
+	| '-regex'
+	| '-iregex';
+
+const PATTERN_PREDICATES = new Set<FindPatternPredicateToken>([
+	'-name',
+	'-path',
+	'-ipath',
+	'-wholename',
+	'-iwholename',
+	'-regex',
+	'-iregex',
+]);
+
 export function compileFind(command: SimpleCommandIR): StepIR {
 	return {
 		cmd: 'find',
@@ -137,11 +156,24 @@ function parseFindToken(
 	token: string,
 	state: FindParseState
 ): number {
-	if (token === '-name' || token === '-path') {
-		return parseStringPredicate(argv, index, token, state);
+	if (isPatternPredicateToken(token)) {
+		return parsePatternPredicate(argv, index, token, state);
 	}
 	if (token === '-type') {
 		return parseTypePredicate(argv, index, state);
+	}
+	if (token === '-true' || token === '-false') {
+		state.currentBranch.push({
+			kind: 'constant',
+			value: token === '-true',
+		});
+		return index + 1;
+	}
+	if (token === '-empty') {
+		state.currentBranch.push({
+			kind: 'empty',
+		});
+		return index + 1;
 	}
 	if (token === '-o' || token === '-or') {
 		return parseOrPredicateSeparator(index, state);
@@ -182,6 +214,12 @@ function parseFindToken(
 	return index + 1;
 }
 
+function isPatternPredicateToken(
+	token: string
+): token is FindPatternPredicateToken {
+	return PATTERN_PREDICATES.has(token as FindPatternPredicateToken);
+}
+
 function parseOrPredicateSeparator(
 	index: number,
 	state: FindParseState
@@ -205,10 +243,10 @@ function parseOrPredicateSeparator(
 	return index + 1;
 }
 
-function parseStringPredicate(
+function parsePatternPredicate(
 	argv: ExpandedWord[],
 	index: number,
-	token: '-name' | '-path',
+	token: FindPatternPredicateToken,
 	state: FindParseState
 ): number {
 	const valueWord = argv[index + 1];
@@ -217,10 +255,44 @@ function parseStringPredicate(
 		return index + 1;
 	}
 
-	state.currentBranch.push({
-		kind: token === '-name' ? 'name' : 'path',
-		pattern: valueWord,
-	});
+	switch (token) {
+		case '-name': {
+			state.currentBranch.push({
+				kind: 'name',
+				pattern: valueWord,
+			});
+			break;
+		}
+		case '-path':
+		case '-wholename': {
+			state.currentBranch.push({
+				kind: 'path',
+				pattern: valueWord,
+			});
+			break;
+		}
+		case '-ipath':
+		case '-iwholename': {
+			state.currentBranch.push({
+				kind: 'ipath',
+				pattern: valueWord,
+			});
+			break;
+		}
+		case '-regex':
+		case '-iregex': {
+			state.currentBranch.push({
+				kind: 'regex',
+				caseInsensitive: token === '-iregex',
+				pattern: valueWord,
+			});
+			break;
+		}
+		default: {
+			const _never: never = token;
+			return _never;
+		}
+	}
 	return index + 2;
 }
 
