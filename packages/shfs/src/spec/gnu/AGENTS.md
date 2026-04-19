@@ -5,3 +5,4 @@
     - Grep: opensrc/repos/github.com/Distrotech/grep/tests/
     - Find (shell): opensrc/repos/github.com/jamesyoungman/findutils/tests/find
     - Find (DejaGNU): opensrc/repos/github.com/jamesyoungman/findutils/find/testsuite
+    - Xargs (DejaGNU): opensrc/repos/github.com/jamesyoungman/findutils/xargs/testsuite

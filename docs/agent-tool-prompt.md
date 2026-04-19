@@ -6,11 +6,12 @@ Strict fish-inspired subset for filesystem commands. Not POSIX, not full fish. D
 
 ## Commands
 
-- `cat`, `cd`, `cp`, `echo`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `pwd`, `read`, `rm`, `set`, `string`, `tail`, `test`, `touch` (built-ins only, no external binaries, no `$PATH`)
+- `cat`, `cd`, `cp`, `echo`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `pwd`, `read`, `rm`, `set`, `string`, `tail`, `test`, `touch`, `xargs` (built-ins only, no external binaries, no `$PATH`)
 
 ## Supported
 
 - **Pipelines**: `|` only, left-to-right, stream-based (newline allowed after `|` for line continuation)
+- **xargs subset**: supports `-0`/`--null`, `-d`, `-E`, `-I`, `-L`, `-n`, `-r`/`--no-run-if-empty`; default command is `echo`; `-n`/`-L`/`-I` are mutually exclusive with last-flag-wins behavior
 - **Statements**: multiple statements separated by newline or `;`
 - **Quoting**: Single `'` (literal, no escapes), double `"` (allows `(command)` substitution, escapes `\"` and `\\` only)
 - **Escapes**: `\` escapes next char outside quotes, line continuation at EOL; literal in single quotes

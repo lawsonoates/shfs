@@ -293,6 +293,25 @@ export interface GrepStep {
 	args: GrepArgsIR;
 }
 
+export interface XargsArgsIR {
+	command: ExpandedWord[];
+	delimiter: string | null;
+	eof: string | null;
+	maxArgs: number | null;
+	maxLines: number | null;
+	noRunIfEmpty: boolean;
+	replace: string | null;
+}
+
+/**
+ * Xargs step.
+ */
+export interface XargsStep {
+	cmd: 'xargs';
+	redirections?: RedirectionIR[];
+	args: XargsArgsIR;
+}
+
 export type SetScope = 'global' | 'local';
 
 /**
@@ -363,7 +382,8 @@ export type StepIR =
 	| StringStep
 	| TailStep
 	| TestStep
-	| TouchStep;
+	| TouchStep
+	| XargsStep;
 
 /**
  * PipelineIR with ExpandedWord support.

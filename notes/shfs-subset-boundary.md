@@ -32,6 +32,11 @@ It is not a full fish shell and does not target host OS parity.
   - default binary match reporting (`Binary file <path> matches`)
   - null-data record mode (`-z` / `--null-data`)
   - deterministic status behavior for match/no-match/error (`0`/`1`/`2`)
+- Argument batching with `xargs` (GNU/POSIX-inspired subset):
+  - supported options: `-0`/`--null`, `-d`, `-E`, `-I`, `-L`, `-n`, `-r`/`--no-run-if-empty`
+  - default command is `echo` when no command is provided
+  - batching controls `-n`, `-L`, and `-I` are mutually exclusive; last option wins
+  - malformed quote/escape input is a deterministic parse failure
 - Globbing and wildcard expansion (fish-style):
   - full pattern support for `*`, `?`, `[ ... ]`, and `**`
   - recursive glob behavior and trailing-slash directory matching semantics
@@ -57,6 +62,9 @@ It is not a full fish shell and does not target host OS parity.
 - Full GNU `grep` compatibility
   - only documented subset behavior is in scope
   - host/locale-specific edge-case parity beyond covered GNU-derived tests is out of scope
+- Full GNU/POSIX `xargs` compatibility
+  - only documented subset behavior is in scope
+  - unsupported flags/modes and GNU warning/diagnostic parity are out of scope
 - Permission model beyond basic virtual FS behavior
 - `env KEY=... cmd` scoped environment injection
 - Interactive shell features:
