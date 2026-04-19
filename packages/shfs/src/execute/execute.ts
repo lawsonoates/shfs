@@ -24,6 +24,7 @@ import { pwd } from '../operator/pwd/pwd';
 import { rm } from '../operator/rm/rm';
 import { tail } from '../operator/tail/tail';
 import { touch } from '../operator/touch/touch';
+import { runXargsCommand } from '../operator/xargs/xargs';
 import type { Record as ShellRecord } from '../record';
 import type { Stream } from '../stream';
 import {
@@ -452,6 +453,32 @@ function executeStreamStep(
 		}
 		case 'find': {
 			return find(fs, context, step.args);
+		}
+		case 'xargs': {
+			return (async function* (): Stream<ShellRecord> {
+				const inputPath = await resolveRedirectPath(
+					step.cmd,
+					step.redirections,
+					'input',
+					fs,
+					context
+				);
+				const result = await runXargsCommand({
+					context,
+					fs,
+					input,
+					inputPath,
+					parsed: step.args,
+				});
+				context.status = result.exitCode;
+				context.stderr.push(...result.stderr);
+				for (const text of result.stdout) {
+					yield {
+						kind: 'line',
+						text,
+					};
+				}
+			})();
 		}
 		case 'head': {
 			return (async function* (): Stream<ShellRecord> {
