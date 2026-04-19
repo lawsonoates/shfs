@@ -310,3 +310,38 @@ test('compileFind records missing and non-numeric traversal arguments', () => {
 		'find: missing argument to -maxdepth',
 	]);
 });
+
+test('compileFind records missing arguments for supported string predicates', () => {
+	const tokens = [
+		'-ipath',
+		'-wholename',
+		'-iwholename',
+		'-regex',
+		'-iregex',
+	] as const;
+
+	for (const token of tokens) {
+		const step = mustBeFindStep(compileFind(findCommand([literal(token)])));
+
+		expect(step.args.usageError).toBe(true);
+		expect(
+			step.args.diagnostics.map((diagnostic) => diagnostic.message)
+		).toEqual([`find: missing argument to ${token}`]);
+	}
+});
+
+test('compileFind accepts boolean constant predicates without arguments', () => {
+	const step = mustBeFindStep(
+		compileFind(
+			findCommand([
+				literal('.'),
+				literal('-true'),
+				literal('-o'),
+				literal('-false'),
+			])
+		)
+	);
+
+	expect(step.args.usageError).toBe(false);
+	expect(step.args.diagnostics).toHaveLength(0);
+});
