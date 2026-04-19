@@ -68,12 +68,12 @@ function parseOption(
 	}
 	if (token === '-n' || token.startsWith('-n')) {
 		const value = optionValue(argv, index, token, '-n');
-		args.maxArgs = parsePositiveInteger(value.value, '-n');
+		setMaxArgsMode(args, parsePositiveInteger(value.value, '-n'));
 		return { matched: true, nextIndex: value.nextIndex };
 	}
 	if (token === '-L' || token.startsWith('-L')) {
 		const value = optionValue(argv, index, token, '-L');
-		args.maxLines = parsePositiveInteger(value.value, '-L');
+		setMaxLinesMode(args, parsePositiveInteger(value.value, '-L'));
 		return { matched: true, nextIndex: value.nextIndex };
 	}
 	if (token === '-E' || token.startsWith('-E')) {
@@ -83,8 +83,7 @@ function parseOption(
 	}
 	if (token === '-I' || token.startsWith('-I')) {
 		const value = optionValue(argv, index, token, '-I');
-		args.replace = value.value;
-		args.maxLines = 1;
+		setReplaceMode(args, value.value);
 		return { matched: true, nextIndex: value.nextIndex };
 	}
 	if (token === '-d' || token.startsWith('-d')) {
@@ -95,6 +94,24 @@ function parseOption(
 	}
 
 	return { matched: false, nextIndex: index };
+}
+
+function setMaxArgsMode(args: XargsArgsIR, maxArgs: number): void {
+	args.maxArgs = maxArgs;
+	args.maxLines = null;
+	args.replace = null;
+}
+
+function setMaxLinesMode(args: XargsArgsIR, maxLines: number): void {
+	args.maxLines = maxLines;
+	args.maxArgs = null;
+	args.replace = null;
+}
+
+function setReplaceMode(args: XargsArgsIR, replace: string): void {
+	args.replace = replace;
+	args.maxLines = 1;
+	args.maxArgs = null;
 }
 
 function optionValue(

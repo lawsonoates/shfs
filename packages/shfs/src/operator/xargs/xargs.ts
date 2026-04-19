@@ -229,8 +229,11 @@ function tokenize(input: string, eof: string | null): TokenizeResult {
 		appendUnquotedChar(state, char);
 	}
 
+	if (state.quote) {
+		throw new Error(`xargs: unterminated quote ${state.quote}`);
+	}
 	if (state.escaped) {
-		state.current += '\\';
+		throw new Error('xargs: unterminated escape');
 	}
 	return { items, stopped: pushToken(items, state.current, eof) };
 }
