@@ -4,44 +4,17 @@ import type {
 	StatementChainModeIR,
 	StepIR,
 } from '@shfs/compiler';
-import { cd } from '../builtin/cd/cd';
-import { echo } from '../builtin/echo/echo';
-import { read } from '../builtin/read/read';
-import { set } from '../builtin/set/set';
-import { string } from '../builtin/string/string';
-import { test } from '../builtin/test/test';
-import type { BuiltinContext, BuiltinRuntime } from '../builtin/types';
 import type { FS } from '../fs/fs';
-import { cat } from '../operator/cat/cat';
-import { cp } from '../operator/cp/cp';
-import { find } from '../operator/find/find';
-import { runGrepCommand } from '../operator/grep/grep';
-import { headLines, headWithN } from '../operator/head/head';
-import { ls } from '../operator/ls/ls';
-import { mkdir } from '../operator/mkdir/mkdir';
-import { mv } from '../operator/mv/mv';
-import { pwd } from '../operator/pwd/pwd';
-import { rm } from '../operator/rm/rm';
-import { tail } from '../operator/tail/tail';
-import { touch } from '../operator/touch/touch';
-import { runXargsCommand } from '../operator/xargs/xargs';
 import type { Record as ShellRecord } from '../record';
 import type { Stream } from '../stream';
-import {
-	evaluateExpandedPathWords,
-	evaluateExpandedSinglePath,
-	normalizeCwd,
-	resolvePathsFromCwd,
-} from './path';
-import { files } from './producers';
-import { toFormattedLineStream } from './records';
+import { normalizeCwd } from './path';
 import {
 	applyOutputRedirect,
 	hasRedirect,
 	type ExecuteResult as RedirectExecuteResult,
 	resolveRedirectPath,
-	withInputRedirect,
 } from './redirection';
+import { CommandRegistry, type ExecuteStepContext } from './registry';
 
 export type { ExecuteResult } from './redirection';
 
@@ -53,26 +26,14 @@ export interface ExecuteContext {
 	localVars?: Map<string, string>;
 }
 
-type NormalizedExecuteContext = BuiltinContext;
-
-type EffectStep = Extract<
-	StepIR,
-	{ cmd: 'cd' | 'cp' | 'mkdir' | 'mv' | 'rm' | 'touch' }
->;
-
-type StreamStep = Exclude<StepIR, EffectStep>;
-
-const EFFECT_COMMANDS = new Set(['cd', 'cp', 'mkdir', 'mv', 'rm', 'touch']);
-const ROOT_DIRECTORY = '/';
-const TEXT_ENCODER = new TextEncoder();
+type NormalizedExecuteContext = ExecuteStepContext;
 
 interface StreamExecutionOptions {
 	finalGrepOutputRedirectPath?: string;
 }
 
-function isEffectStep(step: StepIR): step is EffectStep {
-	return EFFECT_COMMANDS.has(step.cmd);
-}
+const ROOT_DIRECTORY = '/';
+const TEXT_ENCODER = new TextEncoder();
 
 async function* emptyStream<T>(): Stream<T> {
 	// no records
@@ -114,7 +75,8 @@ function isPipelineSink(pipeline: PipelineIR): boolean {
 	}
 
 	return (
-		isEffectStep(finalStep) || hasRedirect(finalStep.redirections, 'output')
+		CommandRegistry.isEffectStep(finalStep) ||
+		hasRedirect(finalStep.redirections, 'output')
 	);
 }
 
@@ -233,9 +195,12 @@ function executePipeline(
 		};
 	}
 
-	if (isEffectStep(lastStep)) {
+	if (CommandRegistry.isEffectStep(lastStep)) {
 		for (const [index, step] of ir.steps.entries()) {
-			if (isEffectStep(step) && index !== ir.steps.length - 1) {
+			if (
+				CommandRegistry.isEffectStep(step) &&
+				index !== ir.steps.length - 1
+			) {
 				throw new Error(
 					`Unsupported pipeline: "${step.cmd}" must be the final command`
 				);
@@ -333,20 +298,21 @@ function executePipelineToStream(
 	return (async function* () {
 		let stream: Stream<ShellRecord> | null = null;
 		for (const [index, step] of steps.entries()) {
-			if (isEffectStep(step)) {
+			if (CommandRegistry.isEffectStep(step)) {
 				throw new Error(
 					`Unsupported pipeline: "${step.cmd}" requires being the final command`
 				);
 			}
-			stream = executeStreamStep(
+			stream = CommandRegistry.executeStep({
 				step,
 				fs,
-				stream,
+				input: stream,
 				context,
-				index === steps.length - 1
-					? options.finalGrepOutputRedirectPath
-					: undefined
-			);
+				resolvedOutputRedirectPath:
+					index === steps.length - 1
+						? options.finalGrepOutputRedirectPath
+						: undefined,
+			});
 		}
 
 		if (!stream) {
@@ -362,7 +328,7 @@ async function executePipelineToSink(
 	context: NormalizedExecuteContext
 ): Promise<void> {
 	const finalStep = steps.at(-1);
-	if (!(finalStep && isEffectStep(finalStep))) {
+	if (!(finalStep && CommandRegistry.isEffectStep(finalStep))) {
 		return;
 	}
 
@@ -373,413 +339,11 @@ async function executePipelineToSink(
 		}
 	}
 
-	await executeEffectStep(finalStep, fs, context);
-}
-
-function executeStreamStep(
-	step: StreamStep,
-	fs: FS,
-	input: Stream<ShellRecord> | null,
-	context: NormalizedExecuteContext,
-	resolvedOutputRedirectPath?: string
-): Stream<ShellRecord> {
-	const builtinRuntime = createBuiltinRuntime(fs, context, input);
-
-	switch (step.cmd) {
-		case 'cat': {
-			return (async function* (): Stream<ShellRecord> {
-				const options = {
-					numberLines: step.args.numberLines,
-					numberNonBlank: step.args.numberNonBlank,
-					showAll: step.args.showAll,
-					showEnds: step.args.showEnds,
-					showNonprinting: step.args.showNonprinting,
-					showTabs: step.args.showTabs,
-					squeezeBlank: step.args.squeezeBlank,
-				};
-				const inputPath = await resolveRedirectPath(
-					step.cmd,
-					step.redirections,
-					'input',
-					fs,
-					context
-				);
-				const filePaths = withInputRedirect(
-					resolvePathsFromCwd(
-						context.cwd,
-						await evaluateExpandedPathWords(
-							'cat',
-							step.args.files,
-							fs,
-							context
-						)
-					),
-					inputPath
-				);
-				if (filePaths.length > 0) {
-					yield* cat(fs, options)(files(...filePaths));
-					context.status = 0;
-					return;
-				}
-				if (input) {
-					yield* cat(fs, options)(input);
-				}
-				context.status = 0;
-			})();
-		}
-		case 'grep': {
-			return (async function* (): Stream<ShellRecord> {
-				const result = await runGrepCommand({
-					context,
-					fs,
-					input,
-					// @shfs/compiler can be consumed as a built package in this workspace,
-					// so grep args may type as legacy argv until compiler is rebuilt.
-					parsed: step.args as unknown as Parameters<
-						typeof runGrepCommand
-					>[0]['parsed'],
-					redirections: step.redirections,
-					resolvedOutputRedirectPath,
-				});
-				context.status = result.exitCode;
-				context.stderr.push(...result.stderr);
-				for (const text of result.stdout) {
-					yield {
-						kind: 'line',
-						text,
-					};
-				}
-			})();
-		}
-		case 'find': {
-			return find(fs, context, step.args);
-		}
-		case 'xargs': {
-			return (async function* (): Stream<ShellRecord> {
-				const inputPath = await resolveRedirectPath(
-					step.cmd,
-					step.redirections,
-					'input',
-					fs,
-					context
-				);
-				const result = await runXargsCommand({
-					context,
-					fs,
-					input,
-					inputPath,
-					parsed: step.args,
-				});
-				context.status = result.exitCode;
-				context.stderr.push(...result.stderr);
-				for (const text of result.stdout) {
-					yield {
-						kind: 'line',
-						text,
-					};
-				}
-			})();
-		}
-		case 'head': {
-			return (async function* (): Stream<ShellRecord> {
-				const inputPath = await resolveRedirectPath(
-					step.cmd,
-					step.redirections,
-					'input',
-					fs,
-					context
-				);
-				const filePaths = withInputRedirect(
-					resolvePathsFromCwd(
-						context.cwd,
-						await evaluateExpandedPathWords(
-							'head',
-							step.args.files,
-							fs,
-							context
-						)
-					),
-					inputPath
-				);
-				if (filePaths.length > 0) {
-					yield* headWithN(fs, step.args.n)(files(...filePaths));
-					context.status = 0;
-					return;
-				}
-				if (input) {
-					yield* headLines(step.args.n)(toFormattedLineStream(input));
-				}
-				context.status = 0;
-			})();
-		}
-		case 'ls': {
-			return (async function* (): Stream<ShellRecord> {
-				const paths = await evaluateExpandedPathWords(
-					'ls',
-					step.args.paths,
-					fs,
-					context
-				);
-				for (const inputPath of paths) {
-					const resolvedPath = resolveLsPath(inputPath, context.cwd);
-					for await (const fileRecord of ls(fs, resolvedPath, {
-						showAll: step.args.showAll,
-					})) {
-						if (step.args.longFormat) {
-							const stat = await fs.stat(fileRecord.path);
-							yield {
-								kind: 'line',
-								text: formatLongListing(fileRecord.path, stat),
-							} as const;
-							continue;
-						}
-						yield fileRecord;
-					}
-				}
-				context.status = 0;
-			})();
-		}
-		case 'tail': {
-			return (async function* (): Stream<ShellRecord> {
-				const inputPath = await resolveRedirectPath(
-					step.cmd,
-					step.redirections,
-					'input',
-					fs,
-					context
-				);
-				const filePaths = withInputRedirect(
-					resolvePathsFromCwd(
-						context.cwd,
-						await evaluateExpandedPathWords(
-							'tail',
-							step.args.files,
-							fs,
-							context
-						)
-					),
-					inputPath
-				);
-				if (filePaths.length > 0) {
-					for (const filePath of filePaths) {
-						yield* tail(step.args.n)(cat(fs)(files(filePath)));
-					}
-					context.status = 0;
-					return;
-				}
-				if (input) {
-					yield* tail(step.args.n)(toFormattedLineStream(input));
-				}
-				context.status = 0;
-			})();
-		}
-		case 'pwd': {
-			return (async function* (): Stream<ShellRecord> {
-				yield* pwd(context.cwd);
-				context.status = 0;
-			})();
-		}
-		case 'echo': {
-			return echo(builtinRuntime, step.args);
-		}
-		case 'set': {
-			return set(builtinRuntime, step.args);
-		}
-		case 'test': {
-			return test(builtinRuntime, step.args);
-		}
-		case 'read': {
-			return read(builtinRuntime, step.args);
-		}
-		case 'string': {
-			return string(builtinRuntime, step.args);
-		}
-		default: {
-			const _exhaustive: never = step;
-			throw new Error(
-				`Unknown command: ${String((_exhaustive as { cmd: string }).cmd)}`
-			);
-		}
-	}
-}
-
-async function executeEffectStep(
-	step: EffectStep,
-	fs: FS,
-	context: NormalizedExecuteContext
-): Promise<void> {
-	const builtinRuntime = createBuiltinRuntime(fs, context, null);
-
-	switch (step.cmd) {
-		case 'cd': {
-			await cd(builtinRuntime, step.args);
-			break;
-		}
-		case 'cp': {
-			const srcPaths = resolvePathsFromCwd(
-				context.cwd,
-				await evaluateExpandedPathWords(
-					'cp',
-					step.args.srcs,
-					fs,
-					context
-				)
-			);
-			const destinationPaths = resolvePathsFromCwd(context.cwd, [
-				await evaluateExpandedSinglePath(
-					'cp',
-					'destination must expand to exactly 1 path',
-					step.args.dest,
-					fs,
-					context
-				),
-			]);
-			const destinationPath = destinationPaths.at(0);
-			if (destinationPath === undefined) {
-				throw new Error('cp: destination missing after expansion');
-			}
-			await cp(fs)({
-				srcs: srcPaths,
-				dest: destinationPath,
-				force: step.args.force,
-				interactive: step.args.interactive,
-				recursive: step.args.recursive,
-			});
-			context.status = 0;
-			break;
-		}
-		case 'mkdir': {
-			const paths = resolvePathsFromCwd(
-				context.cwd,
-				await evaluateExpandedPathWords(
-					'mkdir',
-					step.args.paths,
-					fs,
-					context
-				)
-			);
-			for (const path of paths) {
-				await mkdir(fs)({ path, recursive: step.args.recursive });
-			}
-			context.status = 0;
-			break;
-		}
-		case 'mv': {
-			const srcPaths = resolvePathsFromCwd(
-				context.cwd,
-				await evaluateExpandedPathWords(
-					'mv',
-					step.args.srcs,
-					fs,
-					context
-				)
-			);
-			const destinationPaths = resolvePathsFromCwd(context.cwd, [
-				await evaluateExpandedSinglePath(
-					'mv',
-					'destination must expand to exactly 1 path',
-					step.args.dest,
-					fs,
-					context
-				),
-			]);
-			const destinationPath = destinationPaths.at(0);
-			if (destinationPath === undefined) {
-				throw new Error('mv: destination missing after expansion');
-			}
-			await mv(fs)({
-				srcs: srcPaths,
-				dest: destinationPath,
-				force: step.args.force,
-				interactive: step.args.interactive,
-			});
-			context.status = 0;
-			break;
-		}
-		case 'rm': {
-			const paths = resolvePathsFromCwd(
-				context.cwd,
-				await evaluateExpandedPathWords(
-					'rm',
-					step.args.paths,
-					fs,
-					context
-				)
-			);
-			for (const path of paths) {
-				await rm(fs)({
-					path,
-					force: step.args.force,
-					interactive: step.args.interactive,
-					recursive: step.args.recursive,
-				});
-			}
-			context.status = 0;
-			break;
-		}
-		case 'touch': {
-			const filePaths = resolvePathsFromCwd(
-				context.cwd,
-				await evaluateExpandedPathWords(
-					'touch',
-					step.args.files,
-					fs,
-					context
-				)
-			);
-			await touch(fs)({
-				files: filePaths,
-				accessTimeOnly: step.args.accessTimeOnly,
-				modificationTimeOnly: step.args.modificationTimeOnly,
-			});
-			context.status = 0;
-			break;
-		}
-		default: {
-			const _exhaustive: never = step;
-			throw new Error(
-				`Unknown command: ${String((_exhaustive as { cmd: string }).cmd)}`
-			);
-		}
-	}
-}
-
-function createBuiltinRuntime(
-	fs: FS,
-	context: NormalizedExecuteContext,
-	input: Stream<ShellRecord> | null
-): BuiltinRuntime {
-	return {
+	await CommandRegistry.executeStep({
+		step: finalStep,
 		fs,
 		context,
-		input,
-	};
-}
-
-function formatLongListing(
-	path: string,
-	stat: Awaited<ReturnType<FS['stat']>>
-): string {
-	const mode = stat.isDirectory ? 'd' : '-';
-	const size = String(stat.size).padStart(8, ' ');
-	return `${mode} ${size} ${stat.mtime.toISOString()} ${path}`;
-}
-
-function normalizeLsPath(path: string, cwd: string): string {
-	if (path === '.' || path === './') {
-		return cwd;
-	}
-	if (path.startsWith('./')) {
-		return `${cwd}/${path.slice(2)}`;
-	}
-	if (path.startsWith(ROOT_DIRECTORY)) {
-		return path;
-	}
-	return `${cwd}/${path}`;
-}
-
-function resolveLsPath(path: string, cwd: string): string {
-	return normalizeLsPath(path, cwd);
+	});
 }
 
 function normalizeContext(context: ExecuteContext): NormalizedExecuteContext {
