@@ -1,11 +1,12 @@
 import type { FS } from '../fs/fs';
 import type { Record as ShellRecord } from '../record';
+import type { OutputStream } from '../stderr';
 import type { Stream } from '../stream';
 
 export interface BuiltinContext {
 	cwd: string;
 	status: number;
-	stderr: string[];
+	stderr: OutputStream;
 	globalVars: Map<string, string>;
 	localVars: Map<string, string>;
 }

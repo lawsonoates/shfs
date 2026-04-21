@@ -6,6 +6,7 @@ import type {
 } from '@shfs/compiler';
 import type { FS } from '../fs/fs';
 import type { Record as ShellRecord } from '../record';
+import { BufferedOutputStream, type OutputStream } from '../stderr';
 import type { Stream } from '../stream';
 import { normalizeCwd } from './path';
 import {
@@ -21,7 +22,7 @@ export type { ExecuteResult } from './redirection';
 export interface ExecuteContext {
 	cwd: string;
 	status?: number;
-	stderr?: string[];
+	stderr?: OutputStream;
 	globalVars?: Map<string, string>;
 	localVars?: Map<string, string>;
 }
@@ -349,7 +350,7 @@ async function executePipelineToSink(
 function normalizeContext(context: ExecuteContext): NormalizedExecuteContext {
 	context.cwd = normalizeCwd(context.cwd);
 	context.status ??= 0;
-	context.stderr ??= [];
+	context.stderr ??= new BufferedOutputStream();
 	context.globalVars ??= new Map<string, string>();
 	context.localVars ??= new Map<string, string>();
 	return context as NormalizedExecuteContext;
