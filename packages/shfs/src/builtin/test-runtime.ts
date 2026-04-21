@@ -1,5 +1,6 @@
 import { MemoryFS } from '../fs/memory';
 import type { Record as ShellRecord } from '../record';
+import { BufferedOutputStream } from '../stderr';
 import type { Stream } from '../stream';
 import type { BuiltinRuntime } from './types';
 
@@ -19,7 +20,7 @@ export function createBuiltinRuntime(options?: {
 			globalVars: new Map<string, string>(),
 			localVars: new Map<string, string>(),
 			status: 0,
-			stderr: [],
+			stderr: new BufferedOutputStream(),
 		},
 		fs,
 		input: options?.input ?? null,

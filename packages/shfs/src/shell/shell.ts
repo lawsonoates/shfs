@@ -18,7 +18,11 @@ import {
 	ShellOutput,
 } from '../output-channels';
 import { formatRecord, type Record } from '../record';
-import { formatStderr } from '../stderr';
+import {
+	BufferedOutputStream,
+	formatStderr,
+	type OutputStream,
+} from '../stderr';
 import { lazy } from '../util/lazy';
 
 const ROOT_DIRECTORY = '/';
@@ -266,7 +270,7 @@ export class Shell {
 				const context = {
 					cwd: commandStartCwd,
 					status: this.currentStatus,
-					stderr: [] as string[],
+					stderr: new BufferedOutputStream(),
 					globalVars: this.globalVars,
 					localVars: new Map<string, string>(),
 				};
@@ -275,14 +279,14 @@ export class Shell {
 						stdout: await collectStdoutRecords(
 							execute(ir(), fs, context)
 						),
-						stderr: [...context.stderr],
+						stderr: context.stderr.snapshot(),
 						exitCode: context.status,
 					};
 				} catch (error) {
 					handleDiagnosticFailure(error, context);
 					return {
 						stdout: [],
-						stderr: [...context.stderr],
+						stderr: context.stderr.snapshot(),
 						exitCode: context.status ?? 1,
 					};
 				} finally {
@@ -303,7 +307,7 @@ function handleDiagnosticFailure(
 	error: unknown,
 	context: {
 		status?: number;
-		stderr: string[];
+		stderr: OutputStream;
 	}
 ): void {
 	if (error instanceof ParseSyntaxError) {

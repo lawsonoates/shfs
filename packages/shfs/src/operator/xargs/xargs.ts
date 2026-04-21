@@ -9,6 +9,7 @@ import type { BuiltinContext } from '../../builtin/types';
 import { evaluateExpandedWords } from '../../execute/path';
 import type { FS } from '../../fs/fs';
 import { formatRecord, type Record as ShellRecord } from '../../record';
+import { BufferedOutputStream } from '../../stderr';
 import type { Stream } from '../../stream';
 
 interface RunXargsCommandOptions {
@@ -309,7 +310,7 @@ async function runCommand(
 		globalVars: context.globalVars,
 		localVars: context.localVars,
 		status: context.status,
-		stderr: [],
+		stderr: new BufferedOutputStream(),
 	};
 	const executeModule = await import('../../execute/execute');
 	const result = executeModule.execute(
@@ -320,7 +321,7 @@ async function runCommand(
 	const stdout = await collectStdout(result);
 	return {
 		exitCode: childContext.status,
-		stderr: childContext.stderr,
+		stderr: childContext.stderr.snapshot(),
 		stdout,
 	};
 }

@@ -347,7 +347,7 @@ CommandRegistry.register('grep', {
 				resolvedOutputRedirectPath,
 			});
 			context.status = result.exitCode;
-			context.stderr.push(...result.stderr);
+			context.stderr.appendLines(result.stderr);
 			for (const text of result.stdout) {
 				yield {
 					kind: 'line',
@@ -384,7 +384,7 @@ CommandRegistry.register('xargs', {
 				parsed: step.args,
 			});
 			context.status = result.exitCode;
-			context.stderr.push(...result.stderr);
+			context.stderr.appendLines(result.stderr);
 			for (const text of result.stdout) {
 				yield {
 					kind: 'line',
