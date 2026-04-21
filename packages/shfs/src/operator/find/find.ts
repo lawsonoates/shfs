@@ -439,6 +439,9 @@ function translateFindRegexPattern(pattern: string): string {
 
 	for (let index = 0; index < pattern.length; index++) {
 		const char = pattern[index];
+		if (char === undefined) {
+			continue;
+		}
 		if (char !== '\\') {
 			translated += isEmacsLiteralJsMetaChar(char) ? `\\${char}` : char;
 			continue;
