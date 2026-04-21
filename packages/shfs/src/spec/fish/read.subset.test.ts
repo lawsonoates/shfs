@@ -81,3 +81,19 @@ test('read subset: validates variable names', async () => {
 		'read: invalid variable name: 1bad'
 	);
 });
+
+// read.fish lines 172-181 verify file-fed reads via `<$path`.
+test('read subset (read.fish): input redirection feeds read from a file', async () => {
+	await run('echo hello > /tmp/read-from-file.txt');
+	expect(
+		await run('read from_file </tmp/read-from-file.txt; echo $from_file')
+	).toBe('hello');
+});
+
+// read.fish line 176 uses read from redirected stdin; include whitespace payload.
+test('read subset (read.fish): input redirection preserves spaces for a single read variable', async () => {
+	await run('echo "hello there" > /tmp/read-with-space.txt');
+	expect(
+		await run('read phrase < /tmp/read-with-space.txt; echo $phrase')
+	).toBe('hello there');
+});

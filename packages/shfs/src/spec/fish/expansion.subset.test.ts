@@ -23,6 +23,17 @@ async function run(command: string): Promise<string> {
 	return await shell.$`${command}`.text();
 }
 
+async function runWithStatus(
+	command: string
+): Promise<{ output: string; stderr: string; status: number }> {
+	const result = await shell.$`${command}`.nothrow();
+	return {
+		output: result.text(),
+		stderr: result.stderr.toString(),
+		status: result.exitCode,
+	};
+}
+
 // expansion.fish: echo {apple,orange}
 // Brace expansion is out of scope for shfs.
 
@@ -106,4 +117,25 @@ test('expansion subset: undefined variable expands to empty in double quotes', a
 
 test('expansion subset: undefined variable expands to empty unquoted', async () => {
 	expect(await run('echo value:$undefined')).toBe('value:');
+});
+
+// expansion.fish lines 4-13 use nested fish execution with `... 2>&1`
+// to assert diagnostic capture in command substitutions.
+// Adapted: shfs has no `$fish -c`, so we use a failing command directly.
+test('expansion subset (expansion.fish): command substitution captures diagnostics with 2>&1', async () => {
+	const withoutMerge = await runWithStatus('echo (find /missing)');
+	expect(withoutMerge.output).toBe('');
+	expect(withoutMerge.stderr).toContain('No such file or directory');
+
+	const withMerge = await runWithStatus('echo (find /missing 2>&1)');
+	expect(withMerge.output).toContain('No such file or directory');
+	expect(withMerge.stderr).toBe('');
+});
+
+// expansion.fish lines 327 and 333 use `($fish -c '...' 2>&1)` patterns.
+// Adapted: ensure compile diagnostics can be merged into captured substitution text.
+test('expansion subset (expansion.fish): 2>&1 inside command substitution preserves diagnostic text', async () => {
+	const merged = await runWithStatus('echo (grep -e 2>&1)');
+	expect(merged.output).toContain('Option -e requires a value');
+	expect(merged.stderr).toBe('');
 });
