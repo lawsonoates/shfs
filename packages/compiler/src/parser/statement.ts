@@ -9,11 +9,14 @@
 import { SourceSpan } from '../lexer/position';
 import { TokenKind } from '../lexer/token';
 import {
+	LiteralPart,
 	Pipeline,
 	Program,
-	type SimpleCommand,
+	Redirection,
+	SimpleCommand,
 	Statement,
 	type StatementChainMode,
+	Word,
 } from './ast';
 import type { CommandParser } from './command';
 import type { Parser } from './parser';
@@ -108,10 +111,32 @@ export class StatementParser {
 
 		// Parse remaining commands in pipeline
 		while (this.parser.currentToken.kind === TokenKind.PIPE) {
+			const pipeToken = this.parser.currentToken;
+			const previousCommand = commands.at(-1);
+			if (previousCommand) {
+				const rewrittenPreviousCommand = this.rewriteStderrPipeCommand(
+					previousCommand,
+					pipeToken.span.start.offset,
+					pipeToken.span
+				);
+				if (rewrittenPreviousCommand !== previousCommand) {
+					commands[commands.length - 1] = rewrittenPreviousCommand;
+				}
+			}
 			this.parser.advance(); // consume |
 
 			// Skip any newlines after pipe (line continuation)
 			this.skipNewlines();
+			const tokenAfterPipe = this.parser.currentToken;
+			if (
+				tokenAfterPipe.kind === TokenKind.WORD &&
+				tokenAfterPipe.spelling === '&'
+			) {
+				this.parser.syntacticError(
+					'Invalid fish pipeline operator',
+					'command after | (|& is unsupported; use &|)'
+				);
+			}
 
 			const command = this.commandParser.parseCommand();
 			if (!command) {
@@ -167,5 +192,47 @@ export class StatementParser {
 
 	private isChainKeyword(spelling: string): spelling is 'and' | 'or' {
 		return spelling === 'and' || spelling === 'or';
+	}
+
+	private rewriteStderrPipeCommand(
+		command: SimpleCommand,
+		pipeStartOffset: number,
+		pipeSpan: SourceSpan
+	): SimpleCommand {
+		const trailingArg = command.args.at(-1);
+		if (
+			!(
+				trailingArg &&
+				!trailingArg.quoted &&
+				trailingArg.literalValue === '&' &&
+				trailingArg.span.end.offset === pipeStartOffset
+			)
+		) {
+			return command;
+		}
+
+		const updatedArgs = command.args.slice(0, -1);
+		const pipeTarget = this.createLiteralWord('|', pipeSpan);
+		const updatedRedirections = [
+			...command.redirections,
+			new Redirection(pipeSpan, 'output', pipeTarget, {
+				mode: 'pipe',
+				sourceFd: 1,
+			}),
+			new Redirection(pipeSpan, 'output', pipeTarget, {
+				mode: 'pipe',
+				sourceFd: 2,
+			}),
+		];
+		return new SimpleCommand(
+			command.span,
+			command.name,
+			updatedArgs,
+			updatedRedirections
+		);
+	}
+
+	private createLiteralWord(literal: string, span: SourceSpan): Word {
+		return new Word(span, [new LiteralPart(span, literal)]);
 	}
 }

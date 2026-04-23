@@ -321,7 +321,7 @@ async function runCommand(
 	const stdout = await collectStdout(result);
 	return {
 		exitCode: childContext.status,
-		stderr: childContext.stderr.snapshot(),
+		stderr: [...childContext.stderr.snapshot()],
 		stdout,
 	};
 }

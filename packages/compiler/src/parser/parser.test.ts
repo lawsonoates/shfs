@@ -138,6 +138,24 @@ test('parse preserves mixed quoted and unquoted word parts', () => {
 	]);
 });
 
+// Quoted & before > is an argument, not a redirection prefix.
+test('parse keeps quoted redirection prefix as an argument', () => {
+	const command = parse("echo '&'>out").statements[0]?.pipeline.commands[0];
+
+	expect(command?.args.map((arg) => arg.literalValue)).toEqual(['&']);
+	expect(
+		command?.redirections.map((redirection) => redirection.sourceFd)
+	).toEqual([1]);
+});
+
+// Quoted & before | is an argument, not the &| pipe operator.
+test('parse keeps quoted pipe prefix as an argument', () => {
+	const command = parse("echo '&'|cat").statements[0]?.pipeline.commands[0];
+
+	expect(command?.args.map((arg) => arg.literalValue)).toEqual(['&']);
+	expect(command?.redirections).toHaveLength(0);
+});
+
 test('parse records chain metadata for and/or statements', () => {
 	const program = parse('test 1 = 1; and echo pass; or echo fail');
 	expect(program.statements.map((statement) => statement.chainMode)).toEqual([

@@ -34,6 +34,12 @@ export interface SimpleCommandIR {
  */
 export interface RedirectionIR {
 	kind: 'input' | 'output';
+	mode?: 'file' | 'fd' | 'close' | 'pipe';
+	sourceFd?: number;
+	targetFd?: number | null;
+	append?: boolean;
+	noclobber?: boolean;
+	optional?: boolean;
 	target: ExpandedWord;
 }
 
