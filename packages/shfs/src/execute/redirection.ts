@@ -1,4 +1,8 @@
-import type { RedirectionIR, StepIR } from '@shfs/compiler';
+import {
+	expandedWordToString,
+	type RedirectionIR,
+	type StepIR,
+} from '@shfs/compiler';
 import type { BuiltinContext } from '../builtin/types';
 import type { FS } from '../fs/fs';
 import type { Record as ShellRecord } from '../record';
@@ -7,33 +11,217 @@ import { evaluateExpandedSinglePath, resolvePathFromCwd } from './path';
 import { formatRecord } from './records';
 
 const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+const FD_TARGET_REGEX = /^&[0-9]+$/;
 
 export type ExecuteResult =
 	| { kind: 'stream'; value: Stream<ShellRecord> }
 	| { kind: 'sink'; value: Promise<void> };
 
-function getRedirect(
+export type RedirectionMode = 'file' | 'fd' | 'close' | 'pipe';
+
+export interface ResolvedInputRedirect {
+	path: string | null;
+	closed: boolean;
+}
+
+interface InputDescriptor {
+	kind: 'inherit' | 'path' | 'closed';
+	path?: string;
+}
+
+interface ResolvedFileRedirect {
+	path: string;
+	append: boolean;
+	noclobber: boolean;
+}
+
+function getSourceFd(redirection: RedirectionIR): number {
+	return redirection.sourceFd ?? (redirection.kind === 'input' ? 0 : 1);
+}
+
+function inferModeFromTarget(redirection: RedirectionIR): RedirectionMode {
+	const targetText = expandedWordToString(redirection.target);
+	if (targetText === '&-') {
+		return 'close';
+	}
+	if (FD_TARGET_REGEX.test(targetText)) {
+		return 'fd';
+	}
+	if (redirection.kind === 'output' && targetText === '|') {
+		return 'pipe';
+	}
+	return 'file';
+}
+
+export function getRedirectionMode(
+	redirection: RedirectionIR
+): RedirectionMode {
+	return redirection.mode ?? inferModeFromTarget(redirection);
+}
+
+function getTargetFd(redirection: RedirectionIR): number | null {
+	if (redirection.targetFd !== undefined && redirection.targetFd !== null) {
+		return redirection.targetFd;
+	}
+	const targetText = expandedWordToString(redirection.target);
+	if (FD_TARGET_REGEX.test(targetText)) {
+		return Number(targetText.slice(1));
+	}
+	return null;
+}
+
+function isOptionalInput(redirection: RedirectionIR): boolean {
+	if (redirection.optional) {
+		return true;
+	}
+	if (redirection.kind !== 'input') {
+		return false;
+	}
+	const targetText = expandedWordToString(redirection.target);
+	return targetText.startsWith('?');
+}
+
+function isDefaultFileRedirect(
+	redirection: RedirectionIR,
+	kind: RedirectionIR['kind']
+): boolean {
+	if (redirection.kind !== kind) {
+		return false;
+	}
+	if (getRedirectionMode(redirection) !== 'file') {
+		return false;
+	}
+	const sourceFd = getSourceFd(redirection);
+	return sourceFd === (kind === 'input' ? 0 : 1);
+}
+
+function getLastDefaultFileRedirect(
 	redirections: RedirectionIR[] | undefined,
 	kind: RedirectionIR['kind']
 ): RedirectionIR | null {
 	if (!redirections) {
 		return null;
 	}
-
 	let redirect: RedirectionIR | null = null;
 	for (const redirection of redirections) {
-		if (redirection.kind === kind) {
+		if (isDefaultFileRedirect(redirection, kind)) {
 			redirect = redirection;
 		}
 	}
 	return redirect;
 }
 
+async function resolveFileRedirect(
+	command: string,
+	redirection: RedirectionIR,
+	fs: FS,
+	context: BuiltinContext
+): Promise<ResolvedFileRedirect> {
+	const targetPath = await evaluateExpandedSinglePath(
+		command,
+		'redirection target must expand to exactly 1 path',
+		redirection.target,
+		fs,
+		context
+	);
+	return {
+		path: resolvePathFromCwd(context.cwd, targetPath),
+		append: redirection.append ?? false,
+		noclobber: redirection.noclobber ?? false,
+	};
+}
+
+function updateDescriptor(descriptor: InputDescriptor, path: string): void {
+	descriptor.kind = 'path';
+	descriptor.path = path;
+}
+
+function ensureInputDescriptor(
+	descriptors: Map<number, InputDescriptor>,
+	fd: number
+): InputDescriptor {
+	const existing = descriptors.get(fd);
+	if (existing) {
+		return existing;
+	}
+	const descriptor: InputDescriptor = {
+		kind: 'inherit',
+	};
+	descriptors.set(fd, descriptor);
+	return descriptor;
+}
+
+export async function resolveInputRedirect(
+	command: string,
+	redirections: RedirectionIR[] | undefined,
+	fs: FS,
+	context: BuiltinContext
+): Promise<ResolvedInputRedirect> {
+	if (!redirections || redirections.length === 0) {
+		return { path: null, closed: false };
+	}
+
+	const descriptors = new Map<number, InputDescriptor>();
+
+	for (const redirection of redirections) {
+		if (redirection.kind !== 'input') {
+			continue;
+		}
+
+		const sourceFd = getSourceFd(redirection);
+		const mode = getRedirectionMode(redirection);
+		if (mode === 'close') {
+			descriptors.set(sourceFd, { kind: 'closed' });
+			continue;
+		}
+		if (mode === 'fd') {
+			const targetFd = getTargetFd(redirection);
+			if (targetFd === null) {
+				throw new Error(
+					`${command}: invalid file descriptor duplication target`
+				);
+			}
+			descriptors.set(
+				sourceFd,
+				ensureInputDescriptor(descriptors, targetFd)
+			);
+			continue;
+		}
+		if (mode !== 'file') {
+			continue;
+		}
+
+		const resolved = await resolveFileRedirect(
+			command,
+			redirection,
+			fs,
+			context
+		);
+		if (isOptionalInput(redirection) && !(await fs.exists(resolved.path))) {
+			continue;
+		}
+		updateDescriptor(
+			ensureInputDescriptor(descriptors, sourceFd),
+			resolved.path
+		);
+	}
+
+	const stdinDescriptor = ensureInputDescriptor(descriptors, 0);
+	return {
+		path:
+			stdinDescriptor.kind === 'path'
+				? (stdinDescriptor.path ?? null)
+				: null,
+		closed: stdinDescriptor.kind === 'closed',
+	};
+}
+
 export function hasRedirect(
 	redirections: RedirectionIR[] | undefined,
 	kind: RedirectionIR['kind']
 ): boolean {
-	return getRedirect(redirections, kind) !== null;
+	return getLastDefaultFileRedirect(redirections, kind) !== null;
 }
 
 export async function resolveRedirectPath(
@@ -43,19 +231,22 @@ export async function resolveRedirectPath(
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string | null> {
-	const redirect = getRedirect(redirections, kind);
+	if (kind === 'input') {
+		const resolvedInput = await resolveInputRedirect(
+			command,
+			redirections,
+			fs,
+			context
+		);
+		return resolvedInput.path;
+	}
+
+	const redirect = getLastDefaultFileRedirect(redirections, kind);
 	if (!redirect) {
 		return null;
 	}
-
-	const targetPath = await evaluateExpandedSinglePath(
-		command,
-		'redirection target must expand to exactly 1 path',
-		redirect.target,
-		fs,
-		context
-	);
-	return resolvePathFromCwd(context.cwd, targetPath);
+	const resolved = await resolveFileRedirect(command, redirect, fs, context);
+	return resolved.path;
 }
 
 export function withInputRedirect(
@@ -66,6 +257,42 @@ export function withInputRedirect(
 		return paths;
 	}
 	return [inputPath];
+}
+
+async function readExistingFileText(fs: FS, path: string): Promise<string> {
+	try {
+		return textDecoder.decode(await fs.readFile(path));
+	} catch {
+		return '';
+	}
+}
+
+export async function writeTextToFile(
+	fs: FS,
+	path: string,
+	content: string,
+	options: {
+		append?: boolean;
+	}
+): Promise<void> {
+	const append = options.append ?? false;
+	if (!append) {
+		await fs.writeFile(path, textEncoder.encode(content));
+		return;
+	}
+	const existing = await readExistingFileText(fs, path);
+	const separator = existing === '' || content === '' ? '' : '\n';
+	await fs.writeFile(
+		path,
+		textEncoder.encode(`${existing}${separator}${content}`)
+	);
+}
+
+export async function ensureNoclobberWritable(
+	fs: FS,
+	path: string
+): Promise<boolean> {
+	return !(await fs.exists(path));
 }
 
 export function applyOutputRedirect(

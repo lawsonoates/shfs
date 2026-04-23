@@ -128,6 +128,12 @@ class ProgramCompiler {
 	compileRedirection(node: Redirection): RedirectionIR {
 		return {
 			kind: node.redirectKind,
+			mode: node.mode,
+			sourceFd: node.sourceFd,
+			targetFd: node.targetFd,
+			append: node.append,
+			noclobber: node.noclobber,
+			optional: node.optional,
 			target: this.expandWord(node.target),
 		};
 	}
@@ -256,14 +262,55 @@ class ProgramCompiler {
 	}
 
 	private serializePipeline(pipeline: Pipeline): string {
-		const commands = pipeline.commands.map((cmd) => {
-			const name = this.serializeWord(cmd.name);
-			const args = cmd.args
-				.map((arg) => this.serializeWord(arg))
-				.join(' ');
-			return args ? `${name} ${args}` : name;
-		});
+		const commands = pipeline.commands.map((command) =>
+			this.serializeCommand(command)
+		);
 		return commands.join(' | ');
+	}
+
+	private serializeCommand(command: SimpleCommand): string {
+		const segments = [this.serializeWord(command.name)];
+		for (const arg of command.args) {
+			segments.push(this.serializeWord(arg));
+		}
+		for (const redirection of command.redirections) {
+			segments.push(this.serializeRedirection(redirection));
+		}
+		return segments.join(' ');
+	}
+
+	private serializeRedirection(redirection: Redirection): string {
+		const sourceFd =
+			redirection.sourceFd ===
+			(redirection.redirectKind === 'input' ? 0 : 1)
+				? ''
+				: String(redirection.sourceFd);
+		if (redirection.redirectKind === 'input') {
+			const operator = redirection.optional ? '<?' : '<';
+			if (redirection.mode === 'fd') {
+				return `${sourceFd}<&${redirection.targetFd}`;
+			}
+			if (redirection.mode === 'close') {
+				return `${sourceFd}<&-`;
+			}
+			return `${sourceFd}${operator}${this.serializeWord(redirection.target)}`;
+		}
+
+		if (redirection.mode === 'pipe') {
+			return `${sourceFd}>|`;
+		}
+		if (redirection.mode === 'fd') {
+			return `${sourceFd}>&${redirection.targetFd}`;
+		}
+		if (redirection.mode === 'close') {
+			return `${sourceFd}>&-`;
+		}
+
+		let operator = redirection.append ? '>>' : '>';
+		if (redirection.noclobber) {
+			operator = `${operator}?`;
+		}
+		return `${sourceFd}${operator}${this.serializeWord(redirection.target)}`;
 	}
 
 	private serializeWord(word: Word): string {

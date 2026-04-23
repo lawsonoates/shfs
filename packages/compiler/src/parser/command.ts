@@ -8,9 +8,11 @@
 
 import { SourceSpan } from '../lexer/position';
 import { TokenKind } from '../lexer/token';
-import { Redirection, SimpleCommand, type Word } from './ast';
+import { LiteralPart, Redirection, SimpleCommand, Word } from './ast';
 import type { Parser } from './parser';
 import type { WordParser } from './word';
+
+const DIGITS_ONLY_REGEX = /^[0-9]+$/;
 
 /**
  * Parser for commands.
@@ -79,59 +81,170 @@ export class CommandParser {
 
 		const endPos = this.parser.previousTokenPosition;
 		const span = new SourceSpan(startPos, endPos);
+		const normalized = this.normalizeRedirectionPrefixes(
+			args,
+			redirections
+		);
 
-		return new SimpleCommand(span, name, args, redirections);
+		return new SimpleCommand(
+			span,
+			name,
+			normalized.args,
+			normalized.redirections
+		);
 	}
 
 	/**
 	 * Parse a redirection if present.
 	 *
-	 * Grammar:
+	 * Grammar (subset):
 	 *   redirection ::= '<' word | '>' word | '>>' word
+	 *
+	 * This parser also supports fish-inspired forms consumed by shfs specs:
+	 *   <&3, <&-, <?file, >&2, >&-, 2>|, >?file, >>?file.
 	 */
 	parseRedirection(): Redirection | null {
 		const token = this.parser.currentToken;
-
-		// Input redirection: < file
 		if (token.kind === TokenKind.LESS) {
-			const startPos = token.span.start;
-			this.parser.advance(); // consume <
-
-			const target = this.wordParser.parseWord();
-			if (!target) {
-				this.parser.syntacticError('Expected filename after <', 'word');
-				return null;
-			}
-
-			const endPos = this.parser.previousTokenPosition;
-			const span = new SourceSpan(startPos, endPos);
-
-			return new Redirection(span, 'input', target);
+			return this.parseInputRedirection(token);
 		}
-
-		// Output redirection: > file (or >> file, treated as output in the subset)
 		if (token.kind === TokenKind.GREAT) {
-			const startPos = token.span.start;
-			this.parser.advance(); // consume >
-
-			// Support GNU-style append syntax for compatibility with grep tests.
-			if (this.parser.currentToken.kind === TokenKind.GREAT) {
-				this.parser.advance(); // consume second > from >>
-			}
-
-			const target = this.wordParser.parseWord();
-			if (!target) {
-				this.parser.syntacticError('Expected filename after >', 'word');
-				return null;
-			}
-
-			const endPos = this.parser.previousTokenPosition;
-			const span = new SourceSpan(startPos, endPos);
-
-			return new Redirection(span, 'output', target);
+			return this.parseOutputRedirection(token);
 		}
 
 		return null;
+	}
+
+	private parseInputRedirection(token: { span: SourceSpan }): Redirection {
+		const startPos = token.span.start;
+		this.parser.advance();
+		this.validateInputTargetPrefix();
+
+		const parsedTarget = this.parseInputTargetAfterLess();
+		const fdMode = this.parseFdMode(parsedTarget.target, '<&N or <&-');
+		const endPos = this.parser.previousTokenPosition;
+		const span = new SourceSpan(startPos, endPos);
+		return new Redirection(span, 'input', parsedTarget.target, {
+			mode: fdMode.mode,
+			optional: parsedTarget.optional,
+			targetFd: fdMode.targetFd,
+		});
+	}
+
+	private parseOutputRedirection(token: { span: SourceSpan }): Redirection {
+		const startPos = token.span.start;
+		this.parser.advance();
+
+		const append = this.consumeAppendMarker();
+		const noclobber = this.consumeNoclobberMarker();
+
+		if (this.parser.currentToken.kind === TokenKind.PIPE) {
+			const pipeToken = this.parser.currentToken;
+			return new Redirection(
+				new SourceSpan(startPos, this.parser.previousTokenPosition),
+				'output',
+				this.createLiteralWord('|', pipeToken.span),
+				{
+					append,
+					mode: 'pipe',
+					noclobber,
+				}
+			);
+		}
+
+		const target = this.wordParser.parseWord();
+		if (!target) {
+			this.parser.syntacticError('Expected filename after >', 'word');
+		}
+		const fdMode = this.parseFdMode(target, '>&N or >&-');
+		const endPos = this.parser.previousTokenPosition;
+		const span = new SourceSpan(startPos, endPos);
+		return new Redirection(span, 'output', target, {
+			append,
+			mode: fdMode.mode,
+			noclobber,
+			targetFd: fdMode.targetFd,
+		});
+	}
+
+	private validateInputTargetPrefix(): void {
+		if (this.parser.currentToken.kind !== TokenKind.WORD) {
+			return;
+		}
+		const spelling = this.parser.currentToken.spelling;
+		if (spelling.startsWith('?&') || spelling.startsWith('&?')) {
+			this.parser.syntacticError(
+				'Invalid redirection target after <',
+				'<path, <?path, <&N, or <&-'
+			);
+		}
+	}
+
+	private parseInputTargetAfterLess(): { optional: boolean; target: Word } {
+		let optional = false;
+		let target = this.wordParser.parseWord();
+		if (!target) {
+			this.parser.syntacticError('Expected filename after <', 'word');
+		}
+		const targetLiteral = target.literalValue;
+		if (!targetLiteral?.startsWith('?')) {
+			return { optional, target };
+		}
+		optional = true;
+		if (targetLiteral === '?') {
+			const explicitTarget = this.wordParser.parseWord();
+			if (!explicitTarget) {
+				this.parser.syntacticError(
+					'Expected filename after <?',
+					'word'
+				);
+			}
+			target = explicitTarget;
+			return { optional, target };
+		}
+		target = this.cloneLiteralWord(target, targetLiteral.slice(1));
+		return { optional, target };
+	}
+
+	private consumeAppendMarker(): boolean {
+		if (this.parser.currentToken.kind !== TokenKind.GREAT) {
+			return false;
+		}
+		this.parser.advance();
+		return true;
+	}
+
+	private consumeNoclobberMarker(): boolean {
+		if (
+			this.parser.currentToken.kind !== TokenKind.WORD ||
+			this.parser.currentToken.spelling !== '?'
+		) {
+			return false;
+		}
+		this.parser.advance();
+		return true;
+	}
+
+	private parseFdMode(
+		target: Word,
+		expected: string
+	): { mode: Redirection['mode']; targetFd: number | null } {
+		const targetLiteral = target.literalValue;
+		if (!targetLiteral?.startsWith('&')) {
+			return { mode: 'file', targetFd: null };
+		}
+
+		const fdTarget = targetLiteral.slice(1);
+		if (fdTarget === '-') {
+			return { mode: 'close', targetFd: null };
+		}
+		if (DIGITS_ONLY_REGEX.test(fdTarget)) {
+			return { mode: 'fd', targetFd: Number(fdTarget) };
+		}
+		this.parser.syntacticError(
+			'Invalid file descriptor duplication target',
+			expected
+		);
 	}
 
 	/**
@@ -145,5 +258,114 @@ export class CommandParser {
 			kind === TokenKind.NEWLINE ||
 			kind === TokenKind.EOF
 		);
+	}
+
+	private cloneLiteralWord(word: Word, literal: string): Word {
+		return new Word(
+			word.span,
+			[new LiteralPart(word.span, literal)],
+			word.quoted
+		);
+	}
+
+	private createLiteralWord(literal: string, span: SourceSpan): Word {
+		return new Word(span, [new LiteralPart(span, literal)]);
+	}
+
+	private cloneRedirection(
+		redirection: Redirection,
+		options: {
+			sourceFd?: number;
+			mode?: Redirection['mode'];
+		}
+	): Redirection {
+		return new Redirection(
+			redirection.span,
+			redirection.redirectKind,
+			redirection.target,
+			{
+				append: redirection.append,
+				mode: options.mode ?? redirection.mode,
+				noclobber: redirection.noclobber,
+				optional: redirection.optional,
+				sourceFd: options.sourceFd ?? redirection.sourceFd,
+				targetFd: redirection.targetFd,
+			}
+		);
+	}
+
+	private normalizeRedirectionPrefixes(
+		args: Word[],
+		redirections: Redirection[]
+	): { args: Word[]; redirections: Redirection[] } {
+		if (args.length === 0 || redirections.length === 0) {
+			return { args, redirections };
+		}
+
+		const consumedPrefixArgIndices = new Set<number>();
+		const normalizedRedirections: Redirection[] = [];
+
+		for (const redirection of redirections) {
+			const prefixArgIndex = this.findContiguousPrefixArgIndex(
+				args,
+				consumedPrefixArgIndices,
+				redirection.span.start.offset
+			);
+			if (prefixArgIndex === null) {
+				normalizedRedirections.push(redirection);
+				continue;
+			}
+			const prefixLiteral = args[prefixArgIndex]?.literalValue;
+			if (!prefixLiteral) {
+				normalizedRedirections.push(redirection);
+				continue;
+			}
+			if (
+				prefixLiteral === '&' &&
+				redirection.redirectKind === 'output'
+			) {
+				consumedPrefixArgIndices.add(prefixArgIndex);
+				normalizedRedirections.push(
+					this.cloneRedirection(redirection, { sourceFd: 1 }),
+					this.cloneRedirection(redirection, { sourceFd: 2 })
+				);
+				continue;
+			}
+			if (DIGITS_ONLY_REGEX.test(prefixLiteral)) {
+				consumedPrefixArgIndices.add(prefixArgIndex);
+				normalizedRedirections.push(
+					this.cloneRedirection(redirection, {
+						sourceFd: Number(prefixLiteral),
+					})
+				);
+				continue;
+			}
+			normalizedRedirections.push(redirection);
+		}
+
+		const normalizedArgs = args.filter(
+			(_arg, index) => !consumedPrefixArgIndices.has(index)
+		);
+		return { args: normalizedArgs, redirections: normalizedRedirections };
+	}
+
+	private findContiguousPrefixArgIndex(
+		args: Word[],
+		consumedPrefixArgIndices: Set<number>,
+		redirectionStartOffset: number
+	): number | null {
+		for (let index = args.length - 1; index >= 0; index--) {
+			if (consumedPrefixArgIndices.has(index)) {
+				continue;
+			}
+			const arg = args[index];
+			if (!arg) {
+				continue;
+			}
+			if (arg.span.end.offset === redirectionStartOffset) {
+				return index;
+			}
+		}
+		return null;
 	}
 }

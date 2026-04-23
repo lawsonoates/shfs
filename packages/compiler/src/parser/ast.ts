@@ -284,6 +284,7 @@ export class CommandSubPart implements WordPartBase {
  * Redirection type.
  */
 export type RedirectionKind = 'input' | 'output';
+export type RedirectionMode = 'file' | 'fd' | 'close' | 'pipe';
 
 /**
  * A redirection (input or output).
@@ -291,12 +292,36 @@ export type RedirectionKind = 'input' | 'output';
  */
 export class Redirection extends ASTNode {
 	readonly redirectKind: RedirectionKind;
+	readonly mode: RedirectionMode;
+	readonly sourceFd: number;
+	readonly targetFd: number | null;
+	readonly append: boolean;
+	readonly noclobber: boolean;
+	readonly optional: boolean;
 	readonly target: Word;
 
-	constructor(span: SourceSpan, redirectKind: RedirectionKind, target: Word) {
+	constructor(
+		span: SourceSpan,
+		redirectKind: RedirectionKind,
+		target: Word,
+		options: {
+			mode?: RedirectionMode;
+			sourceFd?: number;
+			targetFd?: number | null;
+			append?: boolean;
+			noclobber?: boolean;
+			optional?: boolean;
+		} = {}
+	) {
 		super(span);
 		this.redirectKind = redirectKind;
 		this.target = target;
+		this.mode = options.mode ?? 'file';
+		this.sourceFd = options.sourceFd ?? (redirectKind === 'input' ? 0 : 1);
+		this.targetFd = options.targetFd ?? null;
+		this.append = options.append ?? false;
+		this.noclobber = options.noclobber ?? false;
+		this.optional = options.optional ?? false;
 	}
 
 	accept<T>(visitor: Visitor<T>): T {

@@ -29,7 +29,11 @@ import {
 } from './path';
 import { files } from './producers';
 import { toFormattedLineStream } from './records';
-import { resolveRedirectPath, withInputRedirect } from './redirection';
+import {
+	resolveInputRedirect,
+	resolveRedirectPath,
+	withInputRedirect,
+} from './redirection';
 
 export type EffectStep = Extract<
 	StepIR,
@@ -74,6 +78,17 @@ const STREAM_COMMANDS = [
 ] as const;
 const STREAM_COMMAND_SET = new Set<StepIR['cmd']>(STREAM_COMMANDS);
 const ROOT_DIRECTORY = '/';
+
+function lineRecordsFromPath(fs: FS, path: string): Stream<ShellRecord> {
+	return (async function* (): Stream<ShellRecord> {
+		for await (const line of fs.readLines(path)) {
+			yield {
+				kind: 'line',
+				text: line,
+			};
+		}
+	})();
+}
 
 let commandRegistriesVerified = false;
 
@@ -534,7 +549,26 @@ CommandRegistry.register('test', {
 CommandRegistry.register('read', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
-		return read(createBuiltinRuntime(fs, context, input), step.args);
+		return (async function* (): Stream<ShellRecord> {
+			const resolvedInput = await resolveInputRedirect(
+				step.cmd,
+				step.redirections,
+				fs,
+				context
+			);
+			if (resolvedInput.closed) {
+				context.stderr.append('read: stdin is closed');
+				context.status = 1;
+				return;
+			}
+			const redirectedInput = resolvedInput.path
+				? lineRecordsFromPath(fs, resolvedInput.path)
+				: input;
+			yield* read(
+				createBuiltinRuntime(fs, context, redirectedInput),
+				step.args
+			);
+		})();
 	},
 });
 

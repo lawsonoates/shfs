@@ -219,9 +219,11 @@ test('redirect subset (redirect.fish): <&3 duplicates fd 3 onto stdin', async ()
 
 // redirect.fish lines 142-144: error redirecting into a non-directory path.
 test('redirect subset (redirect.fish): redirecting into a non-directory path reports an error', async () => {
-	const result = await runWithStatus('echo foo >/bin/echo/file');
+	await run('mkdir -p /tmp');
+	await run('echo leaf > /tmp/not-a-dir');
+	const result = await runWithStatus('echo foo >/tmp/not-a-dir/file');
 	expect(result.status).toBe(1);
-	expect(result.stderr).toContain('/bin/echo');
+	expect(result.stderr).toContain('/tmp/not-a-dir');
 });
 
 // redirect.fish lines 146-149: echo foo <?nonexistent (try-input).
