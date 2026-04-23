@@ -96,6 +96,16 @@ test('redirect subset (redirect.fish): &>> appends both stdout and stderr to an 
 	expect(redirected).toContain('/missing-two');
 });
 
+// Mixed same-file > and 2>> should truncate before merging channels.
+test('redirect subset (boundary): mixed same-file redirections preserve overwrite semantics', async () => {
+	await run('mkdir -p /tmp');
+	await run('echo stale > /tmp/mixed.txt');
+
+	await run('echo fresh > /tmp/mixed.txt 2>> /tmp/mixed.txt');
+
+	expect(await run('cat /tmp/mixed.txt')).toBe('fresh');
+});
+
 // redirect.fish lines 29-30: echo noclobber &>>?$tmpdir/file.txt
 test('redirect subset (redirect.fish): noclobber form &>>? refuses to overwrite an existing file', async () => {
 	await run('mkdir -p /tmp');

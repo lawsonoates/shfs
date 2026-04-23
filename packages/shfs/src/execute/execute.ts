@@ -696,7 +696,7 @@ async function routeStepOutput(params: {
 	if (writesToSameFile) {
 		const mergedText = mergeChannelText(stdoutAsText, stderrAsText);
 		await writeToFileOrReport({
-			append: stdoutDestination.append || stderrDestination.append,
+			append: stdoutDestination.append && stderrDestination.append,
 			content: mergedText,
 			context,
 			fs,
