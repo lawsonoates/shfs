@@ -203,6 +203,7 @@ export class StatementParser {
 		if (
 			!(
 				trailingArg &&
+				!trailingArg.quoted &&
 				trailingArg.literalValue === '&' &&
 				trailingArg.span.end.offset === pipeStartOffset
 			)

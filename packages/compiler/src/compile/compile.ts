@@ -262,21 +262,62 @@ class ProgramCompiler {
 	}
 
 	private serializePipeline(pipeline: Pipeline): string {
-		const commands = pipeline.commands.map((command) =>
-			this.serializeCommand(command)
-		);
-		return commands.join(' | ');
+		const segments: string[] = [];
+		for (let index = 0; index < pipeline.commands.length; index++) {
+			const command = pipeline.commands[index];
+			if (!command) {
+				continue;
+			}
+			const hasNextCommand = index < pipeline.commands.length - 1;
+			segments.push(
+				this.serializeCommand(command, {
+					omitPipeRedirections: hasNextCommand,
+				})
+			);
+			if (hasNextCommand) {
+				segments.push(this.serializePipelineOperator(command));
+			}
+		}
+		return segments.join(' ');
 	}
 
-	private serializeCommand(command: SimpleCommand): string {
+	private serializeCommand(
+		command: SimpleCommand,
+		options: { omitPipeRedirections?: boolean } = {}
+	): string {
 		const segments = [this.serializeWord(command.name)];
 		for (const arg of command.args) {
 			segments.push(this.serializeWord(arg));
 		}
 		for (const redirection of command.redirections) {
+			if (options.omitPipeRedirections && redirection.mode === 'pipe') {
+				continue;
+			}
 			segments.push(this.serializeRedirection(redirection));
 		}
 		return segments.join(' ');
+	}
+
+	private serializePipelineOperator(command: SimpleCommand): string {
+		const pipeRedirections = command.redirections.filter(
+			(redirection) =>
+				redirection.redirectKind === 'output' &&
+				redirection.mode === 'pipe'
+		);
+		const pipesStdout = pipeRedirections.some(
+			(redirection) => redirection.sourceFd === 1
+		);
+		const pipesStderr = pipeRedirections.some(
+			(redirection) => redirection.sourceFd === 2
+		);
+
+		if (pipesStdout && pipesStderr) {
+			return '&|';
+		}
+		if (pipeRedirections.length === 1) {
+			return this.serializeRedirection(pipeRedirections[0]);
+		}
+		return '|';
 	}
 
 	private serializeRedirection(redirection: Redirection): string {

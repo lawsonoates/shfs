@@ -86,6 +86,22 @@ test('compile preserves nested command substitution serialization', () => {
 	});
 });
 
+// Pipe redirections inside command substitutions serialize once.
+test('compile preserves pipe redirection serialization in command substitution', () => {
+	const ir = compile(
+		parse('echo (find /workspace /missing -maxdepth 0 2>| cat)')
+	);
+
+	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+		args: {
+			values: [
+				commandSub('find /workspace /missing -maxdepth 0 2>| cat'),
+			],
+		},
+		cmd: 'echo',
+	});
+});
+
 test('compile preserves mixed glob words as compound arguments', () => {
 	const ir = compile(parse('echo src/*.test.ts'));
 

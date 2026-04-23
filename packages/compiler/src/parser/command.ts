@@ -315,7 +315,12 @@ export class CommandParser {
 				normalizedRedirections.push(redirection);
 				continue;
 			}
-			const prefixLiteral = args[prefixArgIndex]?.literalValue;
+			const prefixArg = args[prefixArgIndex];
+			if (prefixArg?.quoted) {
+				normalizedRedirections.push(redirection);
+				continue;
+			}
+			const prefixLiteral = prefixArg?.literalValue;
 			if (!prefixLiteral) {
 				normalizedRedirections.push(redirection);
 				continue;
