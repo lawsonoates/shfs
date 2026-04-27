@@ -19,6 +19,7 @@ import { pwd } from '../operator/pwd/pwd';
 import { rm } from '../operator/rm/rm';
 import { tail } from '../operator/tail/tail';
 import { touch } from '../operator/touch/touch';
+import { runWcCommand } from '../operator/wc/wc';
 import { runXargsCommand } from '../operator/xargs/xargs';
 import type { Record as ShellRecord } from '../record';
 import type { Stream } from '../stream';
@@ -75,6 +76,7 @@ const STREAM_COMMANDS = [
 	'tail',
 	'test',
 	'xargs',
+	'wc',
 ] as const;
 const STREAM_COMMAND_SET = new Set<StepIR['cmd']>(STREAM_COMMANDS);
 const ROOT_DIRECTORY = '/';
@@ -392,6 +394,36 @@ CommandRegistry.register('xargs', {
 				context
 			);
 			const result = await runXargsCommand({
+				context,
+				fs,
+				input,
+				inputPath,
+				parsed: step.args,
+			});
+			context.status = result.exitCode;
+			context.stderr.appendLines(result.stderr);
+			for (const text of result.stdout) {
+				yield {
+					kind: 'line',
+					text,
+				};
+			}
+		})();
+	},
+});
+
+CommandRegistry.register('wc', {
+	kind: 'stream',
+	handler: ({ step, fs, input, context }) => {
+		return (async function* (): Stream<ShellRecord> {
+			const inputPath = await resolveRedirectPath(
+				step.cmd,
+				step.redirections,
+				'input',
+				fs,
+				context
+			);
+			const result = await runWcCommand({
 				context,
 				fs,
 				input,

@@ -334,6 +334,28 @@ export interface XargsStep {
 	args: XargsArgsIR;
 }
 
+export type WcTotalMode = 'always' | 'auto' | 'invalid' | 'never' | 'only';
+
+export interface WcArgsIR {
+	bytes: boolean;
+	chars: boolean;
+	files: ExpandedWord[];
+	files0From: ExpandedWord | null;
+	lines: boolean;
+	maxLineLength: boolean;
+	total: WcTotalMode;
+	words: boolean;
+}
+
+/**
+ * Wc step.
+ */
+export interface WcStep {
+	cmd: 'wc';
+	redirections?: RedirectionIR[];
+	args: WcArgsIR;
+}
+
 export type SetScope = 'global' | 'local';
 
 /**
@@ -405,6 +427,7 @@ export type StepIR =
 	| TailStep
 	| TestStep
 	| TouchStep
+	| WcStep
 	| XargsStep;
 
 /**

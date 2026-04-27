@@ -1634,7 +1634,7 @@ function getCorpusEntries(): CorpusEntry[] {
 	const entries: CorpusEntry[] = [];
 	const testsDirectory = resolve(
 		dirname(import.meta.filename),
-		'../../../../../opensrc/repos/github.com/Distrotech/grep/tests'
+		'../../spec/gnu/grep/fixtures'
 	);
 	if (!existsSync(testsDirectory)) {
 		corpusEntries = [];
