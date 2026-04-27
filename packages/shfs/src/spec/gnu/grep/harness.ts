@@ -5,10 +5,7 @@ import { dirname } from 'node:path';
 import { MemoryFS } from '../../../fs/memory';
 import { Shell } from '../../../shell/shell';
 
-const GNU_GREP_TESTS_DIR = new URL(
-	'../../../../../../opensrc/repos/github.com/Distrotech/grep/tests/',
-	import.meta.url
-);
+const GNU_GREP_TESTS_DIR = new URL('./fixtures/', import.meta.url);
 
 export interface CommandResult {
 	output: string;
