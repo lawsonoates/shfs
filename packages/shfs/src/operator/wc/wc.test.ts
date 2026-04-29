@@ -41,3 +41,14 @@ test('wc --total=always includes a total for stdin-only input', async () => {
 	);
 	expect(result.stderr.toString()).toBe('');
 });
+
+test('wc -L expands tabs to 8-column stops for files and totals', async () => {
+	fs.setFile('/tabbed', 'a\tbc\n');
+	fs.setFile('/plain', 'x\n');
+
+	const result = await shell.$`wc -L /tabbed /plain`.nothrow();
+
+	expect(result.exitCode).toBe(0);
+	expect(result.text()).toBe('10 /tabbed\n 1 /plain\n10 total');
+	expect(result.stderr.toString()).toBe('');
+});

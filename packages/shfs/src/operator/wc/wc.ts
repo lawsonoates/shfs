@@ -58,7 +58,87 @@ const STDIN_FILE_NAME = '-';
 const NUL_BYTE = 0;
 const NEWLINE_BYTE = 10;
 const DEFAULT_STDIN_FIELD_WIDTH = 7;
+const TAB_WIDTH = 8;
+const ASCII_CONTROL_MAX = 0x1f;
+const DELETE_CHARACTER = 0x7f;
+const C1_CONTROL_MIN = 0x80;
+const C1_CONTROL_MAX = 0x9f;
 const WORD_SEPARATOR_REGEX = /[\s\u00a0\u2007\u202f\u2060]+/u;
+const COMBINING_MARK_REGEX = /^\p{Mark}$/u;
+const DEFAULT_IGNORABLE_CODE_POINT_REGEX =
+	/^\p{Default_Ignorable_Code_Point}$/u;
+const WIDE_CHARACTER_RANGES = [
+	[0x11_00, 0x11_5f],
+	[0x23_1a, 0x23_1b],
+	[0x23_29, 0x23_2a],
+	[0x23_e9, 0x23_ec],
+	[0x23_f0, 0x23_f0],
+	[0x23_f3, 0x23_f3],
+	[0x25_fd, 0x25_fe],
+	[0x26_14, 0x26_15],
+	[0x26_48, 0x26_53],
+	[0x26_7f, 0x26_7f],
+	[0x26_93, 0x26_93],
+	[0x26_a1, 0x26_a1],
+	[0x26_aa, 0x26_ab],
+	[0x26_bd, 0x26_be],
+	[0x26_c4, 0x26_c5],
+	[0x26_ce, 0x26_ce],
+	[0x26_d4, 0x26_d4],
+	[0x26_ea, 0x26_ea],
+	[0x26_f2, 0x26_f3],
+	[0x26_f5, 0x26_f5],
+	[0x26_fa, 0x26_fa],
+	[0x26_fd, 0x26_fd],
+	[0x27_05, 0x27_05],
+	[0x27_0a, 0x27_0b],
+	[0x27_28, 0x27_28],
+	[0x27_4c, 0x27_4c],
+	[0x27_4e, 0x27_4e],
+	[0x27_53, 0x27_55],
+	[0x27_57, 0x27_57],
+	[0x27_95, 0x27_97],
+	[0x27_b0, 0x27_b0],
+	[0x27_bf, 0x27_bf],
+	[0x2b_1b, 0x2b_1c],
+	[0x2b_50, 0x2b_50],
+	[0x2b_55, 0x2b_55],
+	[0x2e_80, 0x30_3e],
+	[0x30_40, 0xa4_cf],
+	[0xac_00, 0xd7_a3],
+	[0xf9_00, 0xfa_ff],
+	[0xfe_10, 0xfe_19],
+	[0xfe_30, 0xfe_6f],
+	[0xff_00, 0xff_60],
+	[0xff_e0, 0xff_e6],
+	[0x1_6f_e0, 0x1_6f_e4],
+	[0x1_6f_f0, 0x1_6f_f1],
+	[0x1_70_00, 0x1_87_f7],
+	[0x1_88_00, 0x1_8c_d5],
+	[0x1_8d_00, 0x1_8d_08],
+	[0x1_af_f0, 0x1_af_f3],
+	[0x1_af_f5, 0x1_af_fb],
+	[0x1_af_fd, 0x1_af_fe],
+	[0x1_b0_00, 0x1_b1_22],
+	[0x1_b1_32, 0x1_b1_32],
+	[0x1_b1_50, 0x1_b1_52],
+	[0x1_b1_55, 0x1_b1_55],
+	[0x1_b1_64, 0x1_b1_67],
+	[0x1_b1_70, 0x1_b2_fb],
+	[0x1_f0_04, 0x1_f0_04],
+	[0x1_f0_cf, 0x1_f0_cf],
+	[0x1_f1_8e, 0x1_f1_8e],
+	[0x1_f1_91, 0x1_f1_9a],
+	[0x1_f2_00, 0x1_f2_02],
+	[0x1_f2_10, 0x1_f2_3b],
+	[0x1_f2_40, 0x1_f2_48],
+	[0x1_f2_50, 0x1_f2_51],
+	[0x1_f2_60, 0x1_f2_65],
+	[0x1_f3_00, 0x1_f6_ff],
+	[0x1_f9_00, 0x1_f9_ff],
+	[0x1_fa_70, 0x1_fa_ff],
+	[0x2_00_00, 0x3_ff_fd],
+] as const;
 
 export async function runWcCommand(
 	options: RunWcCommandOptions
@@ -329,13 +409,67 @@ function countWords(text: string): number {
 
 function countMaxLineLength(text: string): number {
 	let maxLength = 0;
-	for (const line of text.split('\n')) {
-		const lineLength = [...line].length;
-		if (lineLength > maxLength) {
-			maxLength = lineLength;
+	let linePosition = 0;
+	for (const character of text) {
+		switch (character) {
+			case '\n':
+			case '\r':
+			case '\f':
+				if (linePosition > maxLength) {
+					maxLength = linePosition;
+				}
+				linePosition = 0;
+				break;
+			case '\t':
+				linePosition += TAB_WIDTH - (linePosition % TAB_WIDTH);
+				break;
+			case '\v':
+				break;
+			case ' ':
+				linePosition++;
+				break;
+			default:
+				linePosition += displayWidth(character);
 		}
 	}
+	if (linePosition > maxLength) {
+		maxLength = linePosition;
+	}
 	return maxLength;
+}
+
+function displayWidth(character: string): number {
+	const codePoint = character.codePointAt(0);
+	if (codePoint === undefined || isControlCodePoint(codePoint)) {
+		return 0;
+	}
+	if (
+		COMBINING_MARK_REGEX.test(character) ||
+		DEFAULT_IGNORABLE_CODE_POINT_REGEX.test(character)
+	) {
+		return 0;
+	}
+	if (isWideCodePoint(codePoint)) {
+		return 2;
+	}
+	return 1;
+}
+
+function isControlCodePoint(codePoint: number): boolean {
+	return (
+		codePoint <= ASCII_CONTROL_MAX ||
+		codePoint === DELETE_CHARACTER ||
+		(codePoint >= C1_CONTROL_MIN && codePoint <= C1_CONTROL_MAX)
+	);
+}
+
+function isWideCodePoint(codePoint: number): boolean {
+	for (const [start, end] of WIDE_CHARACTER_RANGES) {
+		if (codePoint >= start && codePoint <= end) {
+			return true;
+		}
+	}
+	return false;
 }
 
 function normalizeSelection(parsed: WcArgsIR): WcFieldSelection {
