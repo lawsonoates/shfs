@@ -95,6 +95,7 @@ Filesystem/path commands:
 - rm
 - tail
 - touch
+- wc
 - xargs
 
 Script builtins:

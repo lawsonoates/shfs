@@ -32,6 +32,9 @@ It is not a full fish shell and does not target host OS parity.
   - default binary match reporting (`Binary file <path> matches`)
   - null-data record mode (`-z` / `--null-data`)
   - deterministic status behavior for match/no-match/error (`0`/`1`/`2`)
+- Stream and file counting with `wc` (GNU-derived subset):
+  - supported counts: bytes, characters, lines, words, and maximum line length
+  - `--files0-from` and total modes for deterministic batch counting
 - Argument batching with `xargs` (GNU/POSIX-inspired subset):
   - supported options: `-0`/`--null`, `-d`, `-E`, `-I`, `-L`, `-n`, `-r`/`--no-run-if-empty`
   - default command is `echo` when no command is provided
