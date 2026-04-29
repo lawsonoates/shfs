@@ -1,25 +1,16 @@
 import { beforeEach } from 'bun:test';
-import { readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import { MemoryFS } from '../../../fs/memory';
 import { Shell } from '../../../shell/shell';
 
-const GNU_GREP_TESTS_DIR = new URL('./fixtures/', import.meta.url);
-
 export interface CommandResult {
 	output: string;
+	stderr: string;
 	status: number;
 }
 
-export interface CorpusCase {
-	expectedStatus: number;
-	pattern: string;
-	input: string;
-	line: number;
-}
-
-export interface GrepHarness {
+export interface WcHarness {
 	readonly fs: MemoryFS;
 	run(command: string): Promise<string>;
 	runWithStatus(command: string): Promise<CommandResult>;
@@ -28,7 +19,7 @@ export interface GrepHarness {
 	ensureDir(path: string): Promise<void>;
 }
 
-export function createGrepHarness(): GrepHarness {
+export function createWcHarness(): WcHarness {
 	let fs!: MemoryFS;
 	let shell!: Shell;
 
@@ -46,6 +37,7 @@ export function createGrepHarness(): GrepHarness {
 		return {
 			output: result.text(),
 			status: result.exitCode,
+			stderr: result.stderr.toString(),
 		};
 	};
 
@@ -86,55 +78,6 @@ export function createGrepHarness(): GrepHarness {
 	};
 }
 
-export function quote(value: string): string {
-	return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
-
-export function readFixture(fileName: string): string {
-	return readFileSync(new URL(fileName, GNU_GREP_TESTS_DIR), 'utf8');
-}
-
-export function parseAtDelimitedCorpus(
-	fileName: string,
-	acceptedFieldCounts: readonly number[] = [3]
-): CorpusCase[] {
-	const accepted = new Set(acceptedFieldCounts);
-	const content = readFixture(fileName);
-	const lines = content.split('\n');
-	const cases: CorpusCase[] = [];
-
-	for (const [index, rawLine] of lines.entries()) {
-		if (rawLine === '' || rawLine.startsWith('#')) {
-			continue;
-		}
-
-		const fields = rawLine.split('@');
-		if (!accepted.has(fields.length)) {
-			continue;
-		}
-
-		const expectedStatus = Number.parseInt(fields[0] ?? '', 10);
-		if (Number.isNaN(expectedStatus)) {
-			continue;
-		}
-
-		const pattern = fields[1] ?? '';
-		const input = decodeCorpusInput(fields[2] ?? '');
-
-		cases.push({
-			expectedStatus,
-			pattern,
-			input,
-			line: index + 1,
-		});
-	}
-
-	return cases;
-}
-
-function decodeCorpusInput(value: string): string {
-	if (value === '""') {
-		return '';
-	}
-	return value;
+export function nulSeparated(...paths: string[]): Uint8Array {
+	return new TextEncoder().encode(`${paths.join('\0')}\0`);
 }

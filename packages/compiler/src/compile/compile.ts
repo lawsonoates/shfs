@@ -314,8 +314,9 @@ class ProgramCompiler {
 		if (pipesStdout && pipesStderr) {
 			return '&|';
 		}
-		if (pipeRedirections.length === 1) {
-			return this.serializeRedirection(pipeRedirections[0]);
+		const onlyPipeRedirection = pipeRedirections[0];
+		if (pipeRedirections.length === 1 && onlyPipeRedirection) {
+			return this.serializeRedirection(onlyPipeRedirection);
 		}
 		return '|';
 	}
