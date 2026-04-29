@@ -65,6 +65,16 @@ export async function runWcCommand(
 ): Promise<RunWcCommandResult> {
 	const selection = normalizeSelection(options.parsed);
 	const stderr: string[] = [];
+	const redirectedInputBytes = options.inputPath
+		? await readFileOrReport(options.fs, options.inputPath, stderr)
+		: null;
+	if (redirectedInputBytes === null && options.inputPath) {
+		return { exitCode: 1, stderr, stdout: [] };
+	}
+	const readStdinBytes = createStdinReader(
+		options.input,
+		redirectedInputBytes
+	);
 	const fileOperands = await evaluateExpandedPathWords(
 		'wc',
 		options.parsed.files,
@@ -93,6 +103,7 @@ export async function runWcCommand(
 	const source = await resolveInputSource({
 		...options,
 		fileOperands,
+		readStdinBytes,
 		stderr,
 	});
 	if (source === null) {
@@ -107,6 +118,14 @@ export async function runWcCommand(
 				"wc: when reading file names from standard input, no file name of '-' allowed"
 			);
 			hadError = true;
+			continue;
+		}
+		if (target.displayPath === STDIN_FILE_NAME) {
+			const bytes = await readStdinBytes();
+			countedInputs.push({
+				counts: countBytes(bytes),
+				displayPath: target.displayPath,
+			});
 			continue;
 		}
 		const resolvedPath = resolvePathFromCwd(
@@ -126,9 +145,7 @@ export async function runWcCommand(
 	}
 
 	if (source.targets.length === 0 && !source.fromFiles0) {
-		const bytes = options.inputPath
-			? await readFileOrEmpty(options.fs, options.inputPath)
-			: await readStreamBytes(options.input);
+		const bytes = await readStdinBytes();
 		countedInputs.push({
 			counts: countBytes(bytes),
 			displayPath: DEFAULT_STDIN_DISPLAY_PATH,
@@ -156,6 +173,7 @@ async function resolveInputSource(options: {
 	input: Stream<ShellRecord> | null;
 	inputPath: string | null;
 	parsed: WcArgsIR;
+	readStdinBytes: () => Promise<Uint8Array>;
 	stderr: string[];
 }): Promise<{
 	files0FromStdin: boolean;
@@ -179,9 +197,7 @@ async function resolveInputSource(options: {
 	const files0FromStdin = files0From === STDIN_FILE_NAME;
 	let namesBytes: Uint8Array;
 	if (files0FromStdin) {
-		namesBytes = options.inputPath
-			? await readFileOrEmpty(options.fs, options.inputPath)
-			: await readStreamBytes(options.input);
+		namesBytes = await options.readStdinBytes();
 	} else {
 		const path = resolvePathFromCwd(options.context.cwd, files0From);
 		try {
@@ -245,12 +261,31 @@ function appendName(
 	return 0;
 }
 
-async function readFileOrEmpty(fs: FS, path: string): Promise<Uint8Array> {
+async function readFileOrReport(
+	fs: FS,
+	path: string,
+	stderr: string[]
+): Promise<Uint8Array | null> {
 	try {
 		return await fs.readFile(path);
 	} catch {
-		return DEFAULT_STDIO_BYTES;
+		stderr.push(`wc: ${path}: No such file or directory`);
+		return null;
 	}
+}
+
+function createStdinReader(
+	input: Stream<ShellRecord> | null,
+	redirectedInputBytes: Uint8Array | null
+): () => Promise<Uint8Array> {
+	let hasRead = false;
+	return async () => {
+		if (hasRead) {
+			return DEFAULT_STDIO_BYTES;
+		}
+		hasRead = true;
+		return redirectedInputBytes ?? readStreamBytes(input);
+	};
 }
 
 async function readStreamBytes(
@@ -367,7 +402,7 @@ function shouldIncludeTotal(
 		return false;
 	}
 	if (totalMode === 'always') {
-		return operandCount > 0;
+		return true;
 	}
 	return operandCount > 1;
 }
