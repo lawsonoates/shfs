@@ -16,7 +16,7 @@ async function seedFiles0Fixture(): Promise<void> {
 	await harness.setFile(NAMES_PATH, nulSeparated('2b', '2w'));
 }
 
-test('wc-files0.sh: --files0-from reads NUL-delimited file list from a file', async () => {
+test('gnu wc: wc-files0.sh - --files0-from reads NUL-delimited file list from a file', async () => {
 	await seedFiles0Fixture();
 
 	const result = await harness.run(`wc --files0-from=${NAMES_PATH}`);
@@ -24,7 +24,7 @@ test('wc-files0.sh: --files0-from reads NUL-delimited file list from a file', as
 	expect(result).toBe(' 1  1  2 2b\n 1  2  8 2w\n 2  3 10 total');
 });
 
-test('wc-files0.sh: --files0-from=- reads NUL-delimited file list from stdin', async () => {
+test('gnu wc: wc-files0.sh - --files0-from=- reads NUL-delimited file list from stdin', async () => {
 	await seedFiles0Fixture();
 
 	const result = await harness.run(`wc --files0-from=- < ${NAMES_PATH}`);
@@ -32,7 +32,7 @@ test('wc-files0.sh: --files0-from=- reads NUL-delimited file list from stdin', a
 	expect(result).toBe(' 1  1  2 2b\n 1  2  8 2w\n 2  3 10 total');
 });
 
-test('wc-files0.sh: file names containing newlines are quoted on one output line', async () => {
+test('gnu wc: wc-files0.sh - file names containing newlines are quoted on one output line', async () => {
 	const newlineName = '1\n2';
 	await harness.setTextFile(`/${newlineName}`, '');
 	await harness.setFile(NAMES_PATH, nulSeparated(newlineName));
@@ -42,7 +42,7 @@ test('wc-files0.sh: file names containing newlines are quoted on one output line
 	expect(result).toBe("0 0 0 '1'$'\\n''2'");
 });
 
-test('wc-files0.sh adapted: byte totals from --files0-from are accurate for large virtual files', async () => {
+test('gnu wc: wc-files0.sh - byte totals from --files0-from are accurate for large virtual files', async () => {
 	await harness.setFile('/wc.big', new Uint8Array(LARGE_FILE_SIZE));
 	await harness.setTextFile('/wc.small', '');
 	await harness.setFile(NAMES_PATH, nulSeparated('wc.big', 'wc.small'));

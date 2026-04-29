@@ -12,7 +12,7 @@ const harness = createFindHarness();
 
 // name-lbracket-literal: find -name treats unquoted '[' as a literal character.
 // See Savannah bug #32043.
-test('name-lbracket-literal: -name [ matches a file literally named [', async () => {
+test('gnu find: name-lbracket-literal.sh - -name [ matches a file literally named [', async () => {
 	await harness.setTextFile('/work/[', '');
 
 	const result = await harness.runWithStatus("find /work -name '['");
@@ -21,7 +21,7 @@ test('name-lbracket-literal: -name [ matches a file literally named [', async ()
 });
 
 // name-slash: -name with '/' in pattern should match nothing (basenames only).
-test('name-slash: -name with slash in pattern matches nothing', async () => {
+test('gnu find: name-slash.sh - -name with slash in pattern matches nothing', async () => {
 	await harness.setTextFile('/work/dir/file', '');
 
 	const result = await harness.runWithStatus("find /work -name 'dir/file'");
@@ -30,7 +30,7 @@ test('name-slash: -name with slash in pattern matches nothing', async () => {
 });
 
 // Adapted from name-slash.sh to cover the SHFS subset's explicit -path support.
-test('name-slash (adapted): -path matches the full path rather than the basename', async () => {
+test('gnu find: name-slash.sh - -path matches the full path rather than the basename', async () => {
 	await harness.setTextFile('/work/dir/file', '');
 
 	const result = await harness.runWithStderr(
@@ -40,7 +40,7 @@ test('name-slash (adapted): -path matches the full path rather than the basename
 	expect(result.output).toBe('/work/dir/file');
 });
 
-test('name-slash: -name / matches the root directory basename', async () => {
+test('gnu find: name-slash.sh - -name / matches the root directory basename', async () => {
 	const result = await harness.runWithStatus("find / -maxdepth 0 -name '/'");
 	expect(result.status).toBe(0);
 	expect(result.output).toBe('/');

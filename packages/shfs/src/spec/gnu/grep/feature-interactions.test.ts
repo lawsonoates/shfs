@@ -15,7 +15,7 @@ import { createGrepHarness, quote, readFixture } from './harness';
 
 const harness = createGrepHarness();
 
-test('foad1: -o with -i returns original matching text casing', async () => {
+test('gnu grep: foad1 - -o with -i returns original matching text casing', async () => {
 	await harness.setTextFile('/tmp/in.txt', 'WordA\nwordB\nWORDC\n');
 
 	for (const pattern of ['word', 'Word', 'WORD']) {
@@ -27,7 +27,7 @@ test('foad1: -o with -i returns original matching text casing', async () => {
 	}
 });
 
-test('foad1: -o with -n and -b reports every match, not only first per line', async () => {
+test('gnu grep: foad1 - -o with -n and -b reports every match, not only first per line', async () => {
 	await harness.setTextFile('/tmp/in1.txt', 'wA wB\nwC\n');
 	await harness.setTextFile('/tmp/in2.txt', 'XwA YwB\nZwC\n');
 
@@ -44,7 +44,7 @@ test('foad1: -o with -n and -b reports every match, not only first per line', as
 	expect(offset.output).toBe('1:wA\n5:wB\n9:wC');
 });
 
-test('foad1: -H and -h precedence matches GNU expectation', async () => {
+test('gnu grep: foad1 - -H and -h precedence matches GNU expectation', async () => {
 	await harness.setTextFile('/tmp/in.txt', 'wA wB\n');
 
 	const plain = await harness.runWithStatus(
@@ -72,7 +72,7 @@ test('foad1: -H and -h precedence matches GNU expectation', async () => {
 	expect(hWinsUntilOverridden.output).toBe('wA wB');
 });
 
-test('foad1: end of previous match does not satisfy a new start-of-word assertion', async () => {
+test('gnu grep: foad1 - end of previous match does not satisfy a new start-of-word assertion', async () => {
 	await harness.setTextFile('/tmp/word-underscore.txt', 'word_word\n');
 	await harness.setTextFile('/tmp/wordword.txt', 'wordword\n');
 
@@ -89,7 +89,7 @@ test('foad1: end of previous match does not satisfy a new start-of-word assertio
 	expect(b.output).toBe('word');
 });
 
-test('foad1 + max-count-vs-context: -m with anchors and context obeys first selected line', async () => {
+test('gnu grep: foad1 + max-count-vs-context - -m with anchors and context obeys first selected line', async () => {
 	await harness.setTextFile('/tmp/in.txt', '4\n40\n');
 
 	const exact = await harness.runWithStatus(
@@ -111,7 +111,7 @@ test('foad1 + max-count-vs-context: -m with anchors and context obeys first sele
 	expect(end.output).toBe('4\n40');
 });
 
-test('foad1: -F -w with multiple -e patterns keeps true word boundaries', async () => {
+test('gnu grep: foad1 - -F -w with multiple -e patterns keeps true word boundaries', async () => {
 	await harness.setTextFile('/tmp/in.txt', 'A\nCX\nB\nC\n');
 	const result = await harness.runWithStatus(
 		'grep -wF -e A -e B -e C /tmp/in.txt'
@@ -127,7 +127,7 @@ test('foad1: -F -w with multiple -e patterns keeps true word boundaries', async 
 	expect(noMatch.output).toBe('');
 });
 
-test('yesno: interaction of -C, -v, -o, and -m preserves line and byte offsets', async () => {
+test('gnu grep: yesno - interaction of -C, -v, -o, and -m preserves line and byte offsets', async () => {
 	await harness.setTextFile(
 		'/tmp/yesno.txt',
 		[
@@ -233,7 +233,7 @@ test('yesno: interaction of -C, -v, -o, and -m preserves line and byte offsets',
 	);
 });
 
-test('khadafy: regexp file selects exactly the expected lines corpus', async () => {
+test('gnu grep: khadafy - regexp file selects exactly the expected lines corpus', async () => {
 	const regex = readFixture('khadafy.regexp');
 	const lines = readFixture('khadafy.lines');
 

@@ -46,14 +46,17 @@ const WC_PL_CASES = [
 ] as const satisfies readonly WcPipeCase[];
 
 for (const testCase of WC_PL_CASES) {
-	test(`wc.pl ${testCase.name}: wc ${testCase.options}`.trim(), async () => {
-		await harness.setTextFile(INPUT_PATH, testCase.input);
+	test(
+		`gnu wc: wc.pl ${testCase.name} - wc ${testCase.options}`.trim(),
+		async () => {
+			await harness.setTextFile(INPUT_PATH, testCase.input);
 
-		const command =
-			testCase.options === ''
-				? `wc < ${INPUT_PATH}`
-				: `wc ${testCase.options} < ${INPUT_PATH}`;
+			const command =
+				testCase.options === ''
+					? `wc < ${INPUT_PATH}`
+					: `wc ${testCase.options} < ${INPUT_PATH}`;
 
-		expect(await harness.run(command)).toBe(testCase.expected);
-	});
+			expect(await harness.run(command)).toBe(testCase.expected);
+		}
+	);
 }

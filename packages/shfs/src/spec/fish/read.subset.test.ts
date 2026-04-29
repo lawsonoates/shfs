@@ -23,17 +23,17 @@ async function runNothrow(command: string): Promise<string> {
 	return await shell.$`${command}`.nothrow().text();
 }
 
-test('read subset: captures pipeline input into a variable for later statements in the same run', async () => {
+test('fish read: read.fish - captures pipeline input into a variable for later statements in the same run', async () => {
 	expect(await run('echo /workspace | read target; echo $target')).toBe(
 		'/workspace'
 	);
 });
 
-test('read subset: assigns empty pipeline input as an empty string and reports success', async () => {
+test('fish read: read.fish - assigns empty pipeline input as an empty string and reports success', async () => {
 	expect(await run('echo "" | read empty; echo $status:$empty')).toBe('0:');
 });
 
-test('read subset: consumes only the first record from stream input', async () => {
+test('fish read: read.fish - consumes only the first record from stream input', async () => {
 	await run('echo first > /tmp/read-first.txt');
 	await run('echo second > /tmp/read-second.txt');
 
@@ -44,27 +44,27 @@ test('read subset: consumes only the first record from stream input', async () =
 	).toBe('first');
 });
 
-test('read subset: stores values in local scope for one run only', async () => {
+test('fish read: read.fish - stores values in local scope for one run only', async () => {
 	expect(await run('echo scoped | read local_only; echo $local_only')).toBe(
 		'scoped'
 	);
 	expect(await run('echo $local_only')).toBe('');
 });
 
-test('read subset: reports failure status when no input stream is provided', async () => {
+test('fish read: read.fish - reports failure status when no input stream is provided', async () => {
 	await runNothrow('read missing');
 	expect(await run('echo $status')).toBe('1');
 	expect(await run('read missing; and echo pass; or echo fail')).toBe('fail');
 });
 
-test('read subset: requires exactly one variable name', async () => {
+test('fish read: read.fish - requires exactly one variable name', async () => {
 	await expect(run('read')).rejects.toThrow(REQUIRES_ONE_VARIABLE_NAME);
 	await expect(run('read one two')).rejects.toThrow(
 		REQUIRES_ONE_VARIABLE_NAME
 	);
 });
 
-test('read subset: fish read flags are out of scope', async () => {
+test('fish read: read.fish - fish read flags are out of scope', async () => {
 	await expect(run('read -a values')).rejects.toThrow(
 		REQUIRES_ONE_VARIABLE_NAME
 	);
@@ -76,14 +76,14 @@ test('read subset: fish read flags are out of scope', async () => {
 	);
 });
 
-test('read subset: validates variable names', async () => {
+test('fish read: read.fish - validates variable names', async () => {
 	await expect(run('echo value | read 1bad')).rejects.toThrow(
 		'read: invalid variable name: 1bad'
 	);
 });
 
 // read.fish lines 172-181 verify file-fed reads via `<$path`.
-test('read subset (read.fish): input redirection feeds read from a file', async () => {
+test('fish read: read.fish - input redirection feeds read from a file', async () => {
 	await run('echo hello > /tmp/read-from-file.txt');
 	expect(
 		await run('read from_file </tmp/read-from-file.txt; echo $from_file')
@@ -91,7 +91,7 @@ test('read subset (read.fish): input redirection feeds read from a file', async 
 });
 
 // read.fish line 176 uses read from redirected stdin; include whitespace payload.
-test('read subset (read.fish): input redirection preserves spaces for a single read variable', async () => {
+test('fish read: read.fish - input redirection preserves spaces for a single read variable', async () => {
 	await run('echo "hello there" > /tmp/read-with-space.txt');
 	expect(
 		await run('read phrase < /tmp/read-with-space.txt; echo $phrase')

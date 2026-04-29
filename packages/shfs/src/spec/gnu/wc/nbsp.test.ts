@@ -23,7 +23,7 @@ async function setWrappedCharacter(value: string): Promise<void> {
 }
 
 for (const { codePoint, value } of UTF8_SPACE_CASES) {
-	test(`wc-nbsp.sh: ${codePoint} separates words when printable`, async () => {
+	test(`gnu wc: wc-nbsp.sh ${codePoint} - separates words when printable`, async () => {
 		await setWrappedCharacter(value);
 
 		const lineLength = await harness.run(`wc -L < ${INPUT_PATH}`);

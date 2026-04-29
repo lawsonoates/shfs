@@ -18,7 +18,7 @@ const harness = createGrepHarness();
 const cases = parseAtDelimitedCorpus('spencer1.tests', [3]);
 
 for (const testCase of cases) {
-	test(`spencer1 (spencer1.tests:${testCase.line})`, async () => {
+	test(`gnu grep: spencer1.tests:${testCase.line} - Spencer corpus case`, async () => {
 		await harness.setTextFile('/tmp/in.txt', `${testCase.input}\n`);
 		const { status } = await harness.runWithStatus(
 			`grep -E -e ${quote(testCase.pattern)} /tmp/in.txt`
@@ -28,7 +28,7 @@ for (const testCase of cases) {
 	});
 }
 
-test('spencer1-locale: locale harness corpus remains valid for UTF-8 sample cases', async () => {
+test('gnu grep: spencer1-locale - locale harness corpus remains valid for UTF-8 sample cases', async () => {
 	const utf8Cases = cases.filter(
 		(testCase) =>
 			testCase.pattern.includes('[:upper:]') ||

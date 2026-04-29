@@ -10,7 +10,7 @@ import { createFindHarness } from '../../harness';
 
 const harness = createFindHarness();
 
-test('nameslash: trailing-slash start paths work with -o name matching', async () => {
+test('gnu find: nameslash.exp - trailing-slash start paths work with -o name matching', async () => {
 	await harness.ensureDir('/work/tmp/foo');
 	await harness.ensureDir('/work/tmp/bar');
 

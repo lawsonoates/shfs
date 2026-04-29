@@ -11,7 +11,7 @@ const harness = createWcHarness();
 const LARGE_REGULAR_FILE_SIZE = 1024 * 1024;
 const SMALL_REGULAR_FILE_SIZE = 2;
 
-test('wc-proc.sh adapted: virtual /proc files are counted from their contents', async () => {
+test('gnu wc: wc-proc.sh - virtual /proc files are counted from their contents', async () => {
 	const content = 'Linux version from a virtual proc file\n';
 	await harness.setTextFile('/proc/version', content);
 	await harness.setTextFile('/copy', content);
@@ -22,7 +22,7 @@ test('wc-proc.sh adapted: virtual /proc files are counted from their contents', 
 	expect(actual).toBe(expected);
 });
 
-test('wc-proc.sh adapted: byte counts and totals use virtual file sizes', async () => {
+test('gnu wc: wc-proc.sh - byte counts and totals use virtual file sizes', async () => {
 	await harness.setFile('/no_read', new Uint8Array(SMALL_REGULAR_FILE_SIZE));
 	await harness.setFile('/do_read', new Uint8Array(LARGE_REGULAR_FILE_SIZE));
 

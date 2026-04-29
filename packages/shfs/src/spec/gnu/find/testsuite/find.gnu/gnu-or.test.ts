@@ -14,7 +14,7 @@ import { createFindHarness } from '../../harness';
 
 const harness = createFindHarness();
 
-test('gnu-or (adapted): -or evaluates right branch when left branch is false', async () => {
+test('gnu find: gnu-or.exp - -or evaluates right branch when left branch is false', async () => {
 	await harness.ensureDir('/work/tmp/fred/jim');
 
 	const result = await harness.runWithStatus(

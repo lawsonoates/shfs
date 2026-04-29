@@ -23,12 +23,12 @@ async function runNothrow(command: string): Promise<string> {
 	return await shell.$`${command}`.nothrow().text();
 }
 
-test('test subset: supports one-operand truthiness checks', async () => {
+test('fish test: test.fish - supports one-operand truthiness checks', async () => {
 	expect(await run('test fish; and echo pass; or echo fail')).toBe('pass');
 	expect(await run('test ""; and echo pass; or echo fail')).toBe('fail');
 });
 
-test('test subset: exposes test result through $status as 0/1', async () => {
+test('fish test: test.fish - exposes test result through $status as 0/1', async () => {
 	await run('test fish');
 	expect(await run('echo $status')).toBe('0');
 
@@ -36,7 +36,7 @@ test('test subset: exposes test result through $status as 0/1', async () => {
 	expect(await run('echo $status')).toBe('1');
 });
 
-test('test subset: supports string = and != comparisons', async () => {
+test('fish test: test.fish - supports string = and != comparisons', async () => {
 	expect(await run('test alpha = alpha; and echo yes; or echo no')).toBe(
 		'yes'
 	);
@@ -49,7 +49,7 @@ test('test subset: supports string = and != comparisons', async () => {
 	);
 });
 
-test('test subset: supports variable and command substitution in operands', async () => {
+test('fish test: test.fish - supports variable and command substitution in operands', async () => {
 	await run('set -g left alpha');
 	await run('set -g right alpha');
 
@@ -60,16 +60,16 @@ test('test subset: supports variable and command substitution in operands', asyn
 	).toBe('match');
 });
 
-test('test subset: test command itself emits no output', async () => {
+test('fish test: test.fish - test command itself emits no output', async () => {
 	expect(await run('test alpha = alpha')).toBe('');
 	expect(await runNothrow('test alpha = beta')).toBe('');
 });
 
-test('test subset: requires at least one operand', async () => {
+test('fish test: test.fish - requires at least one operand', async () => {
 	await expect(run('test')).rejects.toThrow('test requires operands');
 });
 
-test('test subset: unsupported fish test operators are out of scope', async () => {
+test('fish test: test.fish - unsupported fish test operators are out of scope', async () => {
 	await expect(run('test 5 -eq 5')).rejects.toThrow(
 		UNSUPPORTED_TEST_ARGS_MESSAGE
 	);
@@ -99,7 +99,7 @@ test('test subset: unsupported fish test operators are out of scope', async () =
 	);
 });
 
-test('test subset: unsupported expression arities and combiners are out of scope', async () => {
+test('fish test: test.fish - unsupported expression arities and combiners are out of scope', async () => {
 	await expect(run('test 1 =')).rejects.toThrow(
 		UNSUPPORTED_TEST_ARGS_MESSAGE
 	);

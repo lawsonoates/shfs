@@ -38,7 +38,7 @@ function sortedWords(output: string): string[] {
 	return trimmed.split(WHITESPACE_REGEX).sort();
 }
 
-test('glob subset (glob.fish): hidden files are only matched with explicit dot', async () => {
+test('fish glob: glob.fish - hidden files are only matched with explicit dot', async () => {
 	await run('mkdir -p /workspace');
 	await run('cd /workspace');
 	await run('touch .hidden visible');
@@ -47,7 +47,7 @@ test('glob subset (glob.fish): hidden files are only matched with explicit dot',
 	expect(await run('echo .*')).toBe('.hidden');
 });
 
-test('glob subset (glob.fish): trailing slash matches only directories', async () => {
+test('fish glob: glob.fish - trailing slash matches only directories', async () => {
 	await run('mkdir -p /workspace');
 	await run('cd /workspace');
 	await run('touch abc1');
@@ -60,7 +60,7 @@ test('glob subset (glob.fish): trailing slash matches only directories', async (
 // Symlink traversal sections from fish tests/checks/glob.fish are intentionally
 // excluded because symlink behavior is explicitly out of scope for shfs.
 
-test('glob subset (glob.fish): recursive globs support ** patterns and trailing slash semantics', async () => {
+test('fish glob: glob.fish - recursive globs support ** patterns and trailing slash semantics', async () => {
 	await run('mkdir -p /workspace');
 	await run('cd /workspace');
 	await run('mkdir -p dir_a1/dir_a2/dir_a3');
@@ -104,7 +104,7 @@ test('glob subset (glob.fish): recursive globs support ** patterns and trailing 
 	]);
 });
 
-test('glob subset (glob.fish): literal segment ** matches in the same directory', async () => {
+test('fish glob: glob.fish - literal segment ** matches in the same directory', async () => {
 	await run('mkdir -p /workspace');
 	await run('cd /workspace');
 	await run('mkdir foo');
@@ -113,7 +113,7 @@ test('glob subset (glob.fish): literal segment ** matches in the same directory'
 	expect(sortedWords(await run('echo **/bar'))).toEqual(['bar', 'foo/bar']);
 });
 
-test('glob subset (boundary): supports ?, [], and * wildcard families', async () => {
+test('fish glob: glob.fish - supports ?, [], and * wildcard families', async () => {
 	await run('mkdir -p /workspace');
 	await run('cd /workspace');
 	await run('touch a.txt b.txt c.txt aa.txt');
@@ -132,11 +132,11 @@ test('glob subset (boundary): supports ?, [], and * wildcard families', async ()
 	]);
 });
 
-test('glob subset (boundary): quoted wildcard characters are literal text, not patterns', async () => {
+test('fish glob: glob.fish - quoted wildcard characters are literal text, not patterns', async () => {
 	expect(await run("echo '*' '?' '[ab]' '**'")).toBe('* ? [ab] **');
 });
 
-test('glob subset (boundary): quoted wildcard characters are literal in path-taking commands', async () => {
+test('fish glob: glob.fish - quoted wildcard characters are literal in path-taking commands', async () => {
 	await run('mkdir -p /workspace');
 	await run('mkdir "/workspace/*literal*"');
 	await run('touch "/workspace/*literal*/file?.txt"');
@@ -146,7 +146,7 @@ test('glob subset (boundary): quoted wildcard characters are literal in path-tak
 	expect(await run('cat "/workspace/*literal*/file?.txt"')).toBe('');
 });
 
-test('glob subset (boundary): unmatched wildcard reports deterministic error', async () => {
+test('fish glob: glob.fish - unmatched wildcard reports deterministic error', async () => {
 	await run('mkdir -p /workspace');
 	await run('cd /workspace');
 
@@ -161,7 +161,7 @@ test('glob subset (boundary): unmatched wildcard reports deterministic error', a
 	expect(touchResult.status).toBe(1);
 });
 
-test('glob subset (boundary): single-target path commands enforce post-expansion cardinality', async () => {
+test('fish glob: glob.fish - single-target path commands enforce post-expansion cardinality', async () => {
 	await run('mkdir -p /workspace');
 	await run('mkdir /workspace/dir-a /workspace/dir-b');
 	await run('touch /workspace/file.txt');
@@ -192,7 +192,7 @@ test('glob subset (boundary): single-target path commands enforce post-expansion
 	expect(mvResult.status).toBe(1);
 });
 
-test('glob subset (boundary): redirection targets enforce shared single-target expansion errors', async () => {
+test('fish glob: glob.fish - redirection targets enforce shared single-target expansion errors', async () => {
 	await run('mkdir -p /workspace');
 	await run('mkdir /workspace/dir-a /workspace/dir-b');
 	await run('cd /workspace');
@@ -205,7 +205,7 @@ test('glob subset (boundary): redirection targets enforce shared single-target e
 	expect(result.status).toBe(1);
 });
 
-test('glob subset (boundary): unmatched redirection globs report deterministic failures', async () => {
+test('fish glob: glob.fish - unmatched redirection globs report deterministic failures', async () => {
 	await run('mkdir -p /workspace');
 	await run('cd /workspace');
 
@@ -215,7 +215,7 @@ test('glob subset (boundary): unmatched redirection globs report deterministic f
 	expect(result.status).toBe(1);
 });
 
-test('glob subset (boundary): multi-target path commands consume expanded glob arguments', async () => {
+test('fish glob: glob.fish - multi-target path commands consume expanded glob arguments', async () => {
 	await run('mkdir -p /workspace');
 	await run('touch /workspace/src-a.txt /workspace/src-b.txt');
 	await run('mkdir /workspace/copies /workspace/moved');

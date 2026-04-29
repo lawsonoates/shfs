@@ -39,34 +39,34 @@ async function runWithStatus(
 
 // expansion.fish: set -l foo; expansion "$foo"; expansion $foo
 // Tests empty variable expansion behavior.
-test('expansion subset: double-quoted empty variable expands to empty string', async () => {
+test('fish expansion: expansion.fish - double-quoted empty variable expands to empty string', async () => {
 	expect(await run('set -l foo; echo "$foo"')).toBe('');
 });
 
-test('expansion subset: unquoted empty variable expands to empty string', async () => {
+test('fish expansion: expansion.fish - unquoted empty variable expands to empty string', async () => {
 	expect(await run('set -l foo; echo $foo')).toBe('');
 });
 
 // expansion.fish: set -l foo; expansion "prefix$foo"; expansion prefix$foo
-test('expansion subset: double-quoted prefix with empty variable keeps prefix', async () => {
+test('fish expansion: expansion.fish - double-quoted prefix with empty variable keeps prefix', async () => {
 	expect(await run('set -l foo; echo "prefix$foo"')).toBe('prefix');
 });
 
-test('expansion subset: unquoted prefix with empty variable keeps prefix', async () => {
+test('fish expansion: expansion.fish - unquoted prefix with empty variable keeps prefix', async () => {
 	expect(await run('set -l foo; echo prefix$foo')).toBe('prefix');
 });
 
 // expansion.fish: set -l foo ''; expansion "$foo"; expansion $foo
-test('expansion subset: double-quoted variable set to empty string expands to empty', async () => {
+test('fish expansion: expansion.fish - double-quoted variable set to empty string expands to empty', async () => {
 	expect(await run('set -l foo \'\'; echo "$foo"')).toBe('');
 });
 
-test('expansion subset: unquoted variable set to empty string expands to empty', async () => {
+test('fish expansion: expansion.fish - unquoted variable set to empty string expands to empty', async () => {
 	expect(await run("set -l foo ''; echo $foo")).toBe('');
 });
 
 // expansion.fish: set -l foo ''; expansion "prefix$foo"; expansion prefix$foo
-test('expansion subset: prefix with variable set to empty string keeps prefix', async () => {
+test('fish expansion: expansion.fish - prefix with variable set to empty string keeps prefix', async () => {
 	expect(await run('set -l foo \'\'; echo "prefix$foo"')).toBe('prefix');
 });
 
@@ -74,55 +74,55 @@ test('expansion subset: prefix with variable set to empty string keeps prefix', 
 // Indirect expansion ($$) is out of scope for shfs.
 
 // Variable expansion with command substitution.
-test('expansion subset: variable expansion inside command substitution', async () => {
+test('fish expansion: expansion.fish - variable expansion inside command substitution', async () => {
 	await run('set -g name world');
 	expect(await run('echo (echo $name)')).toBe('world');
 });
 
 // Variable expansion concatenated with literal text.
-test('expansion subset: variable expansion concatenated with suffix', async () => {
+test('fish expansion: expansion.fish - variable expansion concatenated with suffix', async () => {
 	await run('set -g base file');
 	expect(await run('echo $base.txt')).toBe('file.txt');
 });
 
-test('expansion subset: variable expansion in double quotes with surrounding text', async () => {
+test('fish expansion: expansion.fish - variable expansion in double quotes with surrounding text', async () => {
 	await run('set -g greeting hello');
 	expect(await run('echo "say $greeting please"')).toBe('say hello please');
 });
 
 // Variable set via command substitution, then expanded.
-test('expansion subset: variable assigned from command substitution expands correctly', async () => {
+test('fish expansion: expansion.fish - variable assigned from command substitution expands correctly', async () => {
 	expect(await run('set -l val (echo dynamic); echo "result: $val"')).toBe(
 		'result: dynamic'
 	);
 });
 
 // Multiple variables in one expansion.
-test('expansion subset: multiple variable expansions in one string', async () => {
+test('fish expansion: expansion.fish - multiple variable expansions in one string', async () => {
 	await run('set -g first hello');
 	await run('set -g second world');
 	expect(await run('echo "$first $second"')).toBe('hello world');
 });
 
 // Variable expansion with adjacent command substitution.
-test('expansion subset: variable expansion adjacent to command substitution', async () => {
+test('fish expansion: expansion.fish - variable expansion adjacent to command substitution', async () => {
 	await run('set -g prefix pre');
 	expect(await run('echo "$prefix"(echo fix)')).toBe('prefix');
 });
 
 // Undefined variable expands to empty.
-test('expansion subset: undefined variable expands to empty in double quotes', async () => {
+test('fish expansion: expansion.fish - undefined variable expands to empty in double quotes', async () => {
 	expect(await run('echo "value:$undefined"')).toBe('value:');
 });
 
-test('expansion subset: undefined variable expands to empty unquoted', async () => {
+test('fish expansion: expansion.fish - undefined variable expands to empty unquoted', async () => {
 	expect(await run('echo value:$undefined')).toBe('value:');
 });
 
 // expansion.fish lines 4-13 use nested fish execution with `... 2>&1`
 // to assert diagnostic capture in command substitutions.
 // Adapted: shfs has no `$fish -c`, so we use a failing command directly.
-test('expansion subset (expansion.fish): command substitution captures diagnostics with 2>&1', async () => {
+test('fish expansion: expansion.fish - command substitution captures diagnostics with 2>&1', async () => {
 	const withoutMerge = await runWithStatus('echo (find /missing)');
 	expect(withoutMerge.output).toBe('');
 	expect(withoutMerge.stderr).toContain('No such file or directory');
@@ -134,7 +134,7 @@ test('expansion subset (expansion.fish): command substitution captures diagnosti
 
 // expansion.fish lines 327 and 333 use `($fish -c '...' 2>&1)` patterns.
 // Adapted: ensure compile diagnostics can be merged into captured substitution text.
-test('expansion subset (expansion.fish): 2>&1 inside command substitution preserves diagnostic text', async () => {
+test('fish expansion: expansion.fish - 2>&1 inside command substitution preserves diagnostic text', async () => {
 	const merged = await runWithStatus('echo (grep -e 2>&1)');
 	expect(merged.output).toContain('Option -e requires a value');
 	expect(merged.stderr).toBe('');

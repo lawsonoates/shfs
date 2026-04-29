@@ -15,7 +15,7 @@ const harness = createGrepHarness();
 const cases = parseAtDelimitedCorpus('bre.tests', [3]);
 
 for (const testCase of cases) {
-	test(`bre (bre.tests:${testCase.line})`, async () => {
+	test(`gnu grep: bre.tests:${testCase.line} - basic regular expression corpus case`, async () => {
 		await harness.setTextFile('/tmp/in.txt', `${testCase.input}\n`);
 		const { status } = await harness.runWithStatus(
 			`grep -e ${quote(testCase.pattern)} /tmp/in.txt`

@@ -33,7 +33,7 @@ async function expectStatus(
 	}
 }
 
-test('status: GNU exit code contract (0 match, 1 no match, 2 error)', async () => {
+test('gnu grep: status - GNU exit code contract (0 match, 1 no match, 2 error)', async () => {
 	await expectStatus(`echo abcd | grep -E -e ${quote('abc')}`, 0, 'abcd');
 	await expectStatus(`echo abcd | grep -E -e ${quote('zbc')}`, 1);
 
@@ -55,7 +55,7 @@ test('status: GNU exit code contract (0 match, 1 no match, 2 error)', async () =
 	);
 });
 
-test('options: -E, -G, -F preserve GNU matching behavior', async () => {
+test('gnu grep: options - -E, -G, -F preserve GNU matching behavior', async () => {
 	await expectStatus(`echo abababccccccd | grep -E -e ${quote('c{3}')}`, 0);
 	await expectStatus(
 		`echo abababccccccd | grep -G -e ${quote('c\\{3\\}')}`,
@@ -67,7 +67,7 @@ test('options: -E, -G, -F preserve GNU matching behavior', async () => {
 	);
 });
 
-test('file: -f pattern files including empty and null pattern lists', async () => {
+test('gnu grep: file - -f pattern files including empty and null pattern lists', async () => {
 	await harness.setTextFile('/tmp/patfile', 'radar\nMILES\nGNU\n');
 
 	await expectStatus('echo miles | grep -i -E -f /tmp/patfile', 0, 'miles');
@@ -81,7 +81,7 @@ test('file: -f pattern files including empty and null pattern lists', async () =
 	await expectStatus('echo abbcd | grep -F -f /tmp/patfile', 1);
 });
 
-test('empty: empty -e pattern matches all while empty -f file matches none', async () => {
+test('gnu grep: empty - empty -e pattern matches all while empty -f file matches none', async () => {
 	await harness.ensureDir('/dev');
 	await harness.setTextFile('/dev/null', '');
 
@@ -106,7 +106,7 @@ test('empty: empty -e pattern matches all while empty -f file matches none', asy
 	}
 });
 
-test('grep-dev-null: /dev/null as pattern file yields no patterns', async () => {
+test('gnu grep: grep-dev-null - /dev/null as pattern file yields no patterns', async () => {
 	await harness.ensureDir('/dev');
 	await harness.setTextFile('/dev/null', '');
 
@@ -121,7 +121,7 @@ test('grep-dev-null: /dev/null as pattern file yields no patterns', async () => 
 	}
 });
 
-test('grep-dir: directory passed to -f is an error', async () => {
+test('gnu grep: grep-dir - directory passed to -f is an error', async () => {
 	await harness.ensureDir('/tmp/a');
 
 	for (const opt of [
@@ -135,7 +135,7 @@ test('grep-dir: directory passed to -f is an error', async () => {
 	}
 });
 
-test('help-version: grep advertises help and version successfully', async () => {
+test('gnu grep: help-version - grep advertises help and version successfully', async () => {
 	const help = await harness.runWithStatus('grep --help');
 	expect(help.status).toBe(0);
 	expect(help.output.length).toBeGreaterThan(0);

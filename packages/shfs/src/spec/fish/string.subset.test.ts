@@ -23,28 +23,28 @@ async function runNothrow(command: string): Promise<string> {
 	return await shell.$`${command}`.nothrow().text();
 }
 
-test('string subset: replace transforms matching text', async () => {
+test('fish string: string.fish - replace transforms matching text', async () => {
 	expect(await run('string replace is was "blue is my favorite"')).toBe(
 		'blue was my favorite'
 	);
 });
 
-test('string subset: replace applies to each provided input value', async () => {
+test('fish string: string.fish - replace applies to each provided input value', async () => {
 	expect(await run('string replace . - a.b c.d')).toBe('a-b\nc-d');
 });
 
-test('string subset: replace supports variable and command substitution', async () => {
+test('fish string: string.fish - replace supports variable and command substitution', async () => {
 	await run('set -g target TARGET');
 	expect(
 		await run('echo (string replace TARGET path /workspace/$target)')
 	).toBe('/workspace/path');
 });
 
-test('string subset: match supports fish-style wildcard patterns', async () => {
+test('fish string: string.fish - match supports fish-style wildcard patterns', async () => {
 	expect(await run('string match "a*b" axxb')).toBe('axxb');
 });
 
-test('string subset: match -q suppresses output and drives and/or chaining', async () => {
+test('fish string: string.fish - match -q suppresses output and drives and/or chaining', async () => {
 	expect(
 		await run('string match -q "a*" alpha; and echo yes; or echo no')
 	).toBe('yes');
@@ -53,7 +53,7 @@ test('string subset: match -q suppresses output and drives and/or chaining', asy
 	).toBe('no');
 });
 
-test('string subset: match status is exposed through $status', async () => {
+test('fish string: string.fish - match status is exposed through $status', async () => {
 	await run('string match "a*" alpha');
 	expect(await run('echo $status')).toBe('0');
 
@@ -61,11 +61,11 @@ test('string subset: match status is exposed through $status', async () => {
 	expect(await run('echo $status')).toBe('1');
 });
 
-test('string subset: requires a subcommand', async () => {
+test('fish string: string.fish - requires a subcommand', async () => {
 	await expect(run('string')).rejects.toThrow('string requires a subcommand');
 });
 
-test('string subset: validates replace and match arity', async () => {
+test('fish string: string.fish - validates replace and match arity', async () => {
 	await expect(run('string replace from to')).rejects.toThrow(
 		'string replace requires pattern replacement text'
 	);
@@ -74,7 +74,7 @@ test('string subset: validates replace and match arity', async () => {
 	);
 });
 
-test('string subset: unsupported string subcommands are out of scope', async () => {
+test('fish string: string.fish - unsupported string subcommands are out of scope', async () => {
 	await expect(run('string sub --start 2 abc')).rejects.toThrow(
 		UNSUPPORTED_STRING_FEATURE_REGEX
 	);
@@ -89,7 +89,7 @@ test('string subset: unsupported string subcommands are out of scope', async () 
 	);
 });
 
-test('string subset: regex/invert/all flags are out of scope', async () => {
+test('fish string: string.fish - regex/invert/all flags are out of scope', async () => {
 	await expect(run('string match -r "cat|dog" "nice dog"')).rejects.toThrow(
 		UNSUPPORTED_STRING_FEATURE_REGEX
 	);

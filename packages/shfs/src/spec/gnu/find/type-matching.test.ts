@@ -11,7 +11,7 @@ const harness = createFindHarness();
 
 // --- Negative tests: invalid -type arguments ---
 
-test('type_list: empty -type argument is rejected', async () => {
+test('gnu find: type_list.sh - empty -type argument is rejected', async () => {
 	await harness.ensureDir('/work/dir');
 
 	const result = await harness.runWithStderr(
@@ -23,7 +23,7 @@ test('type_list: empty -type argument is rejected', async () => {
 	);
 });
 
-test('type_list: non-separated type arguments (e.g. fd) are rejected', async () => {
+test('gnu find: type_list.sh - non-separated type arguments (e.g. fd) are rejected', async () => {
 	await harness.ensureDir('/work/dir');
 
 	const result = await harness.runWithStderr(
@@ -35,7 +35,7 @@ test('type_list: non-separated type arguments (e.g. fd) are rejected', async () 
 	);
 });
 
-test('type_list: trailing comma in type list is rejected', async () => {
+test('gnu find: type_list.sh - trailing comma in type list is rejected', async () => {
 	await harness.ensureDir('/work/dir');
 
 	const result = await harness.runWithStderr(
@@ -47,7 +47,7 @@ test('type_list: trailing comma in type list is rejected', async () => {
 	);
 });
 
-test('type_list: duplicate entries in type list are rejected', async () => {
+test('gnu find: type_list.sh - duplicate entries in type list are rejected', async () => {
 	await harness.ensureDir('/work/dir');
 
 	const result = await harness.runWithStderr(
@@ -59,7 +59,7 @@ test('type_list: duplicate entries in type list are rejected', async () => {
 
 // --- Positive tests: -type with in-scope file types ---
 
-test('type_list: -type f matches only regular files', async () => {
+test('gnu find: type_list.sh - -type f matches only regular files', async () => {
 	await harness.setTextFile('/work/dir/reg', '');
 	await harness.ensureDir('/work/dir/subdir');
 
@@ -70,7 +70,7 @@ test('type_list: -type f matches only regular files', async () => {
 	expect(sortedLines(result.output)).toBe('/work/dir/reg');
 });
 
-test('type_list: -type d matches only directories', async () => {
+test('gnu find: type_list.sh - -type d matches only directories', async () => {
 	await harness.setTextFile('/work/dir/reg', '');
 	await harness.ensureDir('/work/dir/subdir');
 
@@ -81,7 +81,7 @@ test('type_list: -type d matches only directories', async () => {
 	expect(sortedLines(result.output)).toBe('/work/dir/subdir');
 });
 
-test('type_list: -type f,d matches regular files and directories', async () => {
+test('gnu find: type_list.sh - -type f,d matches regular files and directories', async () => {
 	await harness.setTextFile('/work/dir/reg', '');
 	await harness.ensureDir('/work/dir/subdir');
 

@@ -88,7 +88,7 @@ const FIND_GNU_CASES: readonly FindGnuCase[] = [
 ] as const;
 
 for (const testCase of FIND_GNU_CASES) {
-	test(`${testCase.name}: GNU findutils find.gnu`, async () => {
+	test(`gnu find: ${testCase.name}.exp - matches GNU findutils expected output`, async () => {
 		await testCase.setup();
 
 		const result = await harness.runWithStatus(testCase.command);

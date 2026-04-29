@@ -13,7 +13,7 @@ import { createFindHarness, sortedLines } from './harness';
 const harness = createFindHarness();
 
 // files0-from: find defaults to the current directory when no starting path is given.
-test('files0-from (adapted): find with no args defaults to the current directory', async () => {
+test('gnu find: files0-from.sh - find with no args defaults to the current directory', async () => {
 	await harness.ensureDir('/work');
 	await harness.run('cd /work');
 
@@ -23,7 +23,7 @@ test('files0-from (adapted): find with no args defaults to the current directory
 });
 
 // files0-from: regular recursion from a starting path remains the default.
-test('files0-from (adapted): recursion includes the starting path and descendants', async () => {
+test('gnu find: files0-from.sh - recursion includes the starting path and descendants', async () => {
 	await harness.ensureDir('/work/d1/d2/d3');
 	await harness.setTextFile('/work/d1/d2/d3/file', '');
 	await harness.run('cd /work');
@@ -36,7 +36,7 @@ test('files0-from (adapted): recursion includes the starting path and descendant
 });
 
 // files0-from: -maxdepth 0 prevents recursion into discovered descendants.
-test('files0-from (adapted): -maxdepth 0 lists only the starting path', async () => {
+test('gnu find: files0-from.sh - -maxdepth 0 lists only the starting path', async () => {
 	await harness.ensureDir('/work/d1/d2/d3');
 	await harness.setTextFile('/work/d1/d2/d3/file', '');
 	await harness.run('cd /work');
@@ -47,7 +47,7 @@ test('files0-from (adapted): -maxdepth 0 lists only the starting path', async ()
 });
 
 // type_list: -mindepth suppresses the starting path while keeping deeper matches.
-test('type_list (adapted): -mindepth 1 suppresses the starting path', async () => {
+test('gnu find: type_list.sh - -mindepth 1 suppresses the starting path', async () => {
 	await harness.setTextFile('/work/tree/root-file', '');
 	await harness.ensureDir('/work/tree/sub');
 	await harness.setTextFile('/work/tree/sub/leaf', '');
@@ -63,7 +63,7 @@ test('type_list (adapted): -mindepth 1 suppresses the starting path', async () =
 
 // depth-unreadable-dir: adapt the original -depth regression to the subset's
 // deterministic traversal ordering without depending on permission behavior.
-test('depth-unreadable-dir (adapted): -depth visits children before their parent directories', async () => {
+test('gnu find: depth-unreadable-dir.sh - -depth visits children before their parent directories', async () => {
 	await harness.setTextFile('/work/tmp/dir/file', '');
 
 	const result = await harness.runWithStatus('find /work/tmp -depth');
@@ -77,7 +77,7 @@ test('depth-unreadable-dir (adapted): -depth visits children before their parent
 
 // many-dir-entries-vs-OOM: Verify that find does not have excessive memory
 // consumption even for large directories.
-test('many-dir-entries-vs-OOM: find handles large directories without error', async () => {
+test('gnu find: many-dir-entries-vs-OOM.sh - find handles large directories without error', async () => {
 	const count = 10_000;
 
 	await harness.ensureDir('/work/dir');
@@ -92,7 +92,7 @@ test('many-dir-entries-vs-OOM: find handles large directories without error', as
 	expect(lines.length).toBe(count);
 });
 
-test('many-dir-entries-vs-OOM: find with -name filter on large directory', async () => {
+test('gnu find: many-dir-entries-vs-OOM.sh - find with -name filter on large directory', async () => {
 	const count = 1000;
 
 	await harness.ensureDir('/work/dir');

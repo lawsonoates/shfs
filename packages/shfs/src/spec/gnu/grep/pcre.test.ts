@@ -15,14 +15,14 @@ import { createGrepHarness, quote } from './harness';
 
 const harness = createGrepHarness();
 
-test('pcre: with -P, \\s*$ matches an empty line', async () => {
+test('gnu grep: pcre - with -P, \\s*$ matches an empty line', async () => {
 	const result = await harness.runWithStatus(
 		`echo '' | grep -P ${quote('\\s*$')}`
 	);
 	expect(result.status).toBe(0);
 });
 
-test('pcre-abort: catastrophic backtracking reports status 2 without output', async () => {
+test('gnu grep: pcre-abort - catastrophic backtracking reports status 2 without output', async () => {
 	await harness.setTextFile(
 		'/tmp/in.txt',
 		'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab\n'
@@ -35,7 +35,7 @@ test('pcre-abort: catastrophic backtracking reports status 2 without output', as
 	expect(result.output).toBe('');
 });
 
-test('pcre-invalid-utf8-input: -P handles invalid UTF-8 input bytes without aborting', async () => {
+test('gnu grep: pcre-invalid-utf8-input - -P handles invalid UTF-8 input bytes without aborting', async () => {
 	await harness.setFile(
 		'/tmp/in.bin',
 		new Uint8Array([0x6a, 0x82, 0x0a, 0x6a, 0x0a])
@@ -50,7 +50,7 @@ test('pcre-invalid-utf8-input: -P handles invalid UTF-8 input bytes without abor
 	}
 });
 
-test('pcre-utf8: Unicode property classes and dot matching on UTF-8 input', async () => {
+test('gnu grep: pcre-utf8 - Unicode property classes and dot matching on UTF-8 input', async () => {
 	await harness.setTextFile('/tmp/euro.txt', '€ euro\n');
 
 	const symbol = await harness.runWithStatus(
@@ -78,7 +78,7 @@ test('pcre-utf8: Unicode property classes and dot matching on UTF-8 input', asyn
 	expect(nonSymbol.output).toBe('');
 });
 
-test('pcre-z: -Pz agrees with -z counts on NUL-delimited input', async () => {
+test('gnu grep: pcre-z - -Pz agrees with -z counts on NUL-delimited input', async () => {
 	const input = new Uint8Array([
 		0x61, 0x62, 0x63, 0x00, 0x64, 0x65, 0x66, 0x00, 0x67, 0x68, 0x69, 0x00,
 		0x61, 0x61, 0x61, 0x00, 0x67, 0x61, 0x68, 0x00,

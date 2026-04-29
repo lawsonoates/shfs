@@ -23,7 +23,7 @@ const OUT_OF_SCOPE_WC_SCRIPTS = [
 	},
 ] as const;
 
-test('GNU wc host/runtime scripts are accounted for as outside the shfs boundary', () => {
+test('gnu wc: wc-cpu.sh + wc-parallel.sh + wc-proc.sh - host/runtime scripts are accounted for outside the shfs boundary', () => {
 	expect(OUT_OF_SCOPE_WC_SCRIPTS).toEqual([
 		{
 			reason: 'depends on CPU-specific acceleration, GLIBC_TUNABLES, --debug, shuf, and seq',

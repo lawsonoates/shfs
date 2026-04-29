@@ -22,7 +22,7 @@ async function runNothrow(command: string): Promise<string> {
 	return await shell.$`${command}`.nothrow().text();
 }
 
-test('cd/pwd: supports absolute and relative navigation with . and ..', async () => {
+test('fish cd/pwd: cd.fish - supports absolute and relative navigation with . and ..', async () => {
 	await run('mkdir -p /workspace/app/src');
 	await run('cd /workspace');
 	expect(await run('pwd')).toBe('/workspace');
@@ -40,13 +40,13 @@ test('cd/pwd: supports absolute and relative navigation with . and ..', async ()
 	expect(await run('pwd')).toBe('/');
 });
 
-test('cd/pwd: navigating above root stays at root', async () => {
+test('fish cd/pwd: cd.fish - navigating above root stays at root', async () => {
 	await run('cd /');
 	await run('cd ..');
 	expect(await run('pwd')).toBe('/');
 });
 
-test('cd subset: supports -- for directories that begin with a hyphen', async () => {
+test('fish cd: cd.fish - supports -- for directories that begin with a hyphen', async () => {
 	await run('mkdir -p /workspace');
 	await run('mkdir /workspace/-testdir');
 	await run('cd /workspace');
@@ -56,7 +56,7 @@ test('cd subset: supports -- for directories that begin with a hyphen', async ()
 	expect(await run('echo $status')).toBe('0');
 });
 
-test('cd subset: failed cd does not change the current working directory', async () => {
+test('fish cd: cd.fish - failed cd does not change the current working directory', async () => {
 	await run('mkdir -p /workspace/current');
 	await run('cd /workspace/current');
 
@@ -66,7 +66,7 @@ test('cd subset: failed cd does not change the current working directory', async
 	expect(await run('pwd')).toBe('/workspace/current');
 });
 
-test('cd subset: pwd remains absolute after relative cd navigation', async () => {
+test('fish cd: cd.fish - pwd remains absolute after relative cd navigation', async () => {
 	await run('mkdir -p /workspace/alpha/beta');
 	await run('cd /workspace/alpha');
 	await run('cd beta');
@@ -76,7 +76,7 @@ test('cd subset: pwd remains absolute after relative cd navigation', async () =>
 	expect(current).toBe('/workspace/alpha/beta');
 });
 
-test('set: global variables persist, local variables are scoped to one script run', async () => {
+test('fish set: cd.fish - global variables persist, local variables are scoped to one script run', async () => {
 	await run('set -g PROJECT_ROOT /workspace');
 	expect(await run('echo $PROJECT_ROOT')).toBe('/workspace');
 
@@ -86,35 +86,35 @@ test('set: global variables persist, local variables are scoped to one script ru
 	expect(await run('echo $LOCAL_ONLY')).toBe('');
 });
 
-test('command substitution: executes and can be used as cd target', async () => {
+test('fish command substitution: cd.fish - executes and can be used as cd target', async () => {
 	await run('mkdir -p /workspace/subdir');
 	expect(await run('cd /workspace; cd (echo subdir); pwd')).toBe(
 		'/workspace/subdir'
 	);
 });
 
-test('command substitution: nested substitutions resolve inner output', async () => {
+test('fish command substitution: cd.fish - nested substitutions resolve inner output', async () => {
 	expect(await run('echo (echo (echo nested))')).toBe('nested');
 });
 
-test('statement chaining: supports newline-separated scripts', async () => {
+test('fish statement chaining: cd.fish - supports newline-separated scripts', async () => {
 	expect(
 		await run('mkdir -p /chain/newline\ncd /chain\ncd newline\npwd')
 	).toBe('/chain/newline');
 });
 
-test('statement chaining: supports semicolon-separated scripts', async () => {
+test('fish statement chaining: cd.fish - supports semicolon-separated scripts', async () => {
 	expect(
 		await run('mkdir -p /chain/semicolon; cd /chain; cd semicolon; pwd')
 	).toBe('/chain/semicolon');
 });
 
-test('status and boolean chaining: and/or use prior command status', async () => {
+test('fish status and boolean chaining: cd.fish - and/or use prior command status', async () => {
 	expect(await run('test 1 = 1; and echo pass; or echo fail')).toBe('pass');
 	expect(await run('test 1 = 2; and echo pass; or echo fail')).toBe('fail');
 });
 
-test('$status: reflects success and failure as 0/1', async () => {
+test('fish status: cd.fish - reflects success and failure as 0/1', async () => {
 	await run('test 1 = 1');
 	expect(await run('echo $status')).toBe('0');
 
@@ -122,7 +122,7 @@ test('$status: reflects success and failure as 0/1', async () => {
 	expect(await run('echo $status')).toBe('1');
 });
 
-test('read: can capture pipeline input into a variable', async () => {
+test('fish read: cd.fish - can capture pipeline input into a variable', async () => {
 	expect(await run('echo /workspace | read target; echo $target')).toBe(
 		'/workspace'
 	);
@@ -133,7 +133,7 @@ test('read: can capture pipeline input into a variable', async () => {
 	).toBe('/workspace/from-read');
 });
 
-test('string: can transform paths used by cd and participate in status chains', async () => {
+test('fish string: cd.fish - can transform paths used by cd and participate in status chains', async () => {
 	await run('mkdir -p /workspace/string-target');
 	expect(
 		await run(
@@ -148,20 +148,20 @@ test('string: can transform paths used by cd and participate in status chains', 
 	).toBe('yes');
 });
 
-test('cd errors: missing directory has stable deterministic message', async () => {
+test('fish cd errors: cd.fish - missing directory has stable deterministic message', async () => {
 	await expect(run('cd /missing')).rejects.toThrow(
 		'cd: directory does not exist: /missing'
 	);
 });
 
-test('cd errors: file target has stable deterministic message', async () => {
+test('fish cd errors: cd.fish - file target has stable deterministic message', async () => {
 	await run('touch /not-a-directory');
 	await expect(run('cd /not-a-directory')).rejects.toThrow(
 		'cd: not a directory: /not-a-directory'
 	);
 });
 
-test('cd errors: empty path fails and sets status to 1', async () => {
+test('fish cd errors: cd.fish - empty path fails and sets status to 1', async () => {
 	await expect(run('cd ""')).rejects.toThrow('cd: empty path');
 	expect(await run('echo $status')).toBe('1');
 });

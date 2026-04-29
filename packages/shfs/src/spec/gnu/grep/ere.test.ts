@@ -15,7 +15,7 @@ const harness = createGrepHarness();
 const cases = parseAtDelimitedCorpus('ere.tests', [3]);
 
 for (const testCase of cases) {
-	test(`ere (ere.tests:${testCase.line})`, async () => {
+	test(`gnu grep: ere.tests:${testCase.line} - extended regular expression corpus case`, async () => {
 		await harness.setTextFile('/tmp/in.txt', `${testCase.input}\n`);
 		const { status } = await harness.runWithStatus(
 			`grep -E -e ${quote(testCase.pattern)} /tmp/in.txt`

@@ -21,7 +21,7 @@ function sortedLines(text: string): string {
 	return text.split('\n').sort().join('\n');
 }
 
-test('include-exclude: recursive include/exclude filtering mirrors GNU behavior', async () => {
+test('gnu grep: include-exclude - recursive include/exclude filtering mirrors GNU behavior', async () => {
 	await harness.run('mkdir -p /work/x/dir');
 	await harness.setTextFile('/work/x/a', 'aaa\n');
 	await harness.setTextFile('/work/x/b', 'bbb\n');
@@ -75,7 +75,7 @@ test('include-exclude: recursive include/exclude filtering mirrors GNU behavior'
 	expect(excludeDash.output).toBe('aaa');
 });
 
-test('r-dot: -r defaults to current directory when no file operand is provided', async () => {
+test('gnu grep: r-dot - -r defaults to current directory when no file operand is provided', async () => {
 	await harness.run('mkdir -p /work/dir');
 	await harness.setTextFile('/work/dir/a', 'aaa\n');
 	await harness.setTextFile('/work/dir/b', 'bbb\n');
@@ -90,7 +90,7 @@ test('r-dot: -r defaults to current directory when no file operand is provided',
 	expect(withStdin.output).toBe('a:aaa');
 });
 
-test('max-count-vs-context: -m1 with -A5 stops after first match context window', async () => {
+test('gnu grep: max-count-vs-context - -m1 with -A5 stops after first match context window', async () => {
 	await harness.setTextFile(
 		'/tmp/in.txt',
 		[
@@ -119,7 +119,7 @@ test('max-count-vs-context: -m1 with -A5 stops after first match context window'
 	);
 });
 
-test('word-multi-file: -w over recursive and explicit multi-file inputs', async () => {
+test('gnu grep: word-multi-file - -w over recursive and explicit multi-file inputs', async () => {
 	await harness.run('mkdir -p /work/a');
 	await harness.setTextFile('/work/a/1', 'aa bb cc\n');
 	await harness.setTextFile('/work/a/2', 'bb dd ff\n');
@@ -141,7 +141,7 @@ test('word-multi-file: -w over recursive and explicit multi-file inputs', async 
 	);
 });
 
-test('skip-device: --devices=skip must not ignore stdin', async () => {
+test('gnu grep: skip-device - --devices=skip must not ignore stdin', async () => {
 	const withDash = await harness.runWithStatus(
 		'echo foo | grep -D skip foo -'
 	);
@@ -155,7 +155,7 @@ test('skip-device: --devices=skip must not ignore stdin', async () => {
 	expect(implicitStdin.output).toBe('foo');
 });
 
-test('word-delim-multibyte: \\< recognizes multibyte word starts', async () => {
+test('gnu grep: word-delim-multibyte - \\< recognizes multibyte word starts', async () => {
 	const eAcute = 'é';
 	await harness.setTextFile('/tmp/in.txt', `${eAcute}\n`);
 

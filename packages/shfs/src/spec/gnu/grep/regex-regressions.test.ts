@@ -29,7 +29,7 @@ async function status(command: string): Promise<number> {
 	return (await harness.runWithStatus(command)).status;
 }
 
-test('backref: palindrome, bond stress pattern, and invalid backref handling', async () => {
+test('gnu grep: backref - palindrome, bond stress pattern, and invalid backref handling', async () => {
 	expect(
 		await status(`echo radar | grep -e ${quote('\\(.\\)\\(.\\).\\2\\1')}`)
 	).toBe(0);
@@ -51,7 +51,7 @@ test('backref: palindrome, bond stress pattern, and invalid backref handling', a
 	).toBe(2);
 });
 
-test('backref-word and case-fold-backref: -w and -i preserve captured backreferences', async () => {
+test('gnu grep: backref-word + case-fold-backref - -w and -i preserve captured backreferences', async () => {
 	await harness.setTextFile(
 		'/tmp/exp1.txt',
 		'foo foo bar\nFoo foo\nFOO foo\n'
@@ -70,7 +70,7 @@ test('backref-word and case-fold-backref: -w and -i preserve captured backrefere
 	expect(folded.output).toBe('foo foo bar\nFoo foo\nFOO foo');
 });
 
-test('case-fold-backslash-w and char class/range/type regressions', async () => {
+test('gnu grep: case-fold-backslash-w + case-fold-char-class + case-fold-char-range + case-fold-char-type - case folding preserves word and character class semantics', async () => {
 	expect(await status(`echo foo bar | grep -i ${quote('^foo\\W')}`)).toBe(0);
 
 	await harness.setTextFile('/tmp/case-1.txt', 'X\nY\nZ\n');
@@ -116,7 +116,7 @@ test('case-fold-backslash-w and char class/range/type regressions', async () => 
 	expect(typeTwo.output).toBe('y');
 });
 
-test('dfa coverage and heap-overrun regressions keep correct statuses', async () => {
+test('gnu grep: dfa-coverage + dfa-heap-overrun - regression cases keep correct statuses', async () => {
 	await harness.setTextFile('/tmp/in.txt', 'a\n');
 	const coverage = await harness.runWithStatus(
 		`grep -E ${quote('[^_]|$')} /tmp/in.txt`
@@ -131,7 +131,7 @@ test('dfa coverage and heap-overrun regressions keep correct statuses', async ()
 	).toBe(1);
 });
 
-test('dfaexec-multibyte: alternation and character-class repetition remain equivalent', async () => {
+test('gnu grep: dfaexec-multibyte - alternation and character-class repetition remain equivalent', async () => {
 	await harness.setTextFile('/tmp/letters.txt', 'aa\nab\nba\nbb\n');
 	await harness.setTextFile('/tmp/digits.txt', '1 2 3\n');
 
@@ -154,7 +154,7 @@ test('dfaexec-multibyte: alternation and character-class repetition remain equiv
 	expect(digits.output).toBe('1 2 3');
 });
 
-test('inconsistent-range: equivalent uppercase predicates agree', async () => {
+test('gnu grep: inconsistent-range - equivalent uppercase predicates agree', async () => {
 	await harness.setTextFile('/tmp/in.txt', '00a\n00g\n00z\n00A\n00G\n00Z\n');
 
 	const doubled = await harness.runWithStatus(
@@ -169,7 +169,7 @@ test('inconsistent-range: equivalent uppercase predicates agree', async () => {
 	expect(doubled.output).toBe(ranged.output);
 });
 
-test('high-bit-range: single high-bit character remains matchable in bracket expression', async () => {
+test('gnu grep: high-bit-range - single high-bit character remains matchable in bracket expression', async () => {
 	const input = '\u0081\n';
 	await harness.setTextFile('/tmp/in.txt', input);
 
@@ -180,7 +180,7 @@ test('high-bit-range: single high-bit character remains matchable in bracket exp
 	expect(result.output).toBe('\u0081');
 });
 
-test('invalid-multibyte-infloop: -F with invalid byte pattern returns no match', async () => {
+test('gnu grep: invalid-multibyte-infloop - -F with invalid byte pattern returns no match', async () => {
 	await harness.setFile('/tmp/search-str', new Uint8Array([0x82]));
 	await harness.setFile('/tmp/input', new Uint8Array([0x82, 0x82]));
 
@@ -191,7 +191,7 @@ test('invalid-multibyte-infloop: -F with invalid byte pattern returns no match',
 	expect(result.output).toBe('');
 });
 
-test('repetition-overflow: excessive repetition counts fail with status 2', async () => {
+test('gnu grep: repetition-overflow - excessive repetition counts fail with status 2', async () => {
 	const xp1 = '4294967297';
 	const xp2 = '4294967298';
 
@@ -208,7 +208,7 @@ test('repetition-overflow: excessive repetition counts fail with status 2', asyn
 	expect(two.output).toBe('');
 });
 
-test('reversed-range-endpoints: invalid ranges return status 2', async () => {
+test('gnu grep: reversed-range-endpoints - invalid ranges return status 2', async () => {
 	await harness.ensureDir('/dev');
 	await harness.setTextFile('/dev/null', '');
 
@@ -221,7 +221,7 @@ test('reversed-range-endpoints: invalid ranges return status 2', async () => {
 	}
 });
 
-test('warn-char-classes: diagnose [:space:] typo and accept valid forms', async () => {
+test('gnu grep: warn-char-classes - diagnose [:space:] typo and accept valid forms', async () => {
 	await harness.setTextFile('/tmp/x', 'f\nb\nh\n');
 
 	const invalid = await harness.runWithStatus(
@@ -248,7 +248,7 @@ test('warn-char-classes: diagnose [:space:] typo and accept valid forms', async 
 	}
 });
 
-test('unibyte-negated-circumflex: [^^-^] remains a true negated class', async () => {
+test('gnu grep: unibyte-negated-circumflex - [^^-^] remains a true negated class', async () => {
 	await harness.setTextFile('/tmp/in', 'a\n');
 	const result = await harness.runWithStatus(
 		`grep ${quote('[^^-^]')} /tmp/in`

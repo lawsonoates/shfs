@@ -20,7 +20,7 @@ import { createGrepHarness, quote } from './harness';
 
 const harness = createGrepHarness();
 
-test('backslash-s-and-repetition-operators: \\s and \\S support repetition operators', async () => {
+test('gnu grep: backslash-s-and-repetition-operators - \\s and \\S support repetition operators', async () => {
 	await harness.setTextFile('/tmp/in-space', ' \n');
 
 	for (const re of ['\\s\\+', '\\s*', '\\s\\?', '\\s\\{1\\}']) {
@@ -41,7 +41,7 @@ test('backslash-s-and-repetition-operators: \\s and \\S support repetition opera
 	}
 });
 
-test('backslash-s-vs-invalid-multitype: invalid multibyte never matches \\s or \\S', async () => {
+test('gnu grep: backslash-s-vs-invalid-multibyte - invalid multibyte never matches \\s or \\S', async () => {
 	await harness.setFile('/tmp/in.bin', new Uint8Array([0x82, 0x0a]));
 
 	const upper = await harness.runWithStatus(
@@ -57,7 +57,7 @@ test('backslash-s-vs-invalid-multitype: invalid multibyte never matches \\s or \
 	expect(lower.output).toBe('');
 });
 
-test('char-class-multibyte and char-class-multibyte2: accented characters remain stable in classes and groups', async () => {
+test('gnu grep: char-class-multibyte + char-class-multibyte2 - accented characters remain stable in classes and groups', async () => {
 	await harness.setTextFile('/tmp/accented-lower.txt', 'á\nç\né\n');
 	await harness.setTextFile('/tmp/accented-upper.txt', 'Á\nÇ\nÉ\n');
 
@@ -89,7 +89,7 @@ test('char-class-multibyte and char-class-multibyte2: accented characters remain
 	expect(invalid.status).toBe(1);
 });
 
-test('prefix-of-multibyte: byte prefixes of UTF-8 characters are not standalone matches', async () => {
+test('gnu grep: prefix-of-multibyte - byte prefixes of UTF-8 characters are not standalone matches', async () => {
 	await harness.setFile('/tmp/prefix.txt', new Uint8Array([0xef]));
 	await harness.setFile(
 		'/tmp/input.txt',
@@ -105,7 +105,7 @@ test('prefix-of-multibyte: byte prefixes of UTF-8 characters are not standalone 
 	}
 });
 
-test('fgrep-infloop: fixed-string search over malformed multibyte fragments returns no match', async () => {
+test('gnu grep: fgrep-infloop - fixed-string search over malformed multibyte fragments returns no match', async () => {
 	await harness.setFile('/tmp/needle.bin', new Uint8Array([0xbc, 0xa1]));
 	await harness.setFile(
 		'/tmp/input.bin',
@@ -119,7 +119,7 @@ test('fgrep-infloop: fixed-string search over malformed multibyte fragments retu
 	expect(result.output).toBe('');
 });
 
-test('bogus-wctob: bracket expression must not mis-match invalid high byte', async () => {
+test('gnu grep: bogus-wctob - bracket expression must not mis-match invalid high byte', async () => {
 	await harness.setFile('/tmp/in.bin', new Uint8Array([0xe0, 0x0a]));
 	const result = await harness.runWithStatus(
 		`grep ${quote('[à]')} /tmp/in.bin`
@@ -130,7 +130,7 @@ test('bogus-wctob: bracket expression must not mis-match invalid high byte', asy
 	expect(result.status).not.toBe(0);
 });
 
-test('empty-line-mb: ^$ with -n -i reports only truly empty lines', async () => {
+test('gnu grep: empty-line-mb - ^$ with -n -i reports only truly empty lines', async () => {
 	await harness.setTextFile('/tmp/in.txt', 'a\n\nb\n');
 	await harness.setTextFile('/tmp/in2.txt', 'a\nb\n');
 
@@ -147,7 +147,7 @@ test('empty-line-mb: ^$ with -n -i reports only truly empty lines', async () => 
 	expect(second.output).toBe('');
 });
 
-test('surrogate-pair: non-BMP data must not crash and remains searchable', async () => {
+test('gnu grep: surrogate-pair - non-BMP data must not crash and remains searchable', async () => {
 	const pair = '𐐅';
 	await harness.setTextFile('/tmp/in.txt', `${pair}\n`);
 
@@ -166,7 +166,7 @@ test('surrogate-pair: non-BMP data must not crash and remains searchable', async
 	}
 });
 
-test('multibyte-white-space: UTF-8 whitespace code points satisfy \\s and not \\S', async () => {
+test('gnu grep: multibyte-white-space - UTF-8 whitespace code points satisfy \\s and not \\S', async () => {
 	const spaces = [
 		'\u0009',
 		'\u000b',
@@ -203,7 +203,7 @@ test('multibyte-white-space: UTF-8 whitespace code points satisfy \\s and not \\
 	}
 });
 
-test('turkish-I and turkish-I-without-dot: -i with multi-byte case mappings preserves full lines', async () => {
+test('gnu grep: turkish-I + turkish-I-without-dot - -i with multi-byte case mappings preserves full lines', async () => {
 	const dottedCapitalI = 'İ';
 	await harness.setTextFile(
 		'/tmp/dotted.txt',

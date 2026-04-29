@@ -38,7 +38,7 @@ async function prepareMixedStreamFixture(): Promise<void> {
 // redirect.fish lines 8-9: outnerr 0 &| count
 // Adapted: use find with one valid path (stdout) and one missing path (stderr),
 // then pipe both streams via &|.
-test('redirect subset (redirect.fish): &| pipes both stdout and stderr', async () => {
+test('fish redirect: redirect.fish - &| pipes both stdout and stderr', async () => {
 	await prepareMixedStreamFixture();
 
 	const result = await runWithStatus(
@@ -51,7 +51,7 @@ test('redirect subset (redirect.fish): &| pipes both stdout and stderr', async (
 
 // redirect.fish lines 12-14: outnerr appendfd 2>>&1
 // Adapted: verify fd-dup append form merges stderr into stdout.
-test('redirect subset (redirect.fish): 2>>&1 merges stderr into stdout', async () => {
+test('fish redirect: redirect.fish - 2>>&1 merges stderr into stdout', async () => {
 	await prepareMixedStreamFixture();
 
 	const result = await runWithStatus(
@@ -64,7 +64,7 @@ test('redirect subset (redirect.fish): 2>>&1 merges stderr into stdout', async (
 });
 
 // redirect.fish lines 17-20: outnerr overwrite &>$tmpdir/file.txt
-test('redirect subset (redirect.fish): &> redirects both stdout and stderr to a file', async () => {
+test('fish redirect: redirect.fish - &> redirects both stdout and stderr to a file', async () => {
 	await prepareMixedStreamFixture();
 
 	const result = await runWithStatus(
@@ -80,7 +80,7 @@ test('redirect subset (redirect.fish): &> redirects both stdout and stderr to a 
 });
 
 // redirect.fish lines 22-27: outnerr append &>>$tmpdir/file.txt
-test('redirect subset (redirect.fish): &>> appends both stdout and stderr to an existing file', async () => {
+test('fish redirect: redirect.fish - &>> appends both stdout and stderr to an existing file', async () => {
 	await prepareMixedStreamFixture();
 
 	await runWithStatus(
@@ -97,7 +97,7 @@ test('redirect subset (redirect.fish): &>> appends both stdout and stderr to an 
 });
 
 // Mixed same-file > and 2>> should truncate before merging channels.
-test('redirect subset (boundary): mixed same-file redirections preserve overwrite semantics', async () => {
+test('fish redirect: redirect.fish - mixed same-file redirections preserve overwrite semantics', async () => {
 	await run('mkdir -p /tmp');
 	await run('echo stale > /tmp/mixed.txt');
 
@@ -107,7 +107,7 @@ test('redirect subset (boundary): mixed same-file redirections preserve overwrit
 });
 
 // redirect.fish lines 29-30: echo noclobber &>>?$tmpdir/file.txt
-test('redirect subset (redirect.fish): noclobber form &>>? refuses to overwrite an existing file', async () => {
+test('fish redirect: redirect.fish - noclobber form &>>? refuses to overwrite an existing file', async () => {
 	await run('mkdir -p /tmp');
 	await run('echo seed > /tmp/noclobber.txt');
 
@@ -120,28 +120,28 @@ test('redirect subset (redirect.fish): noclobber form &>>? refuses to overwrite 
 
 // redirect.fish lines 32-35: eval "echo foo |& false"
 // Adapted: no eval wrapper; assert fish's invalid |& syntax is rejected.
-test('redirect subset (redirect.fish): |& is rejected in favor of &|', async () => {
+test('fish redirect: redirect.fish - |& is rejected in favor of &|', async () => {
 	const result = await runWithStatus('echo foo |& false');
 	expect(result.status).toBe(1);
 	expect(result.stderr).toContain('|&');
 });
 
 // redirect.fish lines 37-44: redirection with empty data still creates file.
-test('redirect subset (redirect.fish): > creates an empty target file for empty output', async () => {
+test('fish redirect: redirect.fish - > creates an empty target file for empty output', async () => {
 	await run('mkdir -p /tmp');
 	await run('echo "" > /tmp/empty-stdout.txt');
 	expect(await run('cat /tmp/empty-stdout.txt')).toBe('');
 });
 
 // redirect.fish lines 46-49: echo -n 2>$tmpdir/file.txt
-test('redirect subset (redirect.fish): 2> creates the target file even when stderr is empty', async () => {
+test('fish redirect: redirect.fish - 2> creates the target file even when stderr is empty', async () => {
 	await run('mkdir -p /tmp');
 	await run('echo "" 2> /tmp/empty-stderr.txt');
 	expect(await run('cat /tmp/empty-stderr.txt')).toBe('');
 });
 
 // Additional file-targeted stderr redirection in the same family as lines 46-49.
-test('redirect subset (redirect.fish): 2> sends stderr to a file', async () => {
+test('fish redirect: redirect.fish - 2> sends stderr to a file', async () => {
 	await prepareMixedStreamFixture();
 
 	const result = await runWithStatus('find /missing 2> /tmp/stderr-only.txt');
@@ -154,7 +154,7 @@ test('redirect subset (redirect.fish): 2> sends stderr to a file', async () => {
 });
 
 // redirect.fish lines 66-80: end 2>&1 | ...
-test('redirect subset (redirect.fish): 2>&1 merges stderr into stdout for downstream pipelines', async () => {
+test('fish redirect: redirect.fish - 2>&1 merges stderr into stdout for downstream pipelines', async () => {
 	await prepareMixedStreamFixture();
 
 	const result = await runWithStatus(
@@ -166,14 +166,14 @@ test('redirect subset (redirect.fish): 2>&1 merges stderr into stdout for downst
 });
 
 // redirect.fish lines 82-84: trailing ^ does not trigger redirection.
-test('redirect subset (redirect.fish): trailing caret is literal text, not a redirection', async () => {
+test('fish redirect: redirect.fish - trailing caret is literal text, not a redirection', async () => {
 	expect(await run('echo caret_no_redirect 12345^')).toBe(
 		'caret_no_redirect 12345^'
 	);
 });
 
 // redirect.fish lines 86-95: pipe stderr (2>|) without changing stdout behavior.
-test('redirect subset (redirect.fish): 2>| pipes stderr while stdout remains on stdout', async () => {
+test('fish redirect: redirect.fish - 2>| pipes stderr while stdout remains on stdout', async () => {
 	await prepareMixedStreamFixture();
 
 	const result = await runWithStatus(
@@ -189,21 +189,21 @@ test('redirect subset (redirect.fish): 2>| pipes stderr while stdout remains on 
 
 // redirect.fish lines 97-106: closed stdin with <&-.
 // Adapted: include read case, which should surface a closed-stdin failure.
-test('redirect subset (redirect.fish): <&- closes stdin for read', async () => {
+test('fish redirect: redirect.fish - <&- closes stdin for read', async () => {
 	const result = await runWithStatus('read abc <&-');
 	expect(result.status).toBe(1);
 	expect(result.stderr).toContain('stdin is closed');
 });
 
 // redirect.fish lines 108-109: echo derp >&- outputs nothing.
-test('redirect subset (redirect.fish): >&- closes stdout for the command', async () => {
+test('fish redirect: redirect.fish - >&- closes stdout for the command', async () => {
 	const result = await runWithStatus('echo derp >&-');
 	expect(result.status).toBe(0);
 	expect(result.output).toBe('');
 });
 
 // redirect.fish lines 111-115: echo hooray1 >&1; echo hooray2 >&2.
-test('redirect subset (redirect.fish): >&1 writes to stdout and >&2 writes to stderr', async () => {
+test('fish redirect: redirect.fish - >&1 writes to stdout and >&2 writes to stderr', async () => {
 	const stdoutResult = await runWithStatus('echo hooray1 >&1');
 	expect(stdoutResult.status).toBe(0);
 	expect(stdoutResult.output).toBe('hooray1');
@@ -217,7 +217,7 @@ test('redirect subset (redirect.fish): >&1 writes to stdout and >&2 writes to st
 
 // redirect.fish lines 117-140 exercise fd duplication in pipeline contexts via <&N.
 // Adapted: a simpler direct duplication case using <&3.
-test('redirect subset (redirect.fish): <&3 duplicates fd 3 onto stdin', async () => {
+test('fish redirect: redirect.fish - <&3 duplicates fd 3 onto stdin', async () => {
 	await run('mkdir -p /tmp');
 	await run('echo from-fd3 > /tmp/fd3-input.txt');
 
@@ -228,7 +228,7 @@ test('redirect subset (redirect.fish): <&3 duplicates fd 3 onto stdin', async ()
 });
 
 // redirect.fish lines 142-144: error redirecting into a non-directory path.
-test('redirect subset (redirect.fish): redirecting into a non-directory path reports an error', async () => {
+test('fish redirect: redirect.fish - redirecting into a non-directory path reports an error', async () => {
 	await run('mkdir -p /tmp');
 	await run('echo leaf > /tmp/not-a-dir');
 	const result = await runWithStatus('echo foo >/tmp/not-a-dir/file');
@@ -237,7 +237,7 @@ test('redirect subset (redirect.fish): redirecting into a non-directory path rep
 });
 
 // redirect.fish lines 146-149: echo foo <?nonexistent (try-input).
-test('redirect subset (redirect.fish): <? with a missing file allows command to continue', async () => {
+test('fish redirect: redirect.fish - <? with a missing file allows command to continue', async () => {
 	const result = await runWithStatus('echo foo <?nonexistent');
 	expect(result.status).toBe(0);
 	expect(result.output).toBe('foo');
@@ -245,21 +245,21 @@ test('redirect subset (redirect.fish): <? with a missing file allows command to 
 
 // redirect.fish lines 151-155: read -l foo <?nonexistent.
 // Adapted: shfs read subset does not support -l, so use plain read.
-test('redirect subset (redirect.fish): read with <? on a missing file fails without setting a value', async () => {
+test('fish redirect: redirect.fish - read with <? on a missing file fails without setting a value', async () => {
 	const result = await runWithStatus('read foo <?nonexistent');
 	expect(result.status).toBe(1);
 	expect(await run('echo $foo')).toBe('');
 });
 
 // redirect.fish lines 157-161: true <&?fail invalid fd syntax.
-test('redirect subset (redirect.fish): <&?fail is rejected as an invalid redirection target', async () => {
+test('fish redirect: redirect.fish - <&?fail is rejected as an invalid redirection target', async () => {
 	const result = await runWithStatus('echo ok <&?fail');
 	expect(result.status).toBe(1);
 	expect(result.stderr).toContain('?fail');
 });
 
 // redirect.fish lines 163-166: true <?&fail parse error.
-test('redirect subset (redirect.fish): <?&fail is rejected', async () => {
+test('fish redirect: redirect.fish - <?&fail is rejected', async () => {
 	const result = await runWithStatus('echo ok <?&fail');
 	expect(result.status).toBe(1);
 	expect(result.stderr).toContain('&');

@@ -14,7 +14,7 @@ import { createFindHarness } from '../../harness';
 
 const harness = createFindHarness();
 
-test('sv-bug-17490 (adapted): final -regex argument does not crash', async () => {
+test('gnu find: sv-bug-17490.exp - final -regex argument does not crash', async () => {
 	const result = await harness.runWithStatus("find . -maxdepth 0 -regex 'x'");
 
 	expect(result.status).toBe(0);

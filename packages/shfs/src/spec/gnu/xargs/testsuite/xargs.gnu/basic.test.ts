@@ -28,7 +28,7 @@ const XARGS_GNU_CASES = [
 ] as const;
 
 for (const testName of XARGS_GNU_CASES) {
-	test(`${testName}: GNU findutils xargs.gnu`, async () => {
+	test(`gnu xargs: ${testName}.exp - matches GNU findutils expected output`, async () => {
 		const result = await harness.runDejaGnuCase('xargs.gnu', testName);
 
 		expect(result.actualExitCode).toBe(result.expectedExitCode);

@@ -12,25 +12,25 @@ const harness = createFindHarness();
 
 // opt-numeric-arg: adapt the upstream numeric-argument diagnostics to the
 // in-scope traversal controls.
-test('opt-numeric-arg (adapted): -maxdepth without argument reports missing argument', async () => {
+test('gnu find: opt-numeric-arg.sh - -maxdepth without argument reports missing argument', async () => {
 	const result = await harness.runWithStderr('find -maxdepth');
 	expect(result.status).toBe(1);
 	expect(result.stderr).toContain('missing argument');
 });
 
-test('opt-numeric-arg (adapted): -maxdepth with non-numeric argument reports error', async () => {
+test('gnu find: opt-numeric-arg.sh - -maxdepth with non-numeric argument reports error', async () => {
 	const result = await harness.runWithStderr('find -maxdepth foo');
 	expect(result.status).toBe(1);
 	expect(result.stderr).toContain('non-numeric argument');
 });
 
-test('opt-numeric-arg (adapted): -mindepth without argument reports missing argument', async () => {
+test('gnu find: opt-numeric-arg.sh - -mindepth without argument reports missing argument', async () => {
 	const result = await harness.runWithStderr('find -mindepth');
 	expect(result.status).toBe(1);
 	expect(result.stderr).toContain('missing argument');
 });
 
-test('opt-numeric-arg (adapted): -mindepth with non-numeric argument reports error', async () => {
+test('gnu find: opt-numeric-arg.sh - -mindepth with non-numeric argument reports error', async () => {
 	const result = await harness.runWithStderr('find -mindepth foo');
 	expect(result.status).toBe(1);
 	expect(result.stderr).toContain('non-numeric argument');
@@ -39,14 +39,14 @@ test('opt-numeric-arg (adapted): -mindepth with non-numeric argument reports err
 // refuse-noop: Verify that find refuses the internal -noop / ---noop option.
 // Between findutils-4.3.1 and 4.6, find dumped core.
 // See Savannah bug #48180.
-test('refuse-noop: find -noop is rejected as unknown predicate', async () => {
+test('gnu find: refuse-noop.sh - find -noop is rejected as unknown predicate', async () => {
 	const result = await harness.runWithStderr('find -noop');
 	expect(result.status).toBe(1);
 	expect(result.stderr).toContain('unknown predicate');
 	expect(result.stderr).toContain('-noop');
 });
 
-test('refuse-noop: find ---noop is rejected as unknown predicate', async () => {
+test('gnu find: refuse-noop.sh - find ---noop is rejected as unknown predicate', async () => {
 	const result = await harness.runWithStderr('find ---noop');
 	expect(result.status).toBe(1);
 	expect(result.stderr).toContain('unknown predicate');

@@ -13,7 +13,7 @@ async function seedTotalFiles(): Promise<void> {
 	await harness.setTextFile('/2w', '2 words\n');
 }
 
-test('wc-total: --total without a value is rejected', async () => {
+test('gnu wc: wc-total.sh - --total without a value is rejected', async () => {
 	await seedTotalFiles();
 
 	const result = await harness.runWithStatus('wc --total 2b 2w');
@@ -21,7 +21,7 @@ test('wc-total: --total without a value is rejected', async () => {
 	expect(result.status).toBe(1);
 });
 
-test('wc-total: --total=never suppresses the total line', async () => {
+test('gnu wc: wc-total.sh - --total=never suppresses the total line', async () => {
 	await seedTotalFiles();
 
 	const result = await harness.run('wc --total=never 2b 2w');
@@ -29,7 +29,7 @@ test('wc-total: --total=never suppresses the total line', async () => {
 	expect(result).toBe(' 1  1  2 2b\n 1  2  8 2w');
 });
 
-test('wc-total: --total=only prints only unpadded totals', async () => {
+test('gnu wc: wc-total.sh - --total=only prints only unpadded totals', async () => {
 	await seedTotalFiles();
 
 	const result = await harness.run('wc --total=only 2b 2w');
@@ -37,7 +37,7 @@ test('wc-total: --total=only prints only unpadded totals', async () => {
 	expect(result).toBe('2 3 10');
 });
 
-test('wc-total: --total=always prints a total for one file', async () => {
+test('gnu wc: wc-total.sh - --total=always prints a total for one file', async () => {
 	await seedTotalFiles();
 
 	const result = await harness.run('wc --total=always 2b');

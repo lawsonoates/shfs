@@ -10,13 +10,13 @@ import { createWcHarness } from './harness';
 const harness = createWcHarness();
 const INPUT_PATH = '/display-width-input';
 
-test('fold-characters.sh adapted: wc -L counts wide characters by display columns', async () => {
+test('gnu wc: fold-characters.sh - wc -L counts wide characters by display columns', async () => {
 	await harness.setTextFile(INPUT_PATH, '\uB250\uFF1A');
 
 	expect(await harness.run(`wc -L < ${INPUT_PATH}`)).toBe('4');
 });
 
-test('fold-zero-width.sh adapted: wc -L ignores zero-width characters', async () => {
+test('gnu wc: fold-zero-width.sh - wc -L ignores zero-width characters', async () => {
 	await harness.setTextFile(INPUT_PATH, '\u200B');
 
 	expect(await harness.run(`wc -L < ${INPUT_PATH}`)).toBe('0');

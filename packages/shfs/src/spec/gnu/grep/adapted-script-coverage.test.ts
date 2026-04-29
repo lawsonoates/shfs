@@ -23,7 +23,7 @@ import { createGrepHarness, quote } from './harness';
 
 const harness = createGrepHarness();
 
-test('backref-multibyte-slow: nested backreference expression matches full corpus', async () => {
+test('gnu grep: backref-multibyte-slow - nested backreference expression matches full corpus', async () => {
 	const lines = Array.from({ length: 256 }, () => 'aba').join('\n');
 	await harness.setTextFile('/tmp/in.txt', `${lines}\n`);
 
@@ -34,7 +34,7 @@ test('backref-multibyte-slow: nested backreference expression matches full corpu
 	expect(result.output).toBe(lines);
 });
 
-test('big-hole (adapted): --binary-file=without-match suppresses matches in binary input', async () => {
+test('gnu grep: big-hole - --binary-file=without-match suppresses matches in binary input', async () => {
 	await harness.setFile(
 		'/tmp/sparse-like.bin',
 		new Uint8Array([0x61, 0x00, 0x62, 0x00, 0x78, 0x00])
@@ -47,7 +47,7 @@ test('big-hole (adapted): --binary-file=without-match suppresses matches in bina
 	expect(result.output).toBe('');
 });
 
-test('big-match and long-line-vs-2GiB-read (adapted): long matching lines remain searchable', async () => {
+test('gnu grep: big-match + long-line-vs-2GiB-read - long matching lines remain searchable', async () => {
 	const longPayload = `${'0'.repeat(1024 * 256)}x`;
 	await harness.setTextFile('/tmp/big.txt', `${longPayload}\n`);
 
@@ -68,7 +68,7 @@ test('big-match and long-line-vs-2GiB-read (adapted): long matching lines remain
 	expect(list.output).toBe('/tmp/big.txt');
 });
 
-test('epipe (adapted): grep in a pipeline can terminate early without failure', async () => {
+test('gnu grep: epipe - grep in a pipeline can terminate early without failure', async () => {
 	const data = Array.from(
 		{ length: 2000 },
 		(_, index) => `line-${index}`
@@ -82,7 +82,7 @@ test('epipe (adapted): grep in a pipeline can terminate early without failure', 
 	expect(result.output).toBe('line-0');
 });
 
-test('in-eq-out-infloop: grep detects output redirection to an input source unless early-exit options apply', async () => {
+test('gnu grep: in-eq-out-infloop - grep detects output redirection to an input source unless early-exit options apply', async () => {
 	await harness.setTextFile('/tmp/out.txt', `${'0'.repeat(2048)}\n`);
 
 	for (const arg of ['/tmp/out.txt', '-', '""']) {
@@ -105,7 +105,7 @@ test('in-eq-out-infloop: grep detects output redirection to an input source unle
 	}
 });
 
-test('fedora regressions: -F -w list matching and -e ordering semantics', async () => {
+test('gnu grep: fedora - -F -w list matching and -e ordering semantics', async () => {
 	await harness.setTextFile('/tmp/list.txt', 'a\nb\nc\n');
 	await harness.setTextFile('/tmp/in.txt', 'a\nbarn\nc\n');
 
@@ -128,7 +128,7 @@ test('fedora regressions: -F -w list matching and -e ordering semantics', async 
 	expect(secondEmptyPattern.output).toBe(firstEmptyPattern.output);
 });
 
-test('fmbtest (adapted): UTF-8 case folding works with pattern files and inline -e expressions', async () => {
+test('gnu grep: fmbtest - UTF-8 case folding works with pattern files and inline -e expressions', async () => {
 	await harness.setTextFile(
 		'/tmp/csinput',
 		[
@@ -157,7 +157,7 @@ test('fmbtest (adapted): UTF-8 case folding works with pattern files and inline 
 	expect(fromExpr.output).toContain('Čas12');
 });
 
-test('euc-mb and sjis-mb (adapted): multibyte boundaries do not create false single-byte matches', async () => {
+test('gnu grep: euc-mb + sjis-mb - multibyte boundaries do not create false single-byte matches', async () => {
 	const fullWidthA = 'Ａ';
 	await harness.setTextFile('/tmp/mb.txt', `${fullWidthA}${fullWidthA}\n`);
 
@@ -174,7 +174,7 @@ test('euc-mb and sjis-mb (adapted): multibyte boundaries do not create false sin
 	expect(acceptWholeChar.output).toBe(`${fullWidthA}${fullWidthA}`);
 });
 
-test('mb-non-UTF8-performance (adapted): non-matching large input returns status 1', async () => {
+test('gnu grep: mb-non-UTF8-performance - non-matching large input returns status 1', async () => {
 	const lines = Array.from(
 		{ length: 5000 },
 		(_, index) => `row-${index}`
@@ -186,7 +186,7 @@ test('mb-non-UTF8-performance (adapted): non-matching large input returns status
 	expect(result.output).toBe('');
 });
 
-test('equiv-classes (adapted): [[=a=]] includes accented variants under multibyte support', async () => {
+test('gnu grep: equiv-classes - [[=a=]] includes accented variants under multibyte support', async () => {
 	const result = await harness.runWithStatus(
 		`echo à | grep ${quote('[[=a=]]')}`
 	);
@@ -194,7 +194,7 @@ test('equiv-classes (adapted): [[=a=]] includes accented variants under multibyt
 	expect(result.output).toBe('à');
 });
 
-test('turkish-eyes (adapted): dotted and dotless I sequence matches under -i in GNU order', async () => {
+test('gnu grep: turkish-eyes - dotted and dotless I sequence matches under -i in GNU order', async () => {
 	const capitalIWithDot = 'İ';
 	const dotlessI = 'ı';
 	const data = `I:${capitalIWithDot} ${dotlessI}:i`;
@@ -208,7 +208,7 @@ test('turkish-eyes (adapted): dotted and dotless I sequence matches under -i in 
 	expect(result.output).toBe(data);
 });
 
-test('unibyte-bracket-expr (adapted): bracket literals round-trip for high-byte values', async () => {
+test('gnu grep: unibyte-bracket-expr - bracket literals round-trip for high-byte values', async () => {
 	const samples = ['\u0080', '\u0090', '\u00a1', '\u00ff'];
 
 	for (const sample of samples) {
@@ -221,7 +221,7 @@ test('unibyte-bracket-expr (adapted): bracket literals round-trip for high-byte 
 	}
 });
 
-test('symlink (adapted): -r and -R traverse regular directory trees consistently', async () => {
+test('gnu grep: symlink - -r and -R traverse regular directory trees consistently', async () => {
 	await harness.run('mkdir -p /tmp/dir/sub');
 	await harness.setTextFile('/tmp/dir/a', 'a\n');
 	await harness.setTextFile('/tmp/dir/sub/b', 'b\n');
