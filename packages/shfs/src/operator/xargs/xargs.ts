@@ -6,6 +6,7 @@ import {
 } from '@shfs/compiler';
 
 import type { BuiltinContext } from '../../builtin/types';
+import { createShellInput, type ShellInput } from '../../execute/io';
 import { evaluateExpandedWords } from '../../execute/path';
 import type { FS } from '../../fs/fs';
 import { formatRecord, type Record as ShellRecord } from '../../record';
@@ -18,6 +19,7 @@ interface RunXargsCommandOptions {
 	input: Stream<ShellRecord> | null;
 	inputPath: string | null;
 	parsed: XargsStep['args'];
+	stdin?: ShellInput;
 }
 
 export interface RunXargsCommandResult {
@@ -98,8 +100,10 @@ async function readInput(options: RunXargsCommandOptions): Promise<string> {
 	}
 
 	const records: string[] = [];
-	for await (const record of options.input) {
-		records.push(formatRecord(record));
+	for await (const line of (
+		options.stdin ?? createShellInput(options.input)
+	).lines()) {
+		records.push(line);
 	}
 	return records.join('\n');
 }

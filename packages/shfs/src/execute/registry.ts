@@ -24,6 +24,7 @@ import { runWcCommand } from '../operator/wc/wc';
 import { runXargsCommand } from '../operator/xargs/xargs';
 import type { Record as ShellRecord } from '../record';
 import type { Stream } from '../stream';
+import { BufferedShellOutput, createShellInput } from './io';
 import {
 	evaluateExpandedPathWords,
 	evaluateExpandedSinglePath,
@@ -210,10 +211,17 @@ function createBuiltinRuntime(
 	context: ExecuteStepContext,
 	input: Stream<ShellRecord> | null
 ): BuiltinRuntime {
+	const stdin = createShellInput(input);
 	return {
 		fs,
 		context,
 		input,
+		io: {
+			stderr: context.stderr,
+			stdin,
+			stdout: new BufferedShellOutput(),
+		},
+		stdin,
 	};
 }
 
@@ -343,7 +351,7 @@ CommandRegistry.register('cat', {
 				return;
 			}
 			if (input) {
-				yield* cat(fs, options)(input);
+				yield* cat(fs, options)(toFormattedLineStream(input));
 			}
 			context.status = 0;
 		})();
@@ -365,6 +373,7 @@ CommandRegistry.register('grep', {
 				>[0]['parsed'],
 				redirections: step.redirections,
 				resolvedOutputRedirectPath,
+				stdin: createShellInput(input),
 			});
 			context.status = result.exitCode;
 			context.stderr.appendLines(result.stderr);
@@ -402,6 +411,7 @@ CommandRegistry.register('xargs', {
 				input,
 				inputPath,
 				parsed: step.args,
+				stdin: createShellInput(input),
 			});
 			context.status = result.exitCode;
 			context.stderr.appendLines(result.stderr);
@@ -432,6 +442,7 @@ CommandRegistry.register('wc', {
 				input,
 				inputPath,
 				parsed: step.args,
+				stdin: createShellInput(input),
 			});
 			context.status = result.exitCode;
 			context.stderr.appendLines(result.stderr);

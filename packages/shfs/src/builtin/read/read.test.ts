@@ -21,6 +21,19 @@ test('read stores first value from stream into local vars', async () => {
 	expect(runtime.context.status).toBe(0);
 });
 
+test('read stores formatted file records instead of reading file contents', async () => {
+	async function* fileInput(): Stream<ShellRecord> {
+		yield { kind: 'file', path: '/workspace/value.txt' };
+	}
+	const runtime = createBuiltinRuntime({ input: fileInput() });
+	const stream = read(runtime, { name: literal('value') });
+
+	await collect<ShellRecord>()(stream);
+
+	expect(runtime.context.localVars.get('value')).toBe('/workspace/value.txt');
+	expect(runtime.context.status).toBe(0);
+});
+
 test('read reports failure when there is no input', async () => {
 	const runtime = createBuiltinRuntime({ input: null });
 	const stream = read(runtime, { name: literal('value') });

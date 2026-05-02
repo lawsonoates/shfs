@@ -19,6 +19,7 @@ import {
 	ensureNoclobberWritable,
 	getRedirectionMode,
 	hasRedirect,
+	isNullDevicePath,
 	type ExecuteResult as RedirectExecuteResult,
 	writeTextToFile,
 } from './redirection';
@@ -42,6 +43,7 @@ type NormalizedExecuteContext = ExecuteStepContext;
 
 type OutputDestination =
 	| { kind: 'closed' }
+	| { kind: 'nullDevice' }
 	| { kind: 'pipe' }
 	| { kind: 'shellStderr' }
 	| { kind: 'shellStdout' }
@@ -449,11 +451,15 @@ async function resolveFileDestination(
 		fs,
 		context
 	);
+	const resolvedPath = resolvePathFromCwd(context.cwd, targetPath);
+	if (isNullDevicePath(resolvedPath)) {
+		return { kind: 'nullDevice' };
+	}
 	return {
 		kind: 'file',
 		append: redirection.append ?? false,
 		noclobber: redirection.noclobber ?? false,
-		path: resolvePathFromCwd(context.cwd, targetPath),
+		path: resolvedPath,
 	};
 }
 
@@ -773,6 +779,8 @@ async function routeStdout(
 			return;
 		case 'closed':
 			return;
+		case 'nullDevice':
+			return;
 		default: {
 			const _exhaustive: never = destination;
 			throw new Error(`Unknown stdout destination: ${_exhaustive}`);
@@ -821,6 +829,8 @@ async function routeStderr(
 			});
 			return;
 		case 'closed':
+			return;
+		case 'nullDevice':
 			return;
 		default: {
 			const _exhaustive: never = destination;

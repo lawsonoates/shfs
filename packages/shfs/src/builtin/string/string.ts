@@ -6,21 +6,44 @@ import {
 } from '../../execute/path';
 import type { Builtin, BuiltinRuntime } from '../types';
 
+interface MatchInvocation {
+	pattern: string;
+	quiet: boolean;
+	values: string[];
+}
+
+async function collectStdinLines(runtime: BuiltinRuntime): Promise<string[]> {
+	if (!runtime.input) {
+		return [];
+	}
+	const lines: string[] = [];
+	for await (const line of runtime.stdin.lines()) {
+		lines.push(line);
+	}
+	return lines;
+}
+
 function replace(runtime: BuiltinRuntime, operands: string[]) {
 	return (async function* () {
 		if (operands[0]?.startsWith('-')) {
 			throw new Error(`string replace: unsupported flag: ${operands[0]}`);
 		}
 
-		if (operands.length < 3) {
+		if (operands.length < 2) {
 			throw new Error('string replace requires pattern replacement text');
 		}
 		const pattern = operands.at(0);
 		const replacement = operands.at(1);
-		const inputs = operands.slice(2);
 		if (pattern === undefined || replacement === undefined) {
 			throw new Error('string replace requires pattern replacement text');
 		}
+		if (operands.length === 2 && !runtime.input) {
+			throw new Error('string replace requires pattern replacement text');
+		}
+		const inputs =
+			operands.length > 2
+				? operands.slice(2)
+				: await collectStdinLines(runtime);
 		if (inputs.length === 0) {
 			runtime.context.status = 1;
 			return;
@@ -36,36 +59,62 @@ function replace(runtime: BuiltinRuntime, operands: string[]) {
 	})();
 }
 
+async function parseMatchInvocation(
+	runtime: BuiltinRuntime,
+	operands: string[]
+): Promise<MatchInvocation> {
+	let quiet = false;
+	let offset = 0;
+
+	while (operands[offset]?.startsWith('-')) {
+		const flag = operands[offset];
+		if (flag === '-q' && !quiet) {
+			quiet = true;
+			offset += 1;
+			continue;
+		}
+
+		throw new Error(`string match: unsupported flag: ${flag}`);
+	}
+
+	const filtered = operands.slice(offset);
+	const [pattern] = filtered;
+	if (!pattern) {
+		throw new Error('string match requires pattern and value');
+	}
+	if (filtered.length > 2) {
+		throw new Error('string match: unsupported arguments');
+	}
+	if (filtered.length === 1 && !runtime.input) {
+		throw new Error('string match requires pattern and value');
+	}
+
+	const values =
+		filtered.length > 1
+			? filtered.slice(1)
+			: await collectStdinLines(runtime);
+
+	return { pattern, quiet, values };
+}
+
 function match(runtime: BuiltinRuntime, operands: string[]) {
 	return (async function* () {
-		let quiet = false;
-		let offset = 0;
-
-		while (operands[offset]?.startsWith('-')) {
-			const flag = operands[offset];
-			if (flag === '-q' && !quiet) {
-				quiet = true;
-				offset += 1;
+		const { pattern, quiet, values } = await parseMatchInvocation(
+			runtime,
+			operands
+		);
+		const matcher = picomatch(pattern, { dot: true });
+		let matched = false;
+		for (const value of values) {
+			if (!matcher(value)) {
 				continue;
 			}
-
-			throw new Error(`string match: unsupported flag: ${flag}`);
+			matched = true;
+			if (!quiet) {
+				yield { kind: 'line', text: value } as const;
+			}
 		}
-
-		const filtered = operands.slice(offset);
-		const [pattern, value] = filtered;
-		if (!(pattern && value !== undefined)) {
-			throw new Error('string match requires pattern and value');
-		}
-		if (filtered.length > 2) {
-			throw new Error('string match: unsupported arguments');
-		}
-
-		const isMatch = picomatch(pattern, { dot: true })(value);
-		runtime.context.status = isMatch ? 0 : 1;
-		if (isMatch && !quiet) {
-			yield { kind: 'line', text: value } as const;
-		}
+		runtime.context.status = matched ? 0 : 1;
 	})();
 }
 
