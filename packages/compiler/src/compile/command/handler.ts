@@ -24,6 +24,7 @@ import { compileString } from './string/string';
 import { compileTail } from './tail/tail';
 import { compileTest } from './test/test';
 import { compileTouch } from './touch/touch';
+import { compileTree } from './tree/tree';
 import { compileWc } from './wc/wc';
 import { compileXargs } from './xargs/xargs';
 
@@ -56,6 +57,7 @@ export namespace CommandHandler {
 		tail: compileTail,
 		test: compileTest,
 		touch: compileTouch,
+		tree: compileTree,
 		wc: compileWc,
 		xargs: compileXargs,
 	};

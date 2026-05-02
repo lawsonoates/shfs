@@ -26,6 +26,10 @@ It is not a full fish shell and does not target host OS parity.
   - default `-print` action
   - deterministic errors for invalid predicates and arguments
   - pipeline-friendly behavior (`find ... | ...`)
+- Directory tree rendering with `tree`:
+  - deterministic recursive display over the virtual filesystem
+  - listing controls: `-a`, `-d`, `-f`, `-F`, `-L`, `-A`, and `--noreport`
+  - filtering controls: `-P`, `-I`, `--prune`, and `--matchdirs`
 - Pattern search with `grep` (GNU-derived subset):
   - supported modes: basic/extended/fixed/PCRE (`-G`, `-E`, `-F`, `-P`)
   - binary-data handling flags: `--binary-files=binary|text|without-match`, `-a`, `-I`
