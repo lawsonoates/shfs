@@ -464,8 +464,8 @@ test('executes multi-step stream pipelines end-to-end', async () => {
 	expect(lineRecords.map((record) => record.text)).toEqual(['gamma']);
 });
 
-// Condition: cat should skip directory records emitted before readable file records.
-test('find pipelines file records into downstream cat consumers', async () => {
+// Condition: cat should consume formatted stdin lines from find, not dereference files.
+test('find pipelines formatted paths into downstream cat consumers', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/workspace/dir/first.txt', 'first');
 	fs.setFile('/workspace/dir/second.txt', 'second');
@@ -522,13 +522,14 @@ test('find pipelines file records into downstream cat consumers', async () => {
 		(record): record is LineRecord => record.kind === 'line'
 	);
 	expect(lineRecords.map((record) => record.text)).toEqual([
-		'first',
-		'second',
+		'dir',
+		'dir/first.txt',
+		'dir/second.txt',
 	]);
 });
 
-// Condition: grep should ignore directory records emitted before matching files.
-test('find pipelines matching file records into grep', async () => {
+// Condition: grep should search formatted path lines from find, not file contents.
+test('find pipelines formatted paths into grep', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/workspace/dir/first.txt', 'first');
 	fs.setFile('/workspace/dir/second.txt', 'second');
@@ -545,7 +546,9 @@ test('find pipelines matching file records into grep', async () => {
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
-	expect(lineRecords.map((record) => record.text)).toEqual(['second']);
+	expect(lineRecords.map((record) => record.text)).toEqual([
+		'dir/second.txt',
+	]);
 });
 
 test('find OR expressions compose in pipelines', async () => {
@@ -570,7 +573,7 @@ test('find OR expressions compose in pipelines', async () => {
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
-	expect(lineRecords.map((record) => record.text)).toEqual(['second']);
+	expect(lineRecords.map((record) => record.text)).toEqual(['dir/second.md']);
 });
 
 // Condition: line-oriented commands (tail, head) should see paths from find, not file contents.
@@ -614,8 +617,8 @@ test('find piped to head outputs paths, not file contents', async () => {
 	expect(lineRecords.map((record) => record.text)).toEqual(['dir/x.txt']);
 });
 
-// Condition: read should skip directory records and capture the first file line.
-test('find pipelines file records into read after skipping directories', async () => {
+// Condition: read should consume formatted stdin lines from find, not dereference files.
+test('find pipelines formatted paths into read', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/workspace/dir/first.txt', 'first');
 	fs.setFile('/workspace/dir/second.txt', 'second');
@@ -636,7 +639,61 @@ test('find pipelines file records into read after skipping directories', async (
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
-	expect(lineRecords.map((record) => record.text)).toEqual(['first']);
+	expect(lineRecords.map((record) => record.text)).toEqual(['dir']);
+});
+
+test('find piped to grep supports BRE alternation over formatted paths', async () => {
+	const fs = new MemoryFS();
+	for (const path of [
+		'/slides/159-a',
+		'/slides/160-a',
+		'/slides/161-a',
+		'/slides/170-a',
+		'/slides/179-a',
+		'/slides/180-a',
+		'/slides/181-a',
+	]) {
+		fs.setFile(path, '');
+	}
+
+	const command = String.raw`find /slides -maxdepth 1 -type f | grep '/slides/16[0-9]-\|/slides/17[0-9]-\|/slides/180-'`;
+	const result = execute(compile(parse(command)), fs);
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+
+	const records = await collect<ShellRecord>()(result.value);
+	const lineRecords = records.filter(
+		(record): record is LineRecord => record.kind === 'line'
+	);
+	expect(lineRecords.map((record) => record.text)).toEqual([
+		'/slides/160-a',
+		'/slides/161-a',
+		'/slides/170-a',
+		'/slides/179-a',
+		'/slides/180-a',
+	]);
+});
+
+test('find piped to wc counts formatted path lines', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/workspace/dir/a.txt', 'content-a');
+	fs.setFile('/workspace/dir/b.txt', 'content-b');
+
+	const result = execute(compile(parse('find dir -type f | wc -l')), fs, {
+		cwd: '/workspace',
+	});
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+
+	const records = await collect<ShellRecord>()(result.value);
+	const lineRecords = records.filter(
+		(record): record is LineRecord => record.kind === 'line'
+	);
+	expect(lineRecords.map((record) => record.text)).toEqual(['2']);
 });
 
 test('cat/head/tail expand glob file arguments relative to cwd', async () => {

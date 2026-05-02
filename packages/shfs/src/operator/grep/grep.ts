@@ -13,12 +13,12 @@ import picomatch from 'picomatch';
 
 import type { BuiltinContext } from '../../builtin/types';
 import { exitCodeForDiagnostics, formatDiagnostics } from '../../diagnostics';
+import { createShellInput, type ShellInput } from '../../execute/io';
 import {
 	evaluateExpandedPathWord,
 	evaluateExpandedWord,
 	resolvePathFromCwd,
 } from '../../execute/path';
-import { toLineStream } from '../../execute/records';
 import { resolveRedirectPath } from '../../execute/redirection';
 import type { FS } from '../../fs/fs';
 import type { Record as ShellRecord } from '../../record';
@@ -78,6 +78,7 @@ interface RunGrepCommandOptions {
 	parsed: GrepArgsIR;
 	redirections: RedirectionIR[] | undefined;
 	resolvedOutputRedirectPath?: string;
+	stdin?: ShellInput;
 }
 
 export interface RunGrepCommandResult {
@@ -210,7 +211,12 @@ async function runGrepCommandInner(
 	hadError ||= searchTargets.hadError;
 
 	const stdinBytes = normalized.readsFromStdin
-		? await readStdinBytes(options.fs, options.input, inputRedirectPath)
+		? await readStdinBytes({
+				fs: options.fs,
+				input: options.input,
+				inputRedirect: inputRedirectPath,
+				stdin: options.stdin,
+			})
 		: null;
 
 	const displayFilename = shouldDisplayFilename(
@@ -667,11 +673,13 @@ function toDisplayPath(
 	return path.slice(prefix.length);
 }
 
-async function readStdinBytes(
-	fs: FS,
-	input: Stream<ShellRecord> | null,
-	inputRedirect: string | null
-): Promise<Uint8Array> {
+async function readStdinBytes(options: {
+	fs: FS;
+	input: Stream<ShellRecord> | null;
+	inputRedirect: string | null;
+	stdin: ShellInput | undefined;
+}): Promise<Uint8Array> {
+	const { fs, input, inputRedirect, stdin } = options;
 	if (inputRedirect !== null) {
 		try {
 			return await fs.readFile(inputRedirect);
@@ -682,14 +690,9 @@ async function readStdinBytes(
 	if (input === null) {
 		return new Uint8Array();
 	}
-	const lines: string[] = [];
-	for await (const line of toLineStream(fs, input)) {
-		lines.push(line.text);
-	}
-	if (lines.length === 0) {
-		return new Uint8Array();
-	}
-	return UTF8_ENCODER.encode(`${lines.join('\n')}\n`);
+	return await (stdin ?? createShellInput(input)).bytes({
+		trailingNewline: true,
+	});
 }
 
 function hasInputOutputConflict(

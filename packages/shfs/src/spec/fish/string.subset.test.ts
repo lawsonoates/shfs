@@ -33,6 +33,10 @@ test('fish string: string.fish - replace applies to each provided input value', 
 	expect(await run('string replace . - a.b c.d')).toBe('a-b\nc-d');
 });
 
+test('fish string: string.fish - replace can read formatted stdin lines', async () => {
+	expect(await run('echo a.b | string replace . -')).toBe('a-b');
+});
+
 test('fish string: string.fish - replace supports variable and command substitution', async () => {
 	await run('set -g target TARGET');
 	expect(
@@ -42,6 +46,10 @@ test('fish string: string.fish - replace supports variable and command substitut
 
 test('fish string: string.fish - match supports fish-style wildcard patterns', async () => {
 	expect(await run('string match "a*b" axxb')).toBe('axxb');
+});
+
+test('fish string: string.fish - match can read formatted stdin lines', async () => {
+	expect(await run('echo axxb | string match "a*b"')).toBe('axxb');
 });
 
 test('fish string: string.fish - match -q suppresses output and drives and/or chaining', async () => {

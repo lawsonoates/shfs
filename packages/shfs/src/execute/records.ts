@@ -28,11 +28,9 @@ export async function* toLineStream(
 }
 
 /**
- * Converts any ShellRecord stream into LineRecords by formatting each record
- * as its display text. Unlike `toLineStream`, this does NOT read file contents —
- * FileRecords are rendered as their path, which is the correct behavior for
- * line-oriented transducers (tail, head) receiving piped input from commands
- * like `find` that produce path listings.
+ * Converts records into stdin-style line text. Unlike `toLineStream`, this does
+ * not read FileRecord contents. FileRecords are rendered as paths, matching the
+ * shell pipe boundary where downstream line-oriented commands consume text.
  */
 export async function* toFormattedLineStream(
 	input: Stream<ShellRecord>

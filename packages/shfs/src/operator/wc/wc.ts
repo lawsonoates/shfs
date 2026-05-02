@@ -1,11 +1,11 @@
 import { expandedWordToString, type WcArgsIR } from '@shfs/compiler';
 
 import type { BuiltinContext } from '../../builtin/types';
+import { createShellInput, type ShellInput } from '../../execute/io';
 import {
 	evaluateExpandedPathWords,
 	resolvePathFromCwd,
 } from '../../execute/path';
-import { formatRecord } from '../../execute/records';
 import type { FS } from '../../fs/fs';
 import type { Record as ShellRecord } from '../../record';
 import type { Stream } from '../../stream';
@@ -16,6 +16,7 @@ export interface RunWcCommandOptions {
 	input: Stream<ShellRecord> | null;
 	inputPath: string | null;
 	parsed: WcArgsIR;
+	stdin?: ShellInput;
 }
 
 export interface RunWcCommandResult {
@@ -51,7 +52,6 @@ interface WcFieldSelection {
 }
 
 const UTF8_DECODER = new TextDecoder();
-const UTF8_ENCODER = new TextEncoder();
 const DEFAULT_STDIN_DISPLAY_PATH: null = null;
 const DEFAULT_STDIO_BYTES = new Uint8Array();
 const STDIN_FILE_NAME = '-';
@@ -153,7 +153,8 @@ export async function runWcCommand(
 	}
 	const readStdinBytes = createStdinReader(
 		options.input,
-		redirectedInputBytes
+		redirectedInputBytes,
+		options.stdin
 	);
 	const fileOperands = await evaluateExpandedPathWords(
 		'wc',
@@ -356,7 +357,8 @@ async function readFileOrReport(
 
 function createStdinReader(
 	input: Stream<ShellRecord> | null,
-	redirectedInputBytes: Uint8Array | null
+	redirectedInputBytes: Uint8Array | null,
+	stdin: ShellInput | undefined
 ): () => Promise<Uint8Array> {
 	let hasRead = false;
 	return async () => {
@@ -364,21 +366,20 @@ function createStdinReader(
 			return DEFAULT_STDIO_BYTES;
 		}
 		hasRead = true;
-		return redirectedInputBytes ?? readStreamBytes(input);
+		return redirectedInputBytes ?? readStreamBytes(input, stdin);
 	};
 }
 
 async function readStreamBytes(
-	input: Stream<ShellRecord> | null
+	input: Stream<ShellRecord> | null,
+	stdin: ShellInput | undefined
 ): Promise<Uint8Array> {
 	if (!input) {
 		return DEFAULT_STDIO_BYTES;
 	}
-	const textParts: string[] = [];
-	for await (const record of input) {
-		textParts.push(formatRecord(record));
-	}
-	return UTF8_ENCODER.encode(textParts.join('\n'));
+	return await (stdin ?? createShellInput(input)).bytes({
+		trailingNewline: true,
+	});
 }
 
 function countBytes(bytes: Uint8Array): Counts {
