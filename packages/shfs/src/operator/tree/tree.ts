@@ -186,14 +186,7 @@ async function buildTreeEntry({
 				})
 			: [];
 
-	const hasIncludeFilter = args.includePatterns.matchers.length > 0;
-	if (
-		!isRoot &&
-		args.prune &&
-		hasIncludeFilter &&
-		!dirMatchesInclude &&
-		children.length === 0
-	) {
+	if (!isRoot && args.prune && !dirMatchesInclude && children.length === 0) {
 		return null;
 	}
 
