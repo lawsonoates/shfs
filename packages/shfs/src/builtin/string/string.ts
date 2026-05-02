@@ -85,14 +85,14 @@ async function parseMatchInvocation(
 	if (filtered.length > 2) {
 		throw new Error('string match: unsupported arguments');
 	}
+	if (filtered.length === 1 && !runtime.input) {
+		throw new Error('string match requires pattern and value');
+	}
 
 	const values =
 		filtered.length > 1
 			? filtered.slice(1)
 			: await collectStdinLines(runtime);
-	if (values.length === 0) {
-		throw new Error('string match requires pattern and value');
-	}
 
 	return { pattern, quiet, values };
 }
