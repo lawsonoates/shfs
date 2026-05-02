@@ -164,6 +164,30 @@ export interface TailStep {
 	args: { n: number; files: ExpandedWord[] };
 }
 
+export interface TreeArgsIR {
+	ascii: boolean;
+	classify: boolean;
+	dirsOnly: boolean;
+	excludePatterns: ExpandedWord[];
+	fullPath: boolean;
+	includePatterns: ExpandedWord[];
+	matchDirs: boolean;
+	maxDepth: number | null;
+	noReport: boolean;
+	paths: ExpandedWord[];
+	prune: boolean;
+	showAll: boolean;
+}
+
+/**
+ * Tree step with ExpandedWord support.
+ */
+export interface TreeStep {
+	cmd: 'tree';
+	redirections?: RedirectionIR[];
+	args: TreeArgsIR;
+}
+
 /**
  * Touch step with ExpandedWord support.
  */
@@ -427,6 +451,7 @@ export type StepIR =
 	| TailStep
 	| TestStep
 	| TouchStep
+	| TreeStep
 	| WcStep
 	| XargsStep;
 

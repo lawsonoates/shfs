@@ -19,6 +19,7 @@ import { pwd } from '../operator/pwd/pwd';
 import { rm } from '../operator/rm/rm';
 import { tail } from '../operator/tail/tail';
 import { touch } from '../operator/touch/touch';
+import { createTreeResolvedArgs, runTreeCommand } from '../operator/tree/tree';
 import { runWcCommand } from '../operator/wc/wc';
 import { runXargsCommand } from '../operator/xargs/xargs';
 import type { Record as ShellRecord } from '../record';
@@ -26,6 +27,7 @@ import type { Stream } from '../stream';
 import {
 	evaluateExpandedPathWords,
 	evaluateExpandedSinglePath,
+	evaluateExpandedWords,
 	resolvePathsFromCwd,
 } from './path';
 import { files } from './producers';
@@ -75,6 +77,7 @@ const STREAM_COMMANDS = [
 	'string',
 	'tail',
 	'test',
+	'tree',
 	'xargs',
 	'wc',
 ] as const;
@@ -437,6 +440,48 @@ CommandRegistry.register('wc', {
 					kind: 'line',
 					text,
 				};
+			}
+		})();
+	},
+});
+
+CommandRegistry.register('tree', {
+	kind: 'stream',
+	handler: ({ step, fs, context }) => {
+		return (async function* (): Stream<ShellRecord> {
+			const paths = resolvePathsFromCwd(
+				context.cwd,
+				await evaluateExpandedPathWords(
+					'tree',
+					step.args.paths,
+					fs,
+					context
+				)
+			);
+			const includePatterns = await evaluateExpandedWords(
+				step.args.includePatterns,
+				fs,
+				context
+			);
+			const excludePatterns = await evaluateExpandedWords(
+				step.args.excludePatterns,
+				fs,
+				context
+			);
+			const result = await runTreeCommand(
+				fs,
+				context.cwd,
+				createTreeResolvedArgs({
+					...step.args,
+					excludePatterns,
+					includePatterns,
+					paths,
+				})
+			);
+			context.status = result.exitCode;
+			context.stderr.appendLines(result.stderr);
+			for (const text of result.stdout) {
+				yield { kind: 'line', text };
 			}
 		})();
 	},

@@ -6,7 +6,7 @@ Strict fish-inspired subset for filesystem commands. Not POSIX, not full fish. D
 
 ## Commands
 
-- `cat`, `cd`, `cp`, `echo`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `pwd`, `read`, `rm`, `set`, `string`, `tail`, `test`, `touch`, `wc`, `xargs` (built-ins only, no external binaries, no `$PATH`)
+- `cat`, `cd`, `cp`, `echo`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `pwd`, `read`, `rm`, `set`, `string`, `tail`, `test`, `touch`, `tree`, `wc`, `xargs` (built-ins only, no external binaries, no `$PATH`)
 
 ## Supported
 
