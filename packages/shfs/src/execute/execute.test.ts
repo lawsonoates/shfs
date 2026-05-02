@@ -9,11 +9,39 @@ import {
 } from '@shfs/compiler';
 
 import { collect } from '../consumer/consumer';
+import type { FS } from '../fs/fs';
 import { MemoryFS } from '../fs/memory';
 import type { FileRecord, LineRecord, Record as ShellRecord } from '../record';
-import { execute } from './execute';
+import { BufferedOutputStream } from '../stderr';
+import { type ExecuteContext, execute } from './execute';
 
 const textDecoder = new TextDecoder();
+
+function createReadonlyFs(backingFs: FS): FS {
+	const readonlyError = new Error('readonly filesystem');
+	return {
+		deleteDirectory: async () => {
+			throw readonlyError;
+		},
+		deleteFile: async () => {
+			throw readonlyError;
+		},
+		exists: backingFs.exists.bind(backingFs),
+		mkdir: async () => {
+			throw readonlyError;
+		},
+		readFile: backingFs.readFile.bind(backingFs),
+		readLines: backingFs.readLines.bind(backingFs),
+		readdir: backingFs.readdir.bind(backingFs),
+		rename: async () => {
+			throw readonlyError;
+		},
+		stat: backingFs.stat.bind(backingFs),
+		writeFile: async () => {
+			throw readonlyError;
+		},
+	};
+}
 
 test('writes stream output to redirected file', async () => {
 	const fs = new MemoryFS();
@@ -150,6 +178,62 @@ test('creates an empty output file when redirecting sink commands', async () => 
 
 	expect(await fs.exists('created.txt')).toBe(true);
 	expect(textDecoder.decode(await fs.readFile('logs.txt'))).toBe('');
+});
+
+test('/dev/null stdout redirection discards without writing through readonly fs', async () => {
+	const backingFs = new MemoryFS();
+	backingFs.setFile('/workspace/rate.txt', '');
+	const fs = createReadonlyFs(backingFs);
+	const stderr = new BufferedOutputStream();
+	const context: ExecuteContext = {
+		cwd: '/',
+		stderr,
+	};
+
+	const result = execute(
+		compile(parse("find / -name '*rate*' >/dev/null")),
+		fs,
+		context
+	);
+	expect(result.kind).toBe('sink');
+	if (result.kind !== 'sink') {
+		throw new Error('Expected sink result');
+	}
+
+	await result.value;
+	expect(context.status).toBe(0);
+	expect(stderr.snapshot()).toEqual([]);
+});
+
+test('/dev/null stderr redirection discards without writing through readonly fs', async () => {
+	const backingFs = new MemoryFS();
+	backingFs.setFile('/workspace/rate.txt', '');
+	const fs = createReadonlyFs(backingFs);
+	const stderr = new BufferedOutputStream();
+	const context: ExecuteContext = {
+		cwd: '/',
+		stderr,
+	};
+
+	const result = execute(
+		compile(parse("find /missing / -name '*rate*' 2>/dev/null")),
+		fs,
+		context
+	);
+	expect(result.kind).toBe('stream');
+	if (result.kind !== 'stream') {
+		throw new Error('Expected stream result');
+	}
+
+	const records = await collect<ShellRecord>()(result.value);
+	const fileRecords = records.filter(
+		(record): record is FileRecord => record.kind === 'file'
+	);
+	expect(fileRecords.map((record) => record.displayPath)).toEqual([
+		'/workspace/rate.txt',
+	]);
+	expect(context.status).toBe(1);
+	expect(stderr.snapshot()).toEqual([]);
 });
 
 test('variable-expanded output redirection resolves relative to cwd', async () => {

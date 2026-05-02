@@ -13,6 +13,7 @@ import { formatRecord } from './records';
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const FD_TARGET_REGEX = /^&[0-9]+$/;
+const NULL_DEVICE_PATH = '/dev/null';
 
 export type ExecuteResult =
 	| { kind: 'stream'; value: Stream<ShellRecord> }
@@ -275,6 +276,9 @@ export async function writeTextToFile(
 		append?: boolean;
 	}
 ): Promise<void> {
+	if (isNullDevicePath(path)) {
+		return;
+	}
 	const append = options.append ?? false;
 	if (!append) {
 		await fs.writeFile(path, textEncoder.encode(content));
@@ -292,7 +296,14 @@ export async function ensureNoclobberWritable(
 	fs: FS,
 	path: string
 ): Promise<boolean> {
+	if (isNullDevicePath(path)) {
+		return true;
+	}
 	return !(await fs.exists(path));
+}
+
+export function isNullDevicePath(path: string): boolean {
+	return path === NULL_DEVICE_PATH;
 }
 
 export function applyOutputRedirect(
@@ -357,6 +368,12 @@ export async function writeStreamToFile(
 	path: string,
 	fs: FS
 ): Promise<void> {
+	if (isNullDevicePath(path)) {
+		for await (const _record of stream) {
+			// Drain the stream so command side effects and status updates complete.
+		}
+		return;
+	}
 	const outputChunks: string[] = [];
 	for await (const record of stream) {
 		outputChunks.push(formatRecord(record));

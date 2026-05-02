@@ -5,7 +5,6 @@
 
 import { beforeEach, expect, test } from 'bun:test';
 
-import type { FS } from '../../fs/fs';
 import { MemoryFS } from '../../fs/memory';
 import { Shell } from '../../shell/shell';
 
@@ -34,32 +33,6 @@ async function runWithStatus(
 async function prepareMixedStreamFixture(): Promise<void> {
 	await run('mkdir -p /workspace /tmp');
 	await run('touch /workspace/a.txt');
-}
-
-function createReadonlyFs(backingFs: FS): FS {
-	const readonlyError = new Error('readonly filesystem');
-	return {
-		deleteDirectory: async () => {
-			throw readonlyError;
-		},
-		deleteFile: async () => {
-			throw readonlyError;
-		},
-		exists: backingFs.exists.bind(backingFs),
-		mkdir: async () => {
-			throw readonlyError;
-		},
-		readFile: backingFs.readFile.bind(backingFs),
-		readLines: backingFs.readLines.bind(backingFs),
-		readdir: backingFs.readdir.bind(backingFs),
-		rename: async () => {
-			throw readonlyError;
-		},
-		stat: backingFs.stat.bind(backingFs),
-		writeFile: async () => {
-			throw readonlyError;
-		},
-	};
 }
 
 // redirect.fish lines 8-9: outnerr 0 &| count
@@ -178,32 +151,6 @@ test('fish redirect: redirect.fish - 2> sends stderr to a file', async () => {
 	expect(await run('cat /tmp/stderr-only.txt')).toContain(
 		MISSING_PATH_MESSAGE
 	);
-});
-
-test('fish redirect: /dev/null stderr sink does not write through readonly fs', async () => {
-	const fs = new MemoryFS();
-	fs.setFile('/workspace/rate.txt', '');
-	const readonlyShell = new Shell(createReadonlyFs(fs));
-
-	const result =
-		await readonlyShell.$`find /missing / -name '*rate*' 2>/dev/null`.nothrow();
-
-	expect(result.exitCode).toBe(1);
-	expect(result.stdout.toString()).toBe('/workspace/rate.txt');
-	expect(result.stderr.toString()).toBe('');
-});
-
-test('fish redirect: /dev/null stdout sink does not write through readonly fs', async () => {
-	const fs = new MemoryFS();
-	fs.setFile('/workspace/rate.txt', '');
-	const readonlyShell = new Shell(createReadonlyFs(fs));
-
-	const result =
-		await readonlyShell.$`find / -name '*rate*' >/dev/null`.nothrow();
-
-	expect(result.exitCode).toBe(0);
-	expect(result.stdout.toString()).toBe('');
-	expect(result.stderr.toString()).toBe('');
 });
 
 // redirect.fish lines 66-80: end 2>&1 | ...
