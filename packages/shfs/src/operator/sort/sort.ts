@@ -36,6 +36,11 @@ interface SortInputResult {
 	stderr: string[];
 }
 
+interface StdinLineReader {
+	displayPath: string | null;
+	read(): AsyncIterable<string>;
+}
+
 interface NumericValue {
 	fraction: string;
 	integer: string;
@@ -75,12 +80,13 @@ export async function runSortCommand(
 		options.fs,
 		options.context
 	);
+	const stdinReader = createStdinLineReader(options);
 
 	if (options.parsed.checkMode !== 'none') {
-		return runCheckMode(options, fileOperands);
+		return runCheckMode(options, fileOperands, stdinReader);
 	}
 
-	const input = await collectSortInput(options, fileOperands);
+	const input = await collectSortInput(options, fileOperands, stdinReader);
 	if (input.exitCode !== 0) {
 		return {
 			exitCode: input.exitCode,
@@ -102,7 +108,8 @@ export async function runSortCommand(
 
 async function runCheckMode(
 	options: RunSortCommandOptions,
-	fileOperands: readonly string[]
+	fileOperands: readonly string[],
+	stdinReader: StdinLineReader
 ): Promise<RunSortCommandResult> {
 	if (fileOperands.length > 1) {
 		const extraOperand = fileOperands[1] ?? '';
@@ -117,7 +124,7 @@ async function runCheckMode(
 
 	const fileOperand = fileOperands.at(0);
 	if (fileOperand === STDIN_FILE_NAME) {
-		return checkSortedLines(collectStdinLines(options), options.parsed);
+		return checkStdinLines(stdinReader, options.parsed);
 	}
 	if (fileOperand !== undefined) {
 		return checkPathLines(
@@ -127,19 +134,22 @@ async function runCheckMode(
 			options.parsed
 		);
 	}
-	if (options.inputPath) {
-		return checkPathLines(
-			options.fs,
-			options.inputPath,
-			options.inputPath,
-			options.parsed
-		);
-	}
-	return checkSortedLines(collectStdinLines(options), options.parsed);
+	return checkStdinLines(stdinReader, options.parsed);
 }
 
 function checkModeOption(args: SortArgsIR): 'c' | 'C' {
 	return args.checkMode === 'quiet' ? 'C' : 'c';
+}
+
+async function checkStdinLines(
+	stdinReader: StdinLineReader,
+	args: SortArgsIR
+): Promise<RunSortCommandResult> {
+	try {
+		return await checkSortedLines(stdinReader.read(), args);
+	} catch {
+		return createStdinCheckReadError(stdinReader.displayPath);
+	}
 }
 
 async function checkPathLines(
@@ -197,35 +207,31 @@ function isSortedPair(
 
 async function collectSortInput(
 	options: RunSortCommandOptions,
-	fileOperands: readonly string[]
+	fileOperands: readonly string[],
+	stdinReader: StdinLineReader
 ): Promise<SortInputResult> {
 	if (fileOperands.length > 0) {
-		return collectFileOperandLines(options, fileOperands);
+		return collectFileOperandLines(options, fileOperands, stdinReader);
 	}
-	if (options.inputPath) {
-		return collectPathLines(
-			options.fs,
-			options.inputPath,
-			options.inputPath
-		);
-	}
-	return {
-		exitCode: 0,
-		lines: await collectStdinLinesToArray(options),
-		stderr: [],
-	};
+	return collectStdinLinesToArray(stdinReader);
 }
 
 async function collectFileOperandLines(
 	options: RunSortCommandOptions,
-	fileOperands: readonly string[]
+	fileOperands: readonly string[],
+	stdinReader: StdinLineReader
 ): Promise<SortInputResult> {
 	const lines: string[] = [];
 	const stderr: string[] = [];
 
 	for (const operand of fileOperands) {
 		if (operand === STDIN_FILE_NAME) {
-			lines.push(...(await collectStdinLinesToArray(options)));
+			const result = await collectStdinLinesToArray(stdinReader);
+			if (result.exitCode !== 0) {
+				stderr.push(...result.stderr);
+				continue;
+			}
+			lines.push(...result.lines);
 			continue;
 		}
 		const path = resolvePathFromCwd(options.context.cwd, operand);
@@ -266,21 +272,63 @@ async function collectPathLines(
 	return { exitCode: 0, lines, stderr: [] };
 }
 
-function collectStdinLines(
+function createStdinLineReader(
 	options: RunSortCommandOptions
-): AsyncIterable<string> {
-	const stdin = options.stdin ?? createShellInput(options.input);
-	return stdin.lines();
+): StdinLineReader {
+	let hasRead = false;
+	return {
+		displayPath: options.inputPath,
+		read() {
+			if (hasRead) {
+				return emptyLines();
+			}
+			hasRead = true;
+			if (options.inputPath) {
+				return options.fs.readLines(options.inputPath);
+			}
+			const stdin = options.stdin ?? createShellInput(options.input);
+			return stdin.lines();
+		},
+	};
 }
 
 async function collectStdinLinesToArray(
-	options: RunSortCommandOptions
-): Promise<string[]> {
+	stdinReader: StdinLineReader
+): Promise<SortInputResult> {
 	const lines: string[] = [];
-	for await (const line of collectStdinLines(options)) {
-		lines.push(line);
+	try {
+		for await (const line of stdinReader.read()) {
+			lines.push(line);
+		}
+	} catch {
+		return createStdinInputReadError(stdinReader.displayPath);
 	}
-	return lines;
+	return { exitCode: 0, lines, stderr: [] };
+}
+
+async function* emptyLines(): AsyncIterable<string> {
+	// no lines
+}
+
+function createStdinCheckReadError(path: string | null): RunSortCommandResult {
+	return {
+		exitCode: 2,
+		stderr: [createStdinReadErrorMessage(path)],
+		stdout: [],
+	};
+}
+
+function createStdinInputReadError(path: string | null): SortInputResult {
+	return {
+		exitCode: 2,
+		lines: [],
+		stderr: [createStdinReadErrorMessage(path)],
+	};
+}
+
+function createStdinReadErrorMessage(path: string | null): string {
+	const displayPath = path ?? STDIN_FILE_NAME;
+	return `sort: cannot read: ${displayPath}: No such file or directory`;
 }
 
 function sortLines(lines: readonly string[], args: SortArgsIR): SortLine[] {
@@ -427,8 +475,8 @@ function parseNumericValue(value: string): NumericValue {
 	let index = skipLeadingBlanks(value);
 	let sign: -1 | 1 = 1;
 	const signCharacter = value.at(index);
-	if (signCharacter === '-' || signCharacter === '+') {
-		sign = signCharacter === '-' ? -1 : 1;
+	if (signCharacter === '-') {
+		sign = -1;
 		index += 1;
 	}
 

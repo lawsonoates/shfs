@@ -23,6 +23,12 @@ test('sort -u with global numeric ordering keeps the first representative', asyn
 	expect(await $`sort -u -n /in`.text()).toBe('1\n2');
 });
 
+test('sort reads redirected stdin for dash file operands', async () => {
+	fs.setFile('/in', 'b\na\n');
+
+	expect(await $`sort - < /in`.text()).toBe('a\nb');
+});
+
 test('sort -n compares large numeric prefixes without Number precision loss', async () => {
 	const smaller = '9'.repeat(400);
 	const larger = `1${'0'.repeat(400)}`;
@@ -35,6 +41,12 @@ test('sort -k supports numeric ordering as an in-scope key suffix', async () => 
 	fs.setFile('/in', 'x 11\nx 2\n');
 
 	expect(await $`sort -k2,2n /in`.text()).toBe('x 2\nx 11');
+});
+
+test('sort -n does not recognize a leading plus sign', async () => {
+	fs.setFile('/in', '+2\n1\n2\n');
+
+	expect(await $`sort -n /in`.text()).toBe('+2\n1\n2');
 });
 
 test('sort rejects empty and multi-character field separators', async () => {
