@@ -4,6 +4,7 @@
 - Grep tests come from: https://github.com/Distrotech/grep/tree/distrotech-grep/tests
 - Tree tests come from: https://github.com/peteretelej/tree/tree/main/tests
 - Wc tests come from: https://github.com/coreutils/coreutils/tree/master/tests/wc
+- Sort tests come from: https://github.com/coreutils/coreutils/tree/master/tests/sort
 - Find shell tests come from: https://github.com/jamesyoungman/findutils/tree/master/tests/find
 - Find DejaGNU tests come from: https://github.com/jamesyoungman/findutils/tree/master/find/testsuite
 - Xargs DejaGNU tests come from: https://github.com/jamesyoungman/findutils/tree/master/xargs/testsuite

@@ -39,6 +39,14 @@ It is not a full fish shell and does not target host OS parity.
 - Stream and file counting with `wc` (GNU-derived subset):
   - supported counts: bytes, characters, lines, words, and maximum line length
   - `--files0-from` and total modes for deterministic batch counting
+- Stream and file sorting with `sort` (GNU-derived subset):
+  - default C-locale/byte-style line ordering over stdin, file operands, and pipelines
+  - numeric ordering with `-n`
+  - key selection with `-k POS[,POS]`, including field and character offsets
+  - field separator selection with `-t CHAR`
+  - unique output and unique-aware check mode with `-u`
+  - sortedness checks with `-c` and quiet checks with `-C`
+  - deterministic status behavior for sorted, unsorted, and error cases
 - Argument batching with `xargs` (GNU/POSIX-inspired subset):
   - supported options: `-0`/`--null`, `-d`, `-E`, `-I`, `-L`, `-n`, `-r`/`--no-run-if-empty`
   - default command is `echo` when no command is provided
@@ -72,6 +80,11 @@ It is not a full fish shell and does not target host OS parity.
 - Full GNU/POSIX `xargs` compatibility
   - only documented subset behavior is in scope
   - unsupported flags/modes and GNU warning/diagnostic parity are out of scope
+- Full GNU `sort` compatibility
+  - only documented subset behavior is in scope
+  - locale-specific collation, month/version/random/human/general-numeric modes,
+    merge-only mode, compression/temp/parallel tuning, debug annotations,
+    `--files0-from`, `-z`, and `-o` output-file behavior are out of scope
 - Permission model beyond basic virtual FS behavior
 - `env KEY=... cmd` scoped environment injection
 - Interactive shell features:
