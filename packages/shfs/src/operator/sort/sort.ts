@@ -332,7 +332,7 @@ function compareSortLines(
 	if (primaryComparison !== 0) {
 		return primaryComparison;
 	}
-	if (args.unique && args.keys.length > 0) {
+	if (args.unique) {
 		return 0;
 	}
 	return compareBytes(left.value.bytes, right.value.bytes);
@@ -554,19 +554,21 @@ function createSeparatedFieldLayout(
 	line: string,
 	fieldSeparator: string
 ): FieldLayout {
-	const separator = fieldSeparator.at(0);
-	if (separator === undefined) {
+	if (fieldSeparator === '') {
 		return { ends: [line.length], starts: [0] };
 	}
 
 	const starts = [0];
 	const ends: number[] = [];
-	for (let index = 0; index < line.length; index += 1) {
-		if (line.at(index) !== separator) {
+	let index = 0;
+	while (index < line.length) {
+		if (!line.startsWith(fieldSeparator, index)) {
+			index += 1;
 			continue;
 		}
 		ends.push(index);
-		starts.push(index + 1);
+		index += fieldSeparator.length;
+		starts.push(index);
 	}
 	ends.push(line.length);
 	return { ends, starts };

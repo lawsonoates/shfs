@@ -83,12 +83,12 @@ function parseSortArgs(argv: readonly ExpandedWord[]): SortArgsIR {
 		}
 		if (token === `-${FIELD_SEPARATOR_OPTION}`) {
 			const value = argv[index + 1];
-			addFieldSeparator(args, value, token, index);
+			addSeparatedFieldSeparator(args, value, token, index);
 			index += 1;
 			continue;
 		}
 		if (token.startsWith(`-${FIELD_SEPARATOR_OPTION}`)) {
-			args.fieldSeparator = token.slice(2);
+			addFieldSeparator(args, token.slice(2), token, index);
 			continue;
 		}
 
@@ -133,7 +133,7 @@ function addKey(
 	}
 }
 
-function addFieldSeparator(
+function addSeparatedFieldSeparator(
 	args: SortArgsIR,
 	value: ExpandedWord | undefined,
 	token: string,
@@ -149,7 +149,32 @@ function addFieldSeparator(
 		);
 		return;
 	}
-	args.fieldSeparator = expandedWordToString(value);
+	addFieldSeparator(args, expandedWordToString(value), token, tokenIndex);
+}
+
+function addFieldSeparator(
+	args: SortArgsIR,
+	raw: string,
+	token: string,
+	tokenIndex: number
+): void {
+	const characters = Array.from(raw);
+	const separator = characters.at(0);
+	if (separator === undefined) {
+		addDiagnostic(args, 'empty-separator', 'empty tab', token, tokenIndex);
+		return;
+	}
+	if (characters.length > 1) {
+		addDiagnostic(
+			args,
+			'multi-character-separator',
+			`multi-character tab '${raw}'`,
+			token,
+			tokenIndex
+		);
+		return;
+	}
+	args.fieldSeparator = separator;
 }
 
 function applyShortOptions(

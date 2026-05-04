@@ -17,6 +17,12 @@ test('sort -u with keys keeps the first representative for each equal key', asyn
 	expect(await $`sort -u -k2,2 /in`.text()).toBe('b A\nc B');
 });
 
+test('sort -u with global numeric ordering keeps the first representative', async () => {
+	fs.setFile('/in', '1\n01\n2\n');
+
+	expect(await $`sort -u -n /in`.text()).toBe('1\n2');
+});
+
 test('sort -n compares large numeric prefixes without Number precision loss', async () => {
 	const smaller = '9'.repeat(400);
 	const larger = `1${'0'.repeat(400)}`;
@@ -29,6 +35,20 @@ test('sort -k supports numeric ordering as an in-scope key suffix', async () => 
 	fs.setFile('/in', 'x 11\nx 2\n');
 
 	expect(await $`sort -k2,2n /in`.text()).toBe('x 2\nx 11');
+});
+
+test('sort rejects empty and multi-character field separators', async () => {
+	fs.setFile('/in', 'x:a\nx:b\n');
+
+	const emptySeparator = await $`sort -t '' -k2,2 /in`.nothrow();
+	const multiCharacterSeparator = await $`sort -tab -k2,2 /in`.nothrow();
+
+	expect(emptySeparator.exitCode).toBe(2);
+	expect(emptySeparator.stderr.toString()).toContain('empty tab');
+	expect(multiCharacterSeparator.exitCode).toBe(2);
+	expect(multiCharacterSeparator.stderr.toString()).toContain(
+		'multi-character tab'
+	);
 });
 
 test('sort -c and -C are incompatible across separate arguments', async () => {
