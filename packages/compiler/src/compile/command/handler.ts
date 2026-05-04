@@ -20,6 +20,7 @@ import { compilePwd } from './pwd/pwd';
 import { compileRead } from './read/read';
 import { compileRm } from './rm/rm';
 import { compileSet } from './set/set';
+import { compileSort } from './sort/sort';
 import { compileString } from './string/string';
 import { compileTail } from './tail/tail';
 import { compileTest } from './test/test';
@@ -53,6 +54,7 @@ export namespace CommandHandler {
 		read: compileRead,
 		rm: compileRm,
 		set: compileSet,
+		sort: compileSort,
 		string: compileString,
 		tail: compileTail,
 		test: compileTest,

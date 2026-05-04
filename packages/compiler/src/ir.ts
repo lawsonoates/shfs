@@ -155,6 +155,43 @@ export interface RmStep {
 	};
 }
 
+export type SortCheckModeIR = 'none' | 'diagnose-first' | 'quiet';
+
+export interface SortKeyPositionIR {
+	character: number | null;
+	field: number;
+}
+
+export interface SortKeyOptionsIR {
+	numeric: boolean;
+}
+
+export interface SortKeyIR {
+	end: SortKeyPositionIR | null;
+	options: SortKeyOptionsIR;
+	raw: string;
+	start: SortKeyPositionIR;
+}
+
+export interface SortArgsIR {
+	checkMode: SortCheckModeIR;
+	diagnostics: ShellDiagnostic[];
+	fieldSeparator: string | null;
+	files: ExpandedWord[];
+	keys: SortKeyIR[];
+	numeric: boolean;
+	unique: boolean;
+}
+
+/**
+ * Sort step.
+ */
+export interface SortStep {
+	cmd: 'sort';
+	redirections?: RedirectionIR[];
+	args: SortArgsIR;
+}
+
 /**
  * Tail step with ExpandedWord support.
  */
@@ -447,6 +484,7 @@ export type StepIR =
 	| ReadStep
 	| RmStep
 	| SetStep
+	| SortStep
 	| StringStep
 	| TailStep
 	| TestStep

@@ -2,6 +2,7 @@
 
 - Each test is derived from an external source outlined in their folders AGENTS.md.
 - This approach gives us an expansive reference that is narrowed instead of starting from scratch.
+- Only adapted external-source tests belong under `spec/`; project-native regression tests should live with the implementation they cover, such as under `builtin/`, `operator/`, `execute/`, or `shell/`.
 
 - DO NOT cater tests to current implementation when writing tests.
 
