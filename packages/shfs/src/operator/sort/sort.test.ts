@@ -43,6 +43,12 @@ test('sort -k supports numeric ordering as an in-scope key suffix', async () => 
 	expect(await $`sort -k2,2n /in`.text()).toBe('x 2\nx 11');
 });
 
+test('sort -k default fields do not shift on leading blanks', async () => {
+	fs.setFile('/in', '  a z\nb c\n');
+
+	expect(await $`sort -k2,2 /in`.text()).toBe('b c\n  a z');
+});
+
 test('sort -n does not recognize a leading plus sign', async () => {
 	fs.setFile('/in', '+2\n1\n2\n');
 

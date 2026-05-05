@@ -636,6 +636,9 @@ function createBlankDelimitedFieldLayout(line: string): FieldLayout {
 		while (index < line.length && isBlank(line.at(index))) {
 			index += 1;
 		}
+		if (blankStart === 0) {
+			continue;
+		}
 		if (index >= line.length) {
 			continue;
 		}
