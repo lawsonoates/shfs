@@ -17,6 +17,7 @@ import { mkdir } from '../operator/mkdir/mkdir';
 import { mv } from '../operator/mv/mv';
 import { pwd } from '../operator/pwd/pwd';
 import { rm } from '../operator/rm/rm';
+import { runSortCommand } from '../operator/sort/sort';
 import { tail } from '../operator/tail/tail';
 import { touch } from '../operator/touch/touch';
 import { createTreeResolvedArgs, runTreeCommand } from '../operator/tree/tree';
@@ -75,6 +76,7 @@ const STREAM_COMMANDS = [
 	'pwd',
 	'read',
 	'set',
+	'sort',
 	'string',
 	'tail',
 	'test',
@@ -451,6 +453,34 @@ CommandRegistry.register('wc', {
 					kind: 'line',
 					text,
 				};
+			}
+		})();
+	},
+});
+
+CommandRegistry.register('sort', {
+	kind: 'stream',
+	handler: ({ step, fs, input, context }) => {
+		return (async function* (): Stream<ShellRecord> {
+			const inputPath = await resolveRedirectPath(
+				step.cmd,
+				step.redirections,
+				'input',
+				fs,
+				context
+			);
+			const result = await runSortCommand({
+				context,
+				fs,
+				input,
+				inputPath,
+				parsed: step.args,
+				stdin: createShellInput(input),
+			});
+			context.status = result.exitCode;
+			context.stderr.appendLines(result.stderr);
+			for (const text of result.stdout) {
+				yield { kind: 'line', text };
 			}
 		})();
 	},
