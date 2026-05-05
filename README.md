@@ -93,6 +93,7 @@ Filesystem/path commands:
 - mv
 - pwd
 - rm
+- sort
 - tail
 - touch
 - tree
