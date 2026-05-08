@@ -257,6 +257,22 @@ async function resolvePredicates(
 					});
 					break;
 				}
+				case 'iname': {
+					const pattern = await evaluateExpandedWord(
+						predicate.pattern,
+						fs,
+						context
+					);
+					resolvedBranch.push({
+						kind: 'name',
+						matcher: picomatch(pattern, {
+							bash: true,
+							dot: true,
+							nocase: true,
+						}),
+					});
+					break;
+				}
 				case 'path': {
 					const pattern = await evaluateExpandedWord(
 						predicate.pattern,

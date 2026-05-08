@@ -73,8 +73,8 @@ test('-iwholename is an alias of -ipath', async () => {
 test('-iname is case-insensitive while -name remains case-sensitive', async () => {
 	await fs.mkdir('/tmp/fred', true);
 
-	const nameResult = await runWithStatus("find tmp -name FrEd -print");
-	const inameResult = await runWithStatus("find tmp -iname FrEd -print");
+	const nameResult = await runWithStatus('find tmp -name FrEd -print');
+	const inameResult = await runWithStatus('find tmp -iname FrEd -print');
 
 	expect(nameResult.status).toBe(0);
 	expect(nameResult.output).toBe('');

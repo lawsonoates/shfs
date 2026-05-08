@@ -46,6 +46,7 @@ interface FindParseState {
 
 type FindPatternPredicateToken =
 	| '-name'
+	| '-iname'
 	| '-path'
 	| '-ipath'
 	| '-wholename'
@@ -55,6 +56,7 @@ type FindPatternPredicateToken =
 
 const PATTERN_PREDICATES = new Set<FindPatternPredicateToken>([
 	'-name',
+	'-iname',
 	'-path',
 	'-ipath',
 	'-wholename',
@@ -259,6 +261,13 @@ function parsePatternPredicate(
 		case '-name': {
 			state.currentBranch.push({
 				kind: 'name',
+				pattern: valueWord,
+			});
+			break;
+		}
+		case '-iname': {
+			state.currentBranch.push({
+				kind: 'iname',
 				pattern: valueWord,
 			});
 			break;

@@ -11,7 +11,7 @@ Strict fish-inspired subset for filesystem commands. Not POSIX, not full fish. D
 ## Supported
 
 - **Pipelines**: `|` only, left-to-right, stream-based (newline allowed after `|` for line continuation)
-- **find subset**: recursive virtual-FS traversal from explicit paths or cwd; supports `-name`, `-path`, `-type f|d`, `-maxdepth`, `-mindepth`, `-depth`, and default `-print`
+- **find subset**: recursive virtual-FS traversal from explicit paths or cwd; supports `-name`, `-iname`, `-path`, `-type f|d`, `-maxdepth`, `-mindepth`, `-depth`, and default `-print`
 - **tree subset**: deterministic directory rendering; supports `-a`, `-d`, `-f`, `-F`, `-L`, `-A`, `--noreport`, `-P`, `-I`, `--prune`, and `--matchdirs`
 - **grep subset**: supports `-G`, `-E`, `-F`, `-P`, binary handling (`--binary-files=...`, `-a`, `-I`), null-data mode (`-z`/`--null-data`), and deterministic `0`/`1`/`2` status behavior
 - **wc subset**: supports byte, character, line, word, and max-line-length counts, plus `--files0-from` and deterministic total modes
