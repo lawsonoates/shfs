@@ -1,4 +1,5 @@
 // Translated/adapted from GNU findutils DejaGNU tests:
+// - find/testsuite/find.gnu/iname.exp
 // - find/testsuite/find.gnu/ipath.exp
 // - find/testsuite/find.gnu/wholename.exp
 // - find/testsuite/find.gnu/iwholename.exp
@@ -27,6 +28,14 @@ interface FindGnuCase {
 }
 
 const FIND_GNU_CASES: readonly FindGnuCase[] = [
+	{
+		name: 'iname',
+		command: 'find tmp -iname frED -print',
+		setup: async () => {
+			await harness.ensureDir('/tmp/fred');
+			await harness.ensureDir('/tmp/jim');
+		},
+	},
 	{
 		name: 'ipath',
 		command: 'find tmp/top -ipath Tmp/TOP/one -print',

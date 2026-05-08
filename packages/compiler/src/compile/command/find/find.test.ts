@@ -139,6 +139,35 @@ test('compileFind treats -or as a synonym for -o', () => {
 	expect(step.args.usageError).toBe(false);
 });
 
+test('compileFind parses -iname as a case-insensitive basename predicate', () => {
+	const step = mustBeFindStep(
+		compileFind(
+			findCommand([
+				literal('src'),
+				literal('-iname'),
+				literal('*.PDF'),
+				literal('-type'),
+				literal('f'),
+			])
+		)
+	);
+
+	expect(step.args.startPaths).toEqual([literal('src')]);
+	expect(step.args.predicateBranches).toEqual([
+		[
+			{
+				kind: 'iname',
+				pattern: literal('*.PDF'),
+			},
+			{
+				kind: 'type',
+				types: ['f'],
+			},
+		],
+	]);
+	expect(step.args.usageError).toBe(false);
+});
+
 test('compileFind keeps traversal options global while parsing mixed AND/OR branches', () => {
 	const step = mustBeFindStep(
 		compileFind(
@@ -313,6 +342,7 @@ test('compileFind records missing and non-numeric traversal arguments', () => {
 
 test('compileFind records missing arguments for supported string predicates', () => {
 	const tokens = [
+		'-iname',
 		'-ipath',
 		'-wholename',
 		'-iwholename',

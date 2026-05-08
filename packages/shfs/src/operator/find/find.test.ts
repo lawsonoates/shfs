@@ -70,6 +70,27 @@ test('-iwholename is an alias of -ipath', async () => {
 	expect(iwholeResult.output).toBe(ipathResult.output);
 });
 
+test('-iname is case-insensitive while -name remains case-sensitive', async () => {
+	await fs.mkdir('/tmp/fred', true);
+
+	const nameResult = await runWithStatus("find tmp -name FrEd -print");
+	const inameResult = await runWithStatus("find tmp -iname FrEd -print");
+
+	expect(nameResult.status).toBe(0);
+	expect(nameResult.output).toBe('');
+	expect(inameResult.status).toBe(0);
+	expect(inameResult.output).toBe('tmp/fred');
+});
+
+test('-iname matches basenames, not full paths', async () => {
+	await setTextFile('/tmp/dir/file.pdf', '');
+
+	const result = await runWithStatus("find tmp -iname 'dir/file.pdf' -print");
+
+	expect(result.status).toBe(0);
+	expect(result.output).toBe('');
+});
+
 test('-true matches the same set as no predicate', async () => {
 	await fs.mkdir('/tmp/fred/jim', true);
 	await setTextFile('/tmp/fred/file.txt', 'content');
