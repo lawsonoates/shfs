@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileSet } from '../../../../../packages/compiler/src/compile/command/set/set';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileSet } from '#compiler/compile/command/set/set';
+import { cmd, literal } from '#compiler/ir';
 
 test('set compiles global assignment', () => {
 	expect(

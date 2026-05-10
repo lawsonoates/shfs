@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileEcho } from '../../../../../packages/compiler/src/compile/command/echo/echo';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileEcho } from '#compiler/compile/command/echo/echo';
+import { cmd, literal } from '#compiler/ir';
 
 test('echo maps positional args into values', () => {
 	expect(compileEcho(cmd('echo', [literal('a'), literal('b')]))).toEqual({

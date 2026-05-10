@@ -14,7 +14,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-import { Harness } from '../../../../../../harness';
+import { Harness } from '#harness';
 
 const FIND_GNU_TESTSUITE_DIR = new URL('./', import.meta.url);
 const TRAILING_NEWLINE_REGEX = /\n$/;

@@ -1,6 +1,6 @@
 import { dirname } from 'node:path';
 
-import type { MemoryFS } from '../../../../../packages/shfs/src/fs/memory';
+import type { MemoryFS } from '#shfs/fs/memory';
 
 export async function ensureDir(fs: MemoryFS, path: string): Promise<void> {
 	if (path === '' || path === '/' || path === '.') {

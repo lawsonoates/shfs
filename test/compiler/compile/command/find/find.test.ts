@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
-import { compileFind } from '../../../../../packages/compiler/src/compile/command/find/find';
+import { compileFind } from '#compiler/compile/command/find/find';
 import {
 	type ExpandedWord,
 	type FindStep,
 	literal,
 	type SimpleCommandIR,
-} from '../../../../../packages/compiler/src/ir';
+} from '#compiler/ir';
 
 function findCommand(args: ExpandedWord[]): SimpleCommandIR {
 	return {

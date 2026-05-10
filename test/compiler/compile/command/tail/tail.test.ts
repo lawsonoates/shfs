@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileTail } from '../../../../../packages/compiler/src/compile/command/tail/tail';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileTail } from '#compiler/compile/command/tail/tail';
+import { cmd, literal } from '#compiler/ir';
 
 test('tail with -N format (negative number)', () => {
 	const result = compileTail(cmd('tail', [literal('-10')]));

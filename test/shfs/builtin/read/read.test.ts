@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
-import { literal } from '../../../../packages/compiler/src';
-import { read } from '../../../../packages/shfs/src/builtin/read/read';
-import { createBuiltinRuntime } from '../../../../packages/shfs/src/builtin/test-runtime';
-import { collect } from '../../../../packages/shfs/src/consumer/consumer';
-import type { Record as ShellRecord } from '../../../../packages/shfs/src/record';
-import type { Stream } from '../../../../packages/shfs/src/stream';
+import { literal } from '#compiler';
+import { read } from '#shfs/builtin/read/read';
+import { createBuiltinRuntime } from '#shfs/builtin/test-runtime';
+import { collect } from '#shfs/consumer/consumer';
+import type { Record as ShellRecord } from '#shfs/record';
+import type { Stream } from '#shfs/stream';
 
 async function* inputStream(): Stream<ShellRecord> {
 	yield { kind: 'line', text: 'first' };

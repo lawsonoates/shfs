@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { MemoryFS } from '../../../packages/shfs/src/fs/memory';
+import { MemoryFS } from '#shfs/fs/memory';
 
 async function collectPaths(paths: AsyncIterable<string>): Promise<string[]> {
 	const collected: string[] = [];

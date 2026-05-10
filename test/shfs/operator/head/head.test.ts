@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 
-import { MemoryFS } from '../../../../packages/shfs/src/fs/memory';
-import { head } from '../../../../packages/shfs/src/operator/head/head';
-import type { FileRecord } from '../../../../packages/shfs/src/record';
+import { MemoryFS } from '#shfs/fs/memory';
+import { head } from '#shfs/operator/head/head';
+import type { FileRecord } from '#shfs/record';
 
 test('head reads first 10 lines by default', async () => {
 	const fs = new MemoryFS();

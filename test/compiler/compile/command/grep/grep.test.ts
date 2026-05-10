@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
-import { compileGrep } from '../../../../../packages/compiler/src/compile/command/grep/grep';
+import { compileGrep } from '#compiler/compile/command/grep/grep';
 import {
 	type ExpandedWord,
 	type GrepStep,
 	literal,
 	type SimpleCommandIR,
-} from '../../../../../packages/compiler/src/ir';
+} from '#compiler/ir';
 
 function grepCommand(args: ExpandedWord[]): SimpleCommandIR {
 	return {

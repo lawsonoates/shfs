@@ -6,21 +6,18 @@ import {
 	type PipelineIR,
 	parse,
 	type ScriptIR,
-} from '../../../packages/compiler/src';
+} from '#compiler';
 
-import { collect } from '../../../packages/shfs/src/consumer/consumer';
-import {
-	type ExecuteContext,
-	execute,
-} from '../../../packages/shfs/src/execute/execute';
-import type { FS } from '../../../packages/shfs/src/fs/fs';
-import { MemoryFS } from '../../../packages/shfs/src/fs/memory';
+import { collect } from '#shfs/consumer/consumer';
+import { type ExecuteContext, execute } from '#shfs/execute/execute';
+import type { FS } from '#shfs/fs/fs';
+import { MemoryFS } from '#shfs/fs/memory';
 import type {
 	FileRecord,
 	LineRecord,
 	Record as ShellRecord,
-} from '../../../packages/shfs/src/record';
-import { BufferedOutputStream } from '../../../packages/shfs/src/stderr';
+} from '#shfs/record';
+import { BufferedOutputStream } from '#shfs/stderr';
 
 const textDecoder = new TextDecoder();
 

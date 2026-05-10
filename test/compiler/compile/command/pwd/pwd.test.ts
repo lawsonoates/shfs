@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compilePwd } from '../../../../../packages/compiler/src/compile/command/pwd/pwd';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compilePwd } from '#compiler/compile/command/pwd/pwd';
+import { cmd, literal } from '#compiler/ir';
 
 test('pwd with no arguments', () => {
 	const result = compilePwd(cmd('pwd', []));

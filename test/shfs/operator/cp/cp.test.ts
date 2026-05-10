@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
-import { MemoryFS } from '../../../../packages/shfs/src/fs/memory';
-import { cp } from '../../../../packages/shfs/src/operator/cp/cp';
+import { MemoryFS } from '#shfs/fs/memory';
+import { cp } from '#shfs/operator/cp/cp';
 
 test('cp copies file from source to destination', async () => {
 	const fs = new MemoryFS();

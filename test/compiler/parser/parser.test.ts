@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
-import { Parser, parse } from '../../../packages/compiler/src/parser/parser';
-import { ParseSyntaxError } from '../../../packages/compiler/src/parser/syntax-error';
+import { Parser, parse } from '#compiler/parser/parser';
+import { ParseSyntaxError } from '#compiler/parser/syntax-error';
 
 test('parse supports newline-separated statements', () => {
 	const program = parse('pwd\ncd /tmp');

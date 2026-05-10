@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
-import { MemoryFS } from '../../../../packages/shfs/src/fs/memory';
-import { touch } from '../../../../packages/shfs/src/operator/touch/touch';
+import { MemoryFS } from '#shfs/fs/memory';
+import { touch } from '#shfs/operator/touch/touch';
 
 test('touch creates new empty file', async () => {
 	const fs = new MemoryFS();

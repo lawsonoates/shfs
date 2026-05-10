@@ -1,8 +1,8 @@
 import { beforeEach, expect, test } from 'bun:test';
 import { dirname } from 'node:path';
 
-import { MemoryFS } from '../../../../packages/shfs/src/fs/memory';
-import { Shell } from '../../../../packages/shfs/src/shell/shell';
+import { MemoryFS } from '#shfs/fs/memory';
+import { Shell } from '#shfs/shell/shell';
 
 interface CommandResult {
 	output: string;

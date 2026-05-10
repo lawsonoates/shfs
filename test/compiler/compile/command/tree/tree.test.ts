@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileTree } from '../../../../../packages/compiler/src/compile/command/tree/tree';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileTree } from '#compiler/compile/command/tree/tree';
+import { cmd, literal } from '#compiler/ir';
 
 test('tree with no arguments defaults to current directory', () => {
 	expect(compileTree(cmd('tree', []))).toEqual({

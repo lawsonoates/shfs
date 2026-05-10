@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileCd } from '../../../../../packages/compiler/src/compile/command/cd/cd';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileCd } from '#compiler/compile/command/cd/cd';
+import { cmd, literal } from '#compiler/ir';
 
 test('cd with no arguments defaults to root', () => {
 	const result = compileCd(cmd('cd', []));

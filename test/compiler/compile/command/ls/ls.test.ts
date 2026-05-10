@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileLs } from '../../../../../packages/compiler/src/compile/command/ls/ls';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileLs } from '#compiler/compile/command/ls/ls';
+import { cmd, literal } from '#compiler/ir';
 
 test('ls with no arguments defaults to current directory', () => {
 	const result = compileLs(cmd('ls', []));

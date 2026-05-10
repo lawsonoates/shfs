@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
-import { literal } from '../../../../packages/compiler/src';
-import { set } from '../../../../packages/shfs/src/builtin/set/set';
-import { createBuiltinRuntime } from '../../../../packages/shfs/src/builtin/test-runtime';
-import { collect } from '../../../../packages/shfs/src/consumer/consumer';
-import type { Record as ShellRecord } from '../../../../packages/shfs/src/record';
+import { literal } from '#compiler';
+import { set } from '#shfs/builtin/set/set';
+import { createBuiltinRuntime } from '#shfs/builtin/test-runtime';
+import { collect } from '#shfs/consumer/consumer';
+import type { Record as ShellRecord } from '#shfs/record';
 
 test('set writes global variables', async () => {
 	const runtime = createBuiltinRuntime();

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
-import { MemoryFS } from '../../../../packages/shfs/src/fs/memory';
-import { Shell } from '../../../../packages/shfs/src/shell/shell';
+import { MemoryFS } from '#shfs/fs/memory';
+import { Shell } from '#shfs/shell/shell';
 
 test('--prune removes directories made empty by -I exclusions', async () => {
 	const fs = new MemoryFS();

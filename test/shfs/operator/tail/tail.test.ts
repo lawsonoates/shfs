@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { tail } from '../../../../packages/shfs/src/operator/tail/tail';
-import type { LineRecord } from '../../../../packages/shfs/src/record';
+import { tail } from '#shfs/operator/tail/tail';
+import type { LineRecord } from '#shfs/record';
 
 test('tail yields last n items from stream', async () => {
 	const n = 2;

@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 
-import { MemoryFS } from '../../../../packages/shfs/src/fs/memory';
-import { cat } from '../../../../packages/shfs/src/operator/cat/cat';
-import type { FileRecord } from '../../../../packages/shfs/src/record';
+import { MemoryFS } from '#shfs/fs/memory';
+import { cat } from '#shfs/operator/cat/cat';
+import type { FileRecord } from '#shfs/record';
 
 test('cat reads file and yields lines', async () => {
 	const fs = new MemoryFS();

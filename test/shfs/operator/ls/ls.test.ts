@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 
-import { MemoryFS } from '../../../../packages/shfs/src/fs/memory';
-import { ls } from '../../../../packages/shfs/src/operator/ls/ls';
-import { Shell } from '../../../../packages/shfs/src/shell/shell';
+import { MemoryFS } from '#shfs/fs/memory';
+import { ls } from '#shfs/operator/ls/ls';
+import { Shell } from '#shfs/shell/shell';
 
 test('ls lists immediate children for a directory path', async () => {
 	const fs = new MemoryFS();

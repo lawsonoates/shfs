@@ -1,10 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileXargs } from '../../../../../packages/compiler/src/compile/command/xargs/xargs';
-import {
-	cmd,
-	literal,
-	type XargsStep,
-} from '../../../../../packages/compiler/src/ir';
+import { compileXargs } from '#compiler/compile/command/xargs/xargs';
+import { cmd, literal, type XargsStep } from '#compiler/ir';
 
 function mustBeXargsStep(step: ReturnType<typeof compileXargs>): XargsStep {
 	if (step.cmd !== 'xargs') {

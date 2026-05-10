@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileRm } from '../../../../../packages/compiler/src/compile/command/rm/rm';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileRm } from '#compiler/compile/command/rm/rm';
+import { cmd, literal } from '#compiler/ir';
 
 test('rm with single file', () => {
 	const result = compileRm(cmd('rm', [literal('file.txt')]));

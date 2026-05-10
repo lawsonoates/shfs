@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileString } from '../../../../../packages/compiler/src/compile/command/string/string';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileString } from '#compiler/compile/command/string/string';
+import { cmd, literal } from '#compiler/ir';
 
 test('string compiles subcommand and operands', () => {
 	expect(

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileMv } from '../../../../../packages/compiler/src/compile/command/mv/mv';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileMv } from '#compiler/compile/command/mv/mv';
+import { cmd, literal } from '#compiler/ir';
 
 test('mv with single file', () => {
 	const result = compileMv(

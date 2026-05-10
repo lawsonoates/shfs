@@ -2,8 +2,8 @@ import { beforeEach } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path/posix';
 
-import { MemoryFS } from '../packages/shfs/src/fs/memory';
-import { Shell } from '../packages/shfs/src/shell/shell';
+import { MemoryFS } from '#shfs/fs/memory';
+import { Shell } from '#shfs/shell/shell';
 
 const textDecoder = new TextDecoder();
 const TRAILING_NEWLINE_REGEX = /\n$/;

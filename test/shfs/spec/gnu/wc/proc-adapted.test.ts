@@ -5,7 +5,7 @@
 
 import { expect, test } from 'bun:test';
 
-import { Harness } from '../../../../harness';
+import { Harness } from '#harness';
 
 const harness = Harness.create();
 const LARGE_REGULAR_FILE_SIZE = 1024 * 1024;

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileCat } from '../../../../../packages/compiler/src/compile/command/cat/cat';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileCat } from '#compiler/compile/command/cat/cat';
+import { cmd, literal } from '#compiler/ir';
 
 test('cat with single file', () => {
 	const result = compileCat(cmd('cat', [literal('file.txt')]));

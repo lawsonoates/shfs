@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileTouch } from '../../../../../packages/compiler/src/compile/command/touch/touch';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileTouch } from '#compiler/compile/command/touch/touch';
+import { cmd, literal } from '#compiler/ir';
 
 test('touch with single file', () => {
 	const result = compileTouch(cmd('touch', [literal('file.txt')]));

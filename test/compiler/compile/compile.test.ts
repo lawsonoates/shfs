@@ -1,12 +1,7 @@
 import { expect, test } from 'bun:test';
-import { compile } from '../../../packages/compiler/src/compile/compile';
-import {
-	commandSub,
-	compound,
-	glob,
-	literal,
-} from '../../../packages/compiler/src/ir';
-import { parse } from '../../../packages/compiler/src/parser/parser';
+import { compile } from '#compiler/compile/compile';
+import { commandSub, compound, glob, literal } from '#compiler/ir';
+import { parse } from '#compiler/parser/parser';
 
 test('compile preserves output redirection on steps', () => {
 	const ir = compile(parse('cat input.txt > output.txt'));

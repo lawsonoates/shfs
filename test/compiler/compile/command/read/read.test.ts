@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileRead } from '../../../../../packages/compiler/src/compile/command/read/read';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileRead } from '#compiler/compile/command/read/read';
+import { cmd, literal } from '#compiler/ir';
 
 test('read compiles variable target name', () => {
 	expect(compileRead(cmd('read', [literal('target')]))).toEqual({

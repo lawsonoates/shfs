@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileCp } from '../../../../../packages/compiler/src/compile/command/cp/cp';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileCp } from '#compiler/compile/command/cp/cp';
+import { cmd, literal } from '#compiler/ir';
 
 test('cp with source and destination', () => {
 	const result = compileCp(

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
-import { MemoryFS } from '../../../../packages/shfs/src/fs/memory';
-import { mkdir } from '../../../../packages/shfs/src/operator/mkdir/mkdir';
+import { MemoryFS } from '#shfs/fs/memory';
+import { mkdir } from '#shfs/operator/mkdir/mkdir';
 
 test('mkdir creates single directory', async () => {
 	const fs = new MemoryFS();

@@ -4,8 +4,8 @@
 
 import { beforeEach, expect, test } from 'bun:test';
 
-import { MemoryFS } from '../../../../../packages/shfs/src/fs/memory';
-import { Shell } from '../../../../../packages/shfs/src/shell/shell';
+import { MemoryFS } from '#shfs/fs/memory';
+import { Shell } from '#shfs/shell/shell';
 import { setTextFile } from './utils';
 
 const INPUT_PATH = '/sort-stdin';

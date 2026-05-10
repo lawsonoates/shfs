@@ -11,7 +11,7 @@
 
 import { expect, test } from 'bun:test';
 
-import { Harness } from '../../../../harness';
+import { Harness } from '#harness';
 
 const harness = Harness.create();
 

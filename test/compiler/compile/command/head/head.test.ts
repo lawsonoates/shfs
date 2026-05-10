@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileHead } from '../../../../../packages/compiler/src/compile/command/head/head';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileHead } from '#compiler/compile/command/head/head';
+import { cmd, literal } from '#compiler/ir';
 
 test('head with single file', () => {
 	const result = compileHead(cmd('head', [literal('file.txt')]));

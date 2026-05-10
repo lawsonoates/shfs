@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
-import { MemoryFS } from '../../../../packages/shfs/src/fs/memory';
-import { rm } from '../../../../packages/shfs/src/operator/rm/rm';
+import { MemoryFS } from '#shfs/fs/memory';
+import { rm } from '#shfs/operator/rm/rm';
 
 test('rm deletes a file', async () => {
 	const fs = new MemoryFS();

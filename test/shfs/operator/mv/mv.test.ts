@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 
-import type { FS } from '../../../../packages/shfs/src/fs/fs';
-import { mv } from '../../../../packages/shfs/src/operator/mv/mv';
-import type { Stream } from '../../../../packages/shfs/src/stream';
-import { normalizePath } from '../../../../packages/shfs/src/util/path';
+import type { FS } from '#shfs/fs/fs';
+import { mv } from '#shfs/operator/mv/mv';
+import type { Stream } from '#shfs/stream';
+import { normalizePath } from '#shfs/util/path';
 
 class RecordingFS implements FS {
 	private readonly files = new Set<string>();

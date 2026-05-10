@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
-import { Scanner } from '../../../packages/compiler/src/lexer/scanner';
-import { TokenKind } from '../../../packages/compiler/src/lexer/token';
+import { Scanner } from '#compiler/lexer/scanner';
+import { TokenKind } from '#compiler/lexer/token';
 
 function scanFirstWord(input: string) {
 	const [token, eofToken] = new Scanner(input).tokenize();

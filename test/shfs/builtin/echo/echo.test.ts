@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
-import { literal } from '../../../../packages/compiler/src';
-import { echo } from '../../../../packages/shfs/src/builtin/echo/echo';
-import { createBuiltinRuntime } from '../../../../packages/shfs/src/builtin/test-runtime';
-import { collect } from '../../../../packages/shfs/src/consumer/consumer';
-import type { Record as ShellRecord } from '../../../../packages/shfs/src/record';
+import { literal } from '#compiler';
+import { echo } from '#shfs/builtin/echo/echo';
+import { createBuiltinRuntime } from '#shfs/builtin/test-runtime';
+import { collect } from '#shfs/consumer/consumer';
+import type { Record as ShellRecord } from '#shfs/record';
 
 test('echo emits a single joined line', async () => {
 	const runtime = createBuiltinRuntime();

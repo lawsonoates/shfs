@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileMkdir } from '../../../../../packages/compiler/src/compile/command/mkdir/mkdir';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileMkdir } from '#compiler/compile/command/mkdir/mkdir';
+import { cmd, literal } from '#compiler/ir';
 
 test('mkdir with single directory', () => {
 	const result = compileMkdir(cmd('mkdir', [literal('mydir')]));

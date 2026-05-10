@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { literal } from '../../../../packages/compiler/src';
-import { cd } from '../../../../packages/shfs/src/builtin/cd/cd';
-import { createBuiltinRuntime } from '../../../../packages/shfs/src/builtin/test-runtime';
+import { literal } from '#compiler';
+import { cd } from '#shfs/builtin/cd/cd';
+import { createBuiltinRuntime } from '#shfs/builtin/test-runtime';
 
 test('cd updates cwd for existing directory', async () => {
 	const runtime = createBuiltinRuntime({ cwd: '/workspace' });

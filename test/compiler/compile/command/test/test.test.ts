@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { compileTest } from '../../../../../packages/compiler/src/compile/command/test/test';
-import { cmd, literal } from '../../../../../packages/compiler/src/ir';
+import { compileTest } from '#compiler/compile/command/test/test';
+import { cmd, literal } from '#compiler/ir';
 
 test('test compiles operands', () => {
 	expect(

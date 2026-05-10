@@ -1,13 +1,13 @@
 import { expect, test } from 'bun:test';
 
-import type { Flag } from '../../../../../packages/compiler/src/compile/command/arg/flag';
+import type { Flag } from '#compiler/compile/command/arg/flag';
 import {
 	createArgParser,
 	type FlagDef,
 	parseArgs,
 	parseWords,
-} from '../../../../../packages/compiler/src/compile/command/arg/parse';
-import { literal } from '../../../../../packages/compiler/src/ir';
+} from '#compiler/compile/command/arg/parse';
+import { literal } from '#compiler/ir';
 
 const mixedFlags: Record<string, Flag> = {
 	number: { short: 'n', takesValue: false },
