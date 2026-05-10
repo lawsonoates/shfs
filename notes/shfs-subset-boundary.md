@@ -21,7 +21,7 @@ It is not a full fish shell and does not target host OS parity.
 - Recursive file discovery with `find`:
   - starting paths or default current directory
   - deterministic recursive traversal over the virtual filesystem
-  - predicates: `-name`, `-path`, `-type` (`f`, `d`)
+  - predicates: `-name`, `-iname`, `-path`, `-type` (`f`, `d`)
   - traversal controls: `-maxdepth`, `-mindepth`, `-depth`
   - default `-print` action
   - deterministic errors for invalid predicates and arguments

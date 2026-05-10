@@ -268,6 +268,10 @@ export type FindPredicateIR =
 			pattern: ExpandedWord;
 	  }
 	| {
+			kind: 'iname';
+			pattern: ExpandedWord;
+	  }
+	| {
 			kind: 'path';
 			pattern: ExpandedWord;
 	  }
