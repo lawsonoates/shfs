@@ -1637,7 +1637,7 @@ function getCorpusEntries(): CorpusEntry[] {
 	const entries: CorpusEntry[] = [];
 	const testsDirectory = resolve(
 		dirname(import.meta.filename),
-		'../../spec/gnu/grep/fixtures'
+		'../../../../../test/shfs/spec/gnu/grep/fixtures'
 	);
 	if (!existsSync(testsDirectory)) {
 		corpusEntries = [];
