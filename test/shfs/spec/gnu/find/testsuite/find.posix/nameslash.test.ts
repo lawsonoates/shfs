@@ -6,9 +6,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createFindHarness } from '../../harness';
+import { Harness } from '../../../../../../harness';
 
-const harness = createFindHarness();
+const harness = Harness.create();
 
 test('gnu find: nameslash.exp - trailing-slash start paths work with -o name matching', async () => {
 	await harness.ensureDir('/work/tmp/foo');

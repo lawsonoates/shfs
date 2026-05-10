@@ -4,9 +4,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createWcHarness, nulSeparated } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createWcHarness();
+const harness = Harness.create();
 const NAMES_PATH = '/names';
 
 async function setNames(content: string | Uint8Array): Promise<void> {
@@ -36,7 +36,7 @@ test('gnu wc: wc-files0-from.pl missing1 - missing --files0-from file is an erro
 });
 
 test('gnu wc: wc-files0-from.pl missing2 - missing listed files still produce total', async () => {
-	await setNames(nulSeparated('missing', 'missing'));
+	await setNames(Harness.nulSeparated('missing', 'missing'));
 
 	const result = await harness.runWithStatus(
 		`wc --files0-from=- < ${NAMES_PATH}`
@@ -49,7 +49,7 @@ test('gnu wc: wc-files0-from.pl missing2 - missing listed files still produce to
 
 test('gnu wc: wc-files0-from.pl duplicate1 - duplicate listed files are counted twice', async () => {
 	await harness.setTextFile('/g', '');
-	await setNames(nulSeparated('g', 'g'));
+	await setNames(Harness.nulSeparated('g', 'g'));
 
 	const result = await harness.run(`wc --files0-from=- < ${NAMES_PATH}`);
 
@@ -121,7 +121,7 @@ test('gnu wc: wc-files0-from.pl 1 - one file name without final NUL is accepted'
 
 test('gnu wc: wc-files0-from.pl 1a - one file name with final NUL is accepted', async () => {
 	await harness.setTextFile('/g', '');
-	await setNames(nulSeparated('g'));
+	await setNames(Harness.nulSeparated('g'));
 
 	const result = await harness.run(`wc --files0-from=- < ${NAMES_PATH}`);
 
@@ -139,7 +139,7 @@ test('gnu wc: wc-files0-from.pl 2 - two file names without final NUL include tot
 
 test('gnu wc: wc-files0-from.pl 2a - two file names with final NUL include total', async () => {
 	await harness.setTextFile('/g', '');
-	await setNames(nulSeparated('g', 'g'));
+	await setNames(Harness.nulSeparated('g', 'g'));
 
 	const result = await harness.run(`wc --files0-from=- < ${NAMES_PATH}`);
 

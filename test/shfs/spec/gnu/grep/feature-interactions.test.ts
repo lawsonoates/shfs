@@ -11,16 +11,16 @@
 
 import { expect, test } from 'bun:test';
 
-import { createGrepHarness, quote, readFixture } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createGrepHarness();
+const harness = Harness.create();
 
 test('gnu grep: foad1 - -o with -i returns original matching text casing', async () => {
 	await harness.setTextFile('/tmp/in.txt', 'WordA\nwordB\nWORDC\n');
 
 	for (const pattern of ['word', 'Word', 'WORD']) {
 		const result = await harness.runWithStatus(
-			`grep ${quote(pattern)} -o -i /tmp/in.txt`
+			`grep ${Harness.quote(pattern)} -o -i /tmp/in.txt`
 		);
 		expect(result.status).toBe(0);
 		expect(result.output).toBe('Word\nword\nWORD');
@@ -32,13 +32,13 @@ test('gnu grep: foad1 - -o with -n and -b reports every match, not only first pe
 	await harness.setTextFile('/tmp/in2.txt', 'XwA YwB\nZwC\n');
 
 	const numbered = await harness.runWithStatus(
-		`grep ${quote('w.')} -o -n /tmp/in1.txt`
+		`grep ${Harness.quote('w.')} -o -n /tmp/in1.txt`
 	);
 	expect(numbered.status).toBe(0);
 	expect(numbered.output).toBe('1:wA\n1:wB\n2:wC');
 
 	const offset = await harness.runWithStatus(
-		`grep ${quote('w.')} -o -b /tmp/in2.txt`
+		`grep ${Harness.quote('w.')} -o -b /tmp/in2.txt`
 	);
 	expect(offset.status).toBe(0);
 	expect(offset.output).toBe('1:wA\n5:wB\n9:wC');
@@ -48,25 +48,25 @@ test('gnu grep: foad1 - -H and -h precedence matches GNU expectation', async () 
 	await harness.setTextFile('/tmp/in.txt', 'wA wB\n');
 
 	const plain = await harness.runWithStatus(
-		`grep ${quote('w.')} /tmp/in.txt`
+		`grep ${Harness.quote('w.')} /tmp/in.txt`
 	);
 	expect(plain.status).toBe(0);
 	expect(plain.output).toBe('wA wB');
 
 	const withH = await harness.runWithStatus(
-		`grep ${quote('w.')} -H /tmp/in.txt`
+		`grep ${Harness.quote('w.')} -H /tmp/in.txt`
 	);
 	expect(withH.status).toBe(0);
 	expect(withH.output).toBe('/tmp/in.txt:wA wB');
 
 	const hThenH = await harness.runWithStatus(
-		`grep ${quote('w.')} -h -H /tmp/in.txt`
+		`grep ${Harness.quote('w.')} -h -H /tmp/in.txt`
 	);
 	expect(hThenH.status).toBe(0);
 	expect(hThenH.output).toBe('/tmp/in.txt:wA wB');
 
 	const hWinsUntilOverridden = await harness.runWithStatus(
-		`grep ${quote('w.')} -H -h /tmp/in.txt`
+		`grep ${Harness.quote('w.')} -H -h /tmp/in.txt`
 	);
 	expect(hWinsUntilOverridden.status).toBe(0);
 	expect(hWinsUntilOverridden.output).toBe('wA wB');
@@ -77,13 +77,13 @@ test('gnu grep: foad1 - end of previous match does not satisfy a new start-of-wo
 	await harness.setTextFile('/tmp/wordword.txt', 'wordword\n');
 
 	const a = await harness.runWithStatus(
-		`grep ${quote('^word_*')} -o /tmp/word-underscore.txt`
+		`grep ${Harness.quote('^word_*')} -o /tmp/word-underscore.txt`
 	);
 	expect(a.status).toBe(0);
 	expect(a.output).toBe('word_');
 
 	const b = await harness.runWithStatus(
-		`grep ${quote('\\<word')} -o /tmp/wordword.txt`
+		`grep ${Harness.quote('\\<word')} -o /tmp/wordword.txt`
 	);
 	expect(b.status).toBe(0);
 	expect(b.output).toBe('word');
@@ -93,19 +93,19 @@ test('gnu grep: foad1 + max-count-vs-context - -m with anchors and context obeys
 	await harness.setTextFile('/tmp/in.txt', '4\n40\n');
 
 	const exact = await harness.runWithStatus(
-		`grep ${quote('^4$')} -m1 -A99 /tmp/in.txt`
+		`grep ${Harness.quote('^4$')} -m1 -A99 /tmp/in.txt`
 	);
 	expect(exact.status).toBe(0);
 	expect(exact.output).toBe('4\n40');
 
 	const begin = await harness.runWithStatus(
-		`grep ${quote('^4')} -m1 -A99 /tmp/in.txt`
+		`grep ${Harness.quote('^4')} -m1 -A99 /tmp/in.txt`
 	);
 	expect(begin.status).toBe(0);
 	expect(begin.output).toBe('4');
 
 	const end = await harness.runWithStatus(
-		`grep ${quote('4$')} -m1 -A99 /tmp/in.txt`
+		`grep ${Harness.quote('4$')} -m1 -A99 /tmp/in.txt`
 	);
 	expect(end.status).toBe(0);
 	expect(end.output).toBe('4\n40');
@@ -234,8 +234,8 @@ test('gnu grep: yesno - interaction of -C, -v, -o, and -m preserves line and byt
 });
 
 test('gnu grep: khadafy - regexp file selects exactly the expected lines corpus', async () => {
-	const regex = readFixture('khadafy.regexp');
-	const lines = readFixture('khadafy.lines');
+	const regex = Harness.readFixture('khadafy.regexp');
+	const lines = Harness.readFixture('khadafy.lines');
 
 	await harness.setTextFile('/tmp/khadafy.regexp', regex);
 	await harness.setTextFile('/tmp/khadafy.lines', lines);

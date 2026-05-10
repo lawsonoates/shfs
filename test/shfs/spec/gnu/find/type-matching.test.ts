@@ -5,9 +5,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createFindHarness, sortedLines } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createFindHarness();
+const harness = Harness.create();
 
 // --- Negative tests: invalid -type arguments ---
 
@@ -67,7 +67,7 @@ test('gnu find: type_list.sh - -type f matches only regular files', async () => 
 		'find /work/dir -mindepth 1 -type f'
 	);
 	expect(result.status).toBe(0);
-	expect(sortedLines(result.output)).toBe('/work/dir/reg');
+	expect(Harness.sortedLines(result.output)).toBe('/work/dir/reg');
 });
 
 test('gnu find: type_list.sh - -type d matches only directories', async () => {
@@ -78,7 +78,7 @@ test('gnu find: type_list.sh - -type d matches only directories', async () => {
 		'find /work/dir -mindepth 1 -type d'
 	);
 	expect(result.status).toBe(0);
-	expect(sortedLines(result.output)).toBe('/work/dir/subdir');
+	expect(Harness.sortedLines(result.output)).toBe('/work/dir/subdir');
 });
 
 test('gnu find: type_list.sh - -type f,d matches regular files and directories', async () => {
@@ -89,7 +89,7 @@ test('gnu find: type_list.sh - -type f,d matches regular files and directories',
 		"find /work/dir -mindepth 1 -type 'f,d'"
 	);
 	expect(result.status).toBe(0);
-	expect(sortedLines(result.output)).toBe(
+	expect(Harness.sortedLines(result.output)).toBe(
 		['/work/dir/reg', '/work/dir/subdir'].sort().join('\n')
 	);
 });

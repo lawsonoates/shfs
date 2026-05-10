@@ -10,9 +10,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createGrepHarness, quote } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createGrepHarness();
+const harness = Harness.create();
 
 function sortedLines(text: string): string {
 	if (text === '') {
@@ -160,7 +160,7 @@ test('gnu grep: word-delim-multibyte - \\< recognizes multibyte word starts', as
 	await harness.setTextFile('/tmp/in.txt', `${eAcute}\n`);
 
 	const result = await harness.runWithStatus(
-		`grep ${quote(`\\<${eAcute}`)} /tmp/in.txt`
+		`grep ${Harness.quote(`\\<${eAcute}`)} /tmp/in.txt`
 	);
 	expect(result.status).toBe(0);
 	expect(result.output).toBe(eAcute);

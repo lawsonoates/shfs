@@ -5,9 +5,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createWcHarness } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createWcHarness();
+const harness = Harness.create();
 const LARGE_REGULAR_FILE_SIZE = 1024 * 1024;
 const SMALL_REGULAR_FILE_SIZE = 2;
 

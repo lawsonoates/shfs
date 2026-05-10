@@ -10,9 +10,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createFindHarness } from '../../harness';
+import { Harness } from '../../../../../../harness';
 
-const harness = createFindHarness();
+const harness = Harness.create();
 
 test('gnu find: gnu-or.exp - -or evaluates right branch when left branch is false', async () => {
 	await harness.ensureDir('/work/tmp/fred/jim');

@@ -10,9 +10,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createFindHarness } from '../../harness';
+import { Harness } from '../../../../../../harness';
 
-const harness = createFindHarness();
+const harness = Harness.create();
 
 test('gnu find: sv-bug-17490.exp - final -regex argument does not crash', async () => {
 	const result = await harness.runWithStatus("find . -maxdepth 0 -regex 'x'");

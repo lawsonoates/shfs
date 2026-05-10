@@ -6,9 +6,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createFindHarness } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createFindHarness();
+const harness = Harness.create();
 
 // opt-numeric-arg: adapt the upstream numeric-argument diagnostics to the
 // in-scope traversal controls.

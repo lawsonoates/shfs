@@ -11,9 +11,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createGrepHarness, quote } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createGrepHarness();
+const harness = Harness.create();
 
 async function expectStatus(
 	command: string,
@@ -34,35 +34,42 @@ async function expectStatus(
 }
 
 test('gnu grep: status - GNU exit code contract (0 match, 1 no match, 2 error)', async () => {
-	await expectStatus(`echo abcd | grep -E -e ${quote('abc')}`, 0, 'abcd');
-	await expectStatus(`echo abcd | grep -E -e ${quote('zbc')}`, 1);
-
-	await expectStatus(`grep -E -e ${quote('abc')} MMMMMMMM.MMM`, 2);
-	await expectStatus(`grep -E -s -e ${quote('abc')} MMMMMMMM.MMM`, 2);
 	await expectStatus(
-		`echo abcd | grep -E -s ${quote('abc')} - MMMMMMMM.MMM`,
+		`echo abcd | grep -E -e ${Harness.quote('abc')}`,
+		0,
+		'abcd'
+	);
+	await expectStatus(`echo abcd | grep -E -e ${Harness.quote('zbc')}`, 1);
+
+	await expectStatus(`grep -E -e ${Harness.quote('abc')} MMMMMMMM.MMM`, 2);
+	await expectStatus(`grep -E -s -e ${Harness.quote('abc')} MMMMMMMM.MMM`, 2);
+	await expectStatus(
+		`echo abcd | grep -E -s ${Harness.quote('abc')} - MMMMMMMM.MMM`,
 		2,
 		'abcd'
 	);
 
 	await expectStatus(
-		`echo abcd | grep -E -q -s ${quote('abc')} MMMMMMMM.MMM -`,
+		`echo abcd | grep -E -q -s ${Harness.quote('abc')} MMMMMMMM.MMM -`,
 		0
 	);
 	await expectStatus(
-		`echo abcd | grep -E -q ${quote('abc')} MMMMMMMM.MMM -`,
+		`echo abcd | grep -E -q ${Harness.quote('abc')} MMMMMMMM.MMM -`,
 		0
 	);
 });
 
 test('gnu grep: options - -E, -G, -F preserve GNU matching behavior', async () => {
-	await expectStatus(`echo abababccccccd | grep -E -e ${quote('c{3}')}`, 0);
 	await expectStatus(
-		`echo abababccccccd | grep -G -e ${quote('c\\{3\\}')}`,
+		`echo abababccccccd | grep -E -e ${Harness.quote('c{3}')}`,
 		0
 	);
 	await expectStatus(
-		`echo abababccccccd | grep -F -e ${quote('c\\{3\\}')}`,
+		`echo abababccccccd | grep -G -e ${Harness.quote('c\\{3\\}')}`,
+		0
+	);
+	await expectStatus(
+		`echo abababccccccd | grep -F -e ${Harness.quote('c\\{3\\}')}`,
 		1
 	);
 });

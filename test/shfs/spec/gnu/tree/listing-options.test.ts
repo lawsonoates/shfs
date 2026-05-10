@@ -4,9 +4,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createTreeHarness, expectContains } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createTreeHarness();
+const harness = Harness.create();
 
 test('gnu tree: integration_tests.rs - -A uses ASCII-style line drawing', async () => {
 	const root = await harness.setupReferenceTree();
@@ -21,16 +21,16 @@ test('gnu tree: integration_tests.rs - -f prints full path prefixes', async () =
 	const root = await harness.setupReferenceTree();
 	const output = await harness.run(`tree -f ${root}`);
 
-	expectContains(output, root);
-	expectContains(output, `${root}/src/main.rs`);
+	Harness.expectContains(output, root);
+	Harness.expectContains(output, `${root}/src/main.rs`);
 });
 
 test('gnu tree: integration_tests.rs - -F classifies directories with trailing slash', async () => {
 	const root = await harness.setupReferenceTree();
 	const output = await harness.run(`tree -F ${root}`);
 
-	expectContains(output, 'src/');
-	expectContains(output, 'docs/');
+	Harness.expectContains(output, 'src/');
+	Harness.expectContains(output, 'docs/');
 });
 
 test('gnu tree: integration_tests.rs - --noreport suppresses the summary report', async () => {

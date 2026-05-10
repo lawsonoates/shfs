@@ -14,9 +14,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createXargsHarness } from '../../harness';
+import { Harness } from '../../../../../../harness';
 
-const harness = createXargsHarness();
+const harness = Harness.create();
 
 const XARGS_POSIX_CASES = [
 	'empty',

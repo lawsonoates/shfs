@@ -4,16 +4,16 @@
 
 import { expect, test } from 'bun:test';
 
-import { createWcHarness, nulSeparated } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createWcHarness();
+const harness = Harness.create();
 const NAMES_PATH = '/names';
 const LARGE_FILE_SIZE = 1024 * 1024;
 
 async function seedFiles0Fixture(): Promise<void> {
 	await harness.setTextFile('/2b', '2\n');
 	await harness.setTextFile('/2w', '2 words\n');
-	await harness.setFile(NAMES_PATH, nulSeparated('2b', '2w'));
+	await harness.setFile(NAMES_PATH, Harness.nulSeparated('2b', '2w'));
 }
 
 test('gnu wc: wc-files0.sh - --files0-from reads NUL-delimited file list from a file', async () => {
@@ -35,7 +35,7 @@ test('gnu wc: wc-files0.sh - --files0-from=- reads NUL-delimited file list from 
 test('gnu wc: wc-files0.sh - file names containing newlines are quoted on one output line', async () => {
 	const newlineName = '1\n2';
 	await harness.setTextFile(`/${newlineName}`, '');
-	await harness.setFile(NAMES_PATH, nulSeparated(newlineName));
+	await harness.setFile(NAMES_PATH, Harness.nulSeparated(newlineName));
 
 	const result = await harness.run(`wc --files0-from=- < ${NAMES_PATH}`);
 
@@ -45,7 +45,10 @@ test('gnu wc: wc-files0.sh - file names containing newlines are quoted on one ou
 test('gnu wc: wc-files0.sh - byte totals from --files0-from are accurate for large virtual files', async () => {
 	await harness.setFile('/wc.big', new Uint8Array(LARGE_FILE_SIZE));
 	await harness.setTextFile('/wc.small', '');
-	await harness.setFile(NAMES_PATH, nulSeparated('wc.big', 'wc.small'));
+	await harness.setFile(
+		NAMES_PATH,
+		Harness.nulSeparated('wc.big', 'wc.small')
+	);
 
 	const result = await harness.run(`wc -c --files0-from=- < ${NAMES_PATH}`);
 

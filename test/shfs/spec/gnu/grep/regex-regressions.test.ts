@@ -21,9 +21,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createGrepHarness, quote } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createGrepHarness();
+const harness = Harness.create();
 
 async function status(command: string): Promise<number> {
 	return (await harness.runWithStatus(command)).status;
@@ -31,23 +31,27 @@ async function status(command: string): Promise<number> {
 
 test('gnu grep: backref - palindrome, bond stress pattern, and invalid backref handling', async () => {
 	expect(
-		await status(`echo radar | grep -e ${quote('\\(.\\)\\(.\\).\\2\\1')}`)
-	).toBe(0);
-
-	expect(
 		await status(
-			`echo civic | grep -E -e ${quote('^(.?)(.?)(.?)(.?)(.?)(.?)(.?)(.?)(.).?\\9\\8\\7\\6\\5\\4\\3\\2\\1$')}`
+			`echo radar | grep -e ${Harness.quote('\\(.\\)\\(.\\).\\2\\1')}`
 		)
 	).toBe(0);
 
 	expect(
 		await status(
-			`echo 123 | grep -e ${quote('a\\(.\\)')} -e ${quote('b\\1')}`
+			`echo civic | grep -E -e ${Harness.quote('^(.?)(.?)(.?)(.?)(.?)(.?)(.?)(.?)(.).?\\9\\8\\7\\6\\5\\4\\3\\2\\1$')}`
+		)
+	).toBe(0);
+
+	expect(
+		await status(
+			`echo 123 | grep -e ${Harness.quote('a\\(.\\)')} -e ${Harness.quote('b\\1')}`
 		)
 	).toBe(2);
 
 	expect(
-		await status(`echo 123 | grep -e ${quote('[')} -e ${quote(']')}`)
+		await status(
+			`echo 123 | grep -e ${Harness.quote('[')} -e ${Harness.quote(']')}`
+		)
 	).toBe(2);
 });
 
@@ -58,59 +62,61 @@ test('gnu grep: backref-word + case-fold-backref - -w and -i preserve captured b
 	);
 
 	const word = await harness.runWithStatus(
-		`grep -w ${quote('\\(foo\\) \\1')} /tmp/exp1.txt`
+		`grep -w ${Harness.quote('\\(foo\\) \\1')} /tmp/exp1.txt`
 	);
 	expect(word.status).toBe(0);
 	expect(word.output).toBe('foo foo bar');
 
 	const folded = await harness.runWithStatus(
-		`grep -Ei ${quote('(foo) \\1')} /tmp/exp1.txt`
+		`grep -Ei ${Harness.quote('(foo) \\1')} /tmp/exp1.txt`
 	);
 	expect(folded.status).toBe(0);
 	expect(folded.output).toBe('foo foo bar\nFoo foo\nFOO foo');
 });
 
 test('gnu grep: case-fold-backslash-w + case-fold-char-class + case-fold-char-range + case-fold-char-type - case folding preserves word and character class semantics', async () => {
-	expect(await status(`echo foo bar | grep -i ${quote('^foo\\W')}`)).toBe(0);
+	expect(
+		await status(`echo foo bar | grep -i ${Harness.quote('^foo\\W')}`)
+	).toBe(0);
 
 	await harness.setTextFile('/tmp/case-1.txt', 'X\nY\nZ\n');
 	const classOne = await harness.runWithStatus(
-		`grep -i ${quote('[y]')} /tmp/case-1.txt`
+		`grep -i ${Harness.quote('[y]')} /tmp/case-1.txt`
 	);
 	expect(classOne.status).toBe(0);
 	expect(classOne.output).toBe('Y');
 
 	await harness.setTextFile('/tmp/case-2.txt', 'x\ny\nz\n');
 	const classTwo = await harness.runWithStatus(
-		`grep -i ${quote('[Y]')} /tmp/case-2.txt`
+		`grep -i ${Harness.quote('[Y]')} /tmp/case-2.txt`
 	);
 	expect(classTwo.status).toBe(0);
 	expect(classTwo.output).toBe('y');
 
 	await harness.setTextFile('/tmp/range-1.txt', 'A\n1\nZ\n.\n');
 	const rangeOne = await harness.runWithStatus(
-		`grep -i ${quote('[a-z]')} /tmp/range-1.txt`
+		`grep -i ${Harness.quote('[a-z]')} /tmp/range-1.txt`
 	);
 	expect(rangeOne.status).toBe(0);
 	expect(rangeOne.output).toBe('A\nZ');
 
 	await harness.setTextFile('/tmp/range-2.txt', 'a\n1\nz\n.\n');
 	const rangeTwo = await harness.runWithStatus(
-		`grep -i ${quote('[A-Z]')} /tmp/range-2.txt`
+		`grep -i ${Harness.quote('[A-Z]')} /tmp/range-2.txt`
 	);
 	expect(rangeTwo.status).toBe(0);
 	expect(rangeTwo.output).toBe('a\nz');
 
 	await harness.setTextFile('/tmp/type-1.txt', '1\nY\n.\n');
 	const typeOne = await harness.runWithStatus(
-		`grep -i ${quote('[[:lower:]]')} /tmp/type-1.txt`
+		`grep -i ${Harness.quote('[[:lower:]]')} /tmp/type-1.txt`
 	);
 	expect(typeOne.status).toBe(0);
 	expect(typeOne.output).toBe('Y');
 
 	await harness.setTextFile('/tmp/type-2.txt', '1\ny\n.\n');
 	const typeTwo = await harness.runWithStatus(
-		`grep -i ${quote('[[:upper:]]')} /tmp/type-2.txt`
+		`grep -i ${Harness.quote('[[:upper:]]')} /tmp/type-2.txt`
 	);
 	expect(typeTwo.status).toBe(0);
 	expect(typeTwo.output).toBe('y');
@@ -119,7 +125,7 @@ test('gnu grep: case-fold-backslash-w + case-fold-char-class + case-fold-char-ra
 test('gnu grep: dfa-coverage + dfa-heap-overrun - regression cases keep correct statuses', async () => {
 	await harness.setTextFile('/tmp/in.txt', 'a\n');
 	const coverage = await harness.runWithStatus(
-		`grep -E ${quote('[^_]|$')} /tmp/in.txt`
+		`grep -E ${Harness.quote('[^_]|$')} /tmp/in.txt`
 	);
 	expect(coverage.status).toBe(0);
 	expect(coverage.output).toBe('a');
@@ -127,7 +133,9 @@ test('gnu grep: dfa-coverage + dfa-heap-overrun - regression cases keep correct 
 	await harness.ensureDir('/dev');
 	await harness.setTextFile('/dev/null', '');
 	expect(
-		await status(`grep -E ${quote('(^| )*(a|b)*(c|d)*( |$)')} < /dev/null`)
+		await status(
+			`grep -E ${Harness.quote('(^| )*(a|b)*(c|d)*( |$)')} < /dev/null`
+		)
 	).toBe(1);
 });
 
@@ -136,19 +144,19 @@ test('gnu grep: dfaexec-multibyte - alternation and character-class repetition r
 	await harness.setTextFile('/tmp/digits.txt', '1 2 3\n');
 
 	const ab = await harness.runWithStatus(
-		`grep -E ${quote('([a]|[b]){2}')} /tmp/letters.txt`
+		`grep -E ${Harness.quote('([a]|[b]){2}')} /tmp/letters.txt`
 	);
 	expect(ab.status).toBe(0);
 	expect(ab.output).toBe('aa\nab\nba\nbb');
 
 	const ba = await harness.runWithStatus(
-		`grep -E ${quote('([b]|[a]){2}')} /tmp/letters.txt`
+		`grep -E ${Harness.quote('([b]|[a]){2}')} /tmp/letters.txt`
 	);
 	expect(ba.status).toBe(0);
 	expect(ba.output).toBe('aa\nab\nba\nbb');
 
 	const digits = await harness.runWithStatus(
-		`grep -E ${quote('^([[:digit:]]+[[:space:]]+){2}')} /tmp/digits.txt`
+		`grep -E ${Harness.quote('^([[:digit:]]+[[:space:]]+){2}')} /tmp/digits.txt`
 	);
 	expect(digits.status).toBe(0);
 	expect(digits.output).toBe('1 2 3');
@@ -158,10 +166,10 @@ test('gnu grep: inconsistent-range - equivalent uppercase predicates agree', asy
 	await harness.setTextFile('/tmp/in.txt', '00a\n00g\n00z\n00A\n00G\n00Z\n');
 
 	const doubled = await harness.runWithStatus(
-		`grep -E ${quote('(.)\\1[A-Z]')} /tmp/in.txt`
+		`grep -E ${Harness.quote('(.)\\1[A-Z]')} /tmp/in.txt`
 	);
 	const ranged = await harness.runWithStatus(
-		`grep -E ${quote('[A-Z]')} /tmp/in.txt`
+		`grep -E ${Harness.quote('[A-Z]')} /tmp/in.txt`
 	);
 
 	expect(doubled.status).toBe(0);
@@ -174,7 +182,7 @@ test('gnu grep: high-bit-range - single high-bit character remains matchable in 
 	await harness.setTextFile('/tmp/in.txt', input);
 
 	const result = await harness.runWithStatus(
-		`grep ${quote('[\u0081]')} /tmp/in.txt`
+		`grep ${Harness.quote('[\u0081]')} /tmp/in.txt`
 	);
 	expect(result.status).toBe(0);
 	expect(result.output).toBe('\u0081');
@@ -196,13 +204,13 @@ test('gnu grep: repetition-overflow - excessive repetition counts fail with stat
 	const xp2 = '4294967298';
 
 	const one = await harness.runWithStatus(
-		`echo abc | grep -E ${quote(`b{${xp1}}`)}`
+		`echo abc | grep -E ${Harness.quote(`b{${xp1}}`)}`
 	);
 	expect(one.status).toBe(2);
 	expect(one.output).toBe('');
 
 	const two = await harness.runWithStatus(
-		`echo abbc | grep -E ${quote(`b{1,${xp2}}`)}`
+		`echo abbc | grep -E ${Harness.quote(`b{1,${xp2}}`)}`
 	);
 	expect(two.status).toBe(2);
 	expect(two.output).toBe('');
@@ -213,8 +221,8 @@ test('gnu grep: reversed-range-endpoints - invalid ranges return status 2', asyn
 	await harness.setTextFile('/dev/null', '');
 
 	for (const cmd of [
-		`grep ${quote('[b-a]')} < /dev/null`,
-		`grep -E ${quote('[b-a]')} < /dev/null`,
+		`grep ${Harness.quote('[b-a]')} < /dev/null`,
+		`grep -E ${Harness.quote('[b-a]')} < /dev/null`,
 	]) {
 		const result = await harness.runWithStatus(cmd);
 		expect(result.status).toBe(2);
@@ -225,12 +233,12 @@ test('gnu grep: warn-char-classes - diagnose [:space:] typo and accept valid for
 	await harness.setTextFile('/tmp/x', 'f\nb\nh\n');
 
 	const invalid = await harness.runWithStatus(
-		`grep ${quote('[:space:]')} /tmp/x`
+		`grep ${Harness.quote('[:space:]')} /tmp/x`
 	);
 	expect(invalid.status).toBe(2);
 
 	const valid = await harness.runWithStatus(
-		`grep ${quote('[[:space:]]')} /tmp/x`
+		`grep ${Harness.quote('[[:space:]]')} /tmp/x`
 	);
 	expect(valid.status).toBe(1);
 
@@ -242,7 +250,7 @@ test('gnu grep: warn-char-classes - diagnose [:space:] typo and accept valid for
 		'[:spac-e:]',
 	]) {
 		const result = await harness.runWithStatus(
-			`grep ${quote(pattern)} /tmp/x`
+			`grep ${Harness.quote(pattern)} /tmp/x`
 		);
 		expect(result.status).toBe(1);
 	}
@@ -251,7 +259,7 @@ test('gnu grep: warn-char-classes - diagnose [:space:] typo and accept valid for
 test('gnu grep: unibyte-negated-circumflex - [^^-^] remains a true negated class', async () => {
 	await harness.setTextFile('/tmp/in', 'a\n');
 	const result = await harness.runWithStatus(
-		`grep ${quote('[^^-^]')} /tmp/in`
+		`grep ${Harness.quote('[^^-^]')} /tmp/in`
 	);
 	expect(result.status).toBe(0);
 	expect(result.output).toBe('a');

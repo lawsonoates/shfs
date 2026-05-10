@@ -10,16 +10,16 @@
 
 import { expect, test } from 'bun:test';
 
-import { createGrepHarness, parseAtDelimitedCorpus, quote } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createGrepHarness();
-const cases = parseAtDelimitedCorpus('spencer2.tests', [3]);
+const harness = Harness.create();
+const cases = Harness.parseAtDelimitedCorpus('spencer2.tests', [3]);
 
 for (const testCase of cases) {
 	test(`gnu grep: spencer2.tests:${testCase.line} - Spencer corpus case`, async () => {
 		await harness.setTextFile('/tmp/in.txt', `${testCase.input}\n`);
 		const { status } = await harness.runWithStatus(
-			`grep -E -e ${quote(testCase.pattern)} /tmp/in.txt`
+			`grep -E -e ${Harness.quote(testCase.pattern)} /tmp/in.txt`
 		);
 
 		expect(status).toBe(testCase.expectedStatus);

@@ -6,9 +6,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createFindHarness } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createFindHarness();
+const harness = Harness.create();
 
 // name-lbracket-literal: find -name treats unquoted '[' as a literal character.
 // See Savannah bug #32043.

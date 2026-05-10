@@ -4,9 +4,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createWcHarness } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createWcHarness();
+const harness = Harness.create();
 
 async function seedTotalFiles(): Promise<void> {
 	await harness.setTextFile('/2b', '2\n');

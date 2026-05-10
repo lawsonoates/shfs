@@ -19,16 +19,16 @@
 
 import { expect, test } from 'bun:test';
 
-import { createGrepHarness, quote } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createGrepHarness();
+const harness = Harness.create();
 
 test('gnu grep: backref-multibyte-slow - nested backreference expression matches full corpus', async () => {
 	const lines = Array.from({ length: 256 }, () => 'aba').join('\n');
 	await harness.setTextFile('/tmp/in.txt', `${lines}\n`);
 
 	const result = await harness.runWithStatus(
-		`grep -E ${quote('^([a-z]).\\1$')} /tmp/in.txt`
+		`grep -E ${Harness.quote('^([a-z]).\\1$')} /tmp/in.txt`
 	);
 	expect(result.status).toBe(0);
 	expect(result.output).toBe(lines);
@@ -52,13 +52,13 @@ test('gnu grep: big-match + long-line-vs-2GiB-read - long matching lines remain 
 	await harness.setTextFile('/tmp/big.txt', `${longPayload}\n`);
 
 	const all = await harness.runWithStatus(
-		`grep -a ${quote('^.*')} /tmp/big.txt`
+		`grep -a ${Harness.quote('^.*')} /tmp/big.txt`
 	);
 	expect(all.status).toBe(0);
 	expect(all.output).toBe(longPayload);
 
 	const backref = await harness.runWithStatus(
-		`grep -a ${quote('^.*x\\(\\)\\1')} /tmp/big.txt`
+		`grep -a ${Harness.quote('^.*x\\(\\)\\1')} /tmp/big.txt`
 	);
 	expect(backref.status).toBe(0);
 	expect(backref.output).toBe(longPayload);
@@ -117,10 +117,10 @@ test('gnu grep: fedora - -F -w list matching and -e ordering semantics', async (
 
 	await harness.setTextFile('/tmp/one.txt', 'test\n');
 	const secondEmptyPattern = await harness.runWithStatus(
-		`cat /tmp/one.txt | grep -e ${quote('HighlightThis')} -e ''`
+		`cat /tmp/one.txt | grep -e ${Harness.quote('HighlightThis')} -e ''`
 	);
 	const firstEmptyPattern = await harness.runWithStatus(
-		`cat /tmp/one.txt | grep -e '' -e ${quote('HighlightThis')}`
+		`cat /tmp/one.txt | grep -e '' -e ${Harness.quote('HighlightThis')}`
 	);
 
 	expect(secondEmptyPattern.status).toBe(0);
@@ -150,7 +150,7 @@ test('gnu grep: fmbtest - UTF-8 case folding works with pattern files and inline
 	expect(fromFile.output).toContain('Čas12');
 
 	const fromExpr = await harness.runWithStatus(
-		`grep -Ei -e ${quote('ČÍšE')} -e ${quote('Čas')} /tmp/csinput`
+		`grep -Ei -e ${Harness.quote('ČÍšE')} -e ${Harness.quote('Čas')} /tmp/csinput`
 	);
 	expect(fromExpr.status).toBe(0);
 	expect(fromExpr.output).toContain('ČÍšE11');
@@ -168,7 +168,7 @@ test('gnu grep: euc-mb + sjis-mb - multibyte boundaries do not create false sing
 	expect(rejectRegexA.status).toBe(1);
 
 	const acceptWholeChar = await harness.runWithStatus(
-		`grep -F ${quote(fullWidthA)} /tmp/mb.txt`
+		`grep -F ${Harness.quote(fullWidthA)} /tmp/mb.txt`
 	);
 	expect(acceptWholeChar.status).toBe(0);
 	expect(acceptWholeChar.output).toBe(`${fullWidthA}${fullWidthA}`);
@@ -188,7 +188,7 @@ test('gnu grep: mb-non-UTF8-performance - non-matching large input returns statu
 
 test('gnu grep: equiv-classes - [[=a=]] includes accented variants under multibyte support', async () => {
 	const result = await harness.runWithStatus(
-		`echo à | grep ${quote('[[=a=]]')}`
+		`echo à | grep ${Harness.quote('[[=a=]]')}`
 	);
 	expect(result.status).toBe(0);
 	expect(result.output).toBe('à');
@@ -202,7 +202,7 @@ test('gnu grep: turkish-eyes - dotted and dotless I sequence matches under -i in
 
 	await harness.setTextFile('/tmp/turkish.txt', `${data}\n`);
 	const result = await harness.runWithStatus(
-		`grep -Ei ${quote(search)} /tmp/turkish.txt`
+		`grep -Ei ${Harness.quote(search)} /tmp/turkish.txt`
 	);
 	expect(result.status).toBe(0);
 	expect(result.output).toBe(data);
@@ -214,7 +214,7 @@ test('gnu grep: unibyte-bracket-expr - bracket literals round-trip for high-byte
 	for (const sample of samples) {
 		await harness.setTextFile('/tmp/in.txt', `${sample}\n`);
 		const result = await harness.runWithStatus(
-			`grep ${quote(`[${sample}]`)} /tmp/in.txt`
+			`grep ${Harness.quote(`[${sample}]`)} /tmp/in.txt`
 		);
 		expect(result.status).toBe(0);
 		expect(result.output).toBe(sample);
@@ -227,10 +227,10 @@ test('gnu grep: symlink - -r and -R traverse regular directory trees consistentl
 	await harness.setTextFile('/tmp/dir/sub/b', 'b\n');
 
 	const recursive = await harness.runWithStatus(
-		`grep -r ${quote('^')} /tmp/dir`
+		`grep -r ${Harness.quote('^')} /tmp/dir`
 	);
 	const dereference = await harness.runWithStatus(
-		`grep -R ${quote('^')} /tmp/dir`
+		`grep -R ${Harness.quote('^')} /tmp/dir`
 	);
 
 	expect(recursive.status).toBe(0);

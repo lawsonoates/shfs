@@ -4,9 +4,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createWcHarness } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createWcHarness();
+const harness = Harness.create();
 const INPUT_PATH = '/nbsp-input';
 
 const UTF8_SPACE_CASES = [

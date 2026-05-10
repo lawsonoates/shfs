@@ -11,13 +11,13 @@
 
 import { expect, test } from 'bun:test';
 
-import { createGrepHarness, quote } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createGrepHarness();
+const harness = Harness.create();
 
 test('gnu grep: pcre - with -P, \\s*$ matches an empty line', async () => {
 	const result = await harness.runWithStatus(
-		`echo '' | grep -P ${quote('\\s*$')}`
+		`echo '' | grep -P ${Harness.quote('\\s*$')}`
 	);
 	expect(result.status).toBe(0);
 });
@@ -29,7 +29,7 @@ test('gnu grep: pcre-abort - catastrophic backtracking reports status 2 without 
 	);
 
 	const result = await harness.runWithStatus(
-		`grep -P ${quote('((a+)*)+$')} /tmp/in.txt`
+		`grep -P ${Harness.quote('((a+)*)+$')} /tmp/in.txt`
 	);
 	expect(result.status).toBe(2);
 	expect(result.output).toBe('');
@@ -54,25 +54,25 @@ test('gnu grep: pcre-utf8 - Unicode property classes and dot matching on UTF-8 i
 	await harness.setTextFile('/tmp/euro.txt', '€ euro\n');
 
 	const symbol = await harness.runWithStatus(
-		`grep -P ${quote('^\\p{S}')} /tmp/euro.txt`
+		`grep -P ${Harness.quote('^\\p{S}')} /tmp/euro.txt`
 	);
 	expect(symbol.status).toBe(0);
 	expect(symbol.output).toBe('€ euro');
 
 	const anyThenEuro = await harness.runWithStatus(
-		`grep -P ${quote('^. euro$')} /tmp/euro.txt`
+		`grep -P ${Harness.quote('^. euro$')} /tmp/euro.txt`
 	);
 	expect(anyThenEuro.status).toBe(0);
 	expect(anyThenEuro.output).toBe('€ euro');
 
 	const onlyMatch = await harness.runWithStatus(
-		`grep -oP ${quote('. euro')} /tmp/euro.txt`
+		`grep -oP ${Harness.quote('. euro')} /tmp/euro.txt`
 	);
 	expect(onlyMatch.status).toBe(0);
 	expect(onlyMatch.output).toBe('€ euro');
 
 	const nonSymbol = await harness.runWithStatus(
-		`grep -P ${quote('^\\P{S}')} /tmp/euro.txt`
+		`grep -P ${Harness.quote('^\\P{S}')} /tmp/euro.txt`
 	);
 	expect(nonSymbol.status).toBe(1);
 	expect(nonSymbol.output).toBe('');

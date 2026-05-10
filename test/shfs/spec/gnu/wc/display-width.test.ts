@@ -5,9 +5,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createWcHarness } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createWcHarness();
+const harness = Harness.create();
 const INPUT_PATH = '/display-width-input';
 
 test('gnu wc: fold-characters.sh - wc -L counts wide characters by display columns', async () => {

@@ -8,9 +8,9 @@
 
 import { expect, test } from 'bun:test';
 
-import { createFindHarness, sortedLines } from './harness';
+import { Harness } from '../../../../harness';
 
-const harness = createFindHarness();
+const harness = Harness.create();
 
 // files0-from: find defaults to the current directory when no starting path is given.
 test('gnu find: files0-from.sh - find with no args defaults to the current directory', async () => {
@@ -30,7 +30,7 @@ test('gnu find: files0-from.sh - recursion includes the starting path and descen
 
 	const result = await harness.runWithStatus('find d1');
 	expect(result.status).toBe(0);
-	expect(sortedLines(result.output)).toBe(
+	expect(Harness.sortedLines(result.output)).toBe(
 		['d1', 'd1/d2', 'd1/d2/d3', 'd1/d2/d3/file'].join('\n')
 	);
 });
@@ -54,7 +54,7 @@ test('gnu find: type_list.sh - -mindepth 1 suppresses the starting path', async 
 
 	const result = await harness.runWithStatus('find /work/tree -mindepth 1');
 	expect(result.status).toBe(0);
-	expect(sortedLines(result.output)).toBe(
+	expect(Harness.sortedLines(result.output)).toBe(
 		['/work/tree/root-file', '/work/tree/sub', '/work/tree/sub/leaf'].join(
 			'\n'
 		)
