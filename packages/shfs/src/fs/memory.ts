@@ -8,6 +8,7 @@ export class MemoryFS implements FS {
 	private readonly files = new Map<string, Uint8Array>();
 	private readonly directories = new Set<string>();
 	private readonly directoryChildren = new Map<string, Set<string>>();
+	private readonly sortedDirectoryChildren = new Map<string, string[]>();
 	private readonly fileMetadata = new Map<
 		string,
 		{ mtime: Date; isDirectory: boolean }
@@ -424,13 +425,20 @@ export class MemoryFS implements FS {
 	}
 
 	private listImmediateChildren(directoryPath: string): string[] {
-		return Array.from(this.directoryChildren.get(directoryPath) ?? []).sort(
+		const cached = this.sortedDirectoryChildren.get(directoryPath);
+		if (cached) {
+			return cached;
+		}
+		const sorted = Array.from(this.directoryChildren.get(directoryPath) ?? []).sort(
 			(left, right) => left.localeCompare(right)
 		);
+		this.sortedDirectoryChildren.set(directoryPath, sorted);
+		return sorted;
 	}
 
 	private rebuildDirectoryChildren(): void {
 		this.directoryChildren.clear();
+		this.sortedDirectoryChildren.clear();
 		for (const directory of this.directories) {
 			this.directoryChildren.set(directory, new Set());
 		}
@@ -453,13 +461,16 @@ export class MemoryFS implements FS {
 			this.directoryChildren.set(parentPath, children);
 		}
 		children.add(path);
+		this.sortedDirectoryChildren.delete(parentPath);
 	}
 
 	private untrackChild(path: string): void {
 		if (path === '/') {
 			return;
 		}
-		this.directoryChildren.get(this.getParentPath(path))?.delete(path);
+		const parentPath = this.getParentPath(path);
+		this.directoryChildren.get(parentPath)?.delete(path);
+		this.sortedDirectoryChildren.delete(parentPath);
 	}
 
 	private replacePathPrefix(
