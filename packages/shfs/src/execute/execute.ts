@@ -692,15 +692,16 @@ async function routeStepOutput(params: {
 
 	const stdoutDestination = plan.fd1;
 	const stderrDestination = plan.fd2;
-	const stdoutAsText = recordsToText(stdoutRecords);
-	const stderrAsText = linesToText(stderrLines);
 
 	const writesToSameFile =
 		stdoutDestination.kind === 'file' &&
 		stderrDestination.kind === 'file' &&
 		stdoutDestination.path === stderrDestination.path;
 	if (writesToSameFile) {
-		const mergedText = mergeChannelText(stdoutAsText, stderrAsText);
+		const mergedText = mergeChannelText(
+			recordsToText(stdoutRecords),
+			linesToText(stderrLines)
+		);
 		await writeToFileOrReport({
 			append: stdoutDestination.append && stderrDestination.append,
 			content: mergedText,
@@ -711,7 +712,6 @@ async function routeStepOutput(params: {
 	} else {
 		await routeStdout(
 			stdoutRecords,
-			stdoutAsText,
 			stdoutDestination,
 			hasNextStep,
 			pipeRecords,
@@ -721,7 +721,6 @@ async function routeStepOutput(params: {
 		);
 		await routeStderr(
 			stderrLines,
-			stderrAsText,
 			stderrDestination,
 			hasNextStep,
 			pipeRecords,
@@ -739,7 +738,6 @@ async function routeStepOutput(params: {
 
 async function routeStdout(
 	stdoutRecords: readonly ShellRecord[],
-	stdoutText: string,
 	destination: OutputDestination,
 	hasNextStep: boolean,
 	pipeRecords: ShellRecord[],
@@ -763,15 +761,17 @@ async function routeStdout(
 		case 'pipe':
 			shellRecords.push(...stdoutRecords);
 			return;
-		case 'shellStderr':
+		case 'shellStderr': {
+			const stdoutText = recordsToText(stdoutRecords);
 			if (stdoutText !== '') {
 				context.stderr.append(stdoutText);
 			}
 			return;
+		}
 		case 'file':
 			await writeToFileOrReport({
 				append: destination.append,
-				content: stdoutText,
+				content: recordsToText(stdoutRecords),
 				context,
 				fs,
 				path: destination.path,
@@ -790,7 +790,6 @@ async function routeStdout(
 
 async function routeStderr(
 	stderrLines: readonly string[],
-	stderrText: string,
 	destination: OutputDestination,
 	hasNextStep: boolean,
 	pipeRecords: ShellRecord[],
@@ -822,7 +821,7 @@ async function routeStderr(
 		case 'file':
 			await writeToFileOrReport({
 				append: destination.append,
-				content: stderrText,
+				content: linesToText(stderrLines),
 				context,
 				fs,
 				path: destination.path,

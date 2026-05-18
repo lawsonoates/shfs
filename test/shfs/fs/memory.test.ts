@@ -73,6 +73,18 @@ test('writeFile rejects existing directory paths', async () => {
 	).rejects.toThrow('Is a directory: /docs');
 });
 
+test('mkdir rejects file parents', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/docs/readme.md', 'guide');
+
+	await expect(fs.mkdir('/docs/readme.md/nested')).rejects.toThrow(
+		'Parent path is not a directory: /docs/readme.md'
+	);
+	expect(await collectPaths(fs.readdir('/docs'))).toEqual([
+		'/docs/readme.md',
+	]);
+});
+
 test('rename moves a file to a new path', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/docs/readme.md', 'guide');
