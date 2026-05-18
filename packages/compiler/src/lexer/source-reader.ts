@@ -73,6 +73,43 @@ export class StringSourceReader implements SourceReader {
 		return char;
 	}
 
+	rewindTo(position: SourcePosition): void {
+		this.pos = position.offset;
+		this.line = position.line;
+		this.column = position.column;
+	}
+
+	readSimpleWord(): string {
+		const start = this.pos;
+		while (this.pos < this.input.length) {
+			const code = this.input.charCodeAt(this.pos);
+			if (
+				code === 32 ||
+				code === 9 ||
+				code === 10 ||
+				code === 124 ||
+				code === 59 ||
+				code === 60 ||
+				code === 62 ||
+				code === 40 ||
+				code === 41 ||
+				code === 34 ||
+				code === 39 ||
+				code === 92 ||
+				code === 42 ||
+				code === 63 ||
+				code === 91 ||
+				code === 35
+			) {
+				break;
+			}
+			this.pos++;
+		}
+		const spelling = this.input.slice(start, this.pos);
+		this.column += spelling.length;
+		return spelling;
+	}
+
 	mark(): void {
 		this.markState = {
 			pos: this.pos,

@@ -16,9 +16,46 @@ import {
 	type TokenWordPartQuote,
 } from './token';
 
-// Pre-compiled regex patterns for performance
-const NUMBER_PATTERN = /^[0-9]+$/;
-const NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_-]*$/;
+function isDigitCode(code: number): boolean {
+	return code >= 48 && code <= 57;
+}
+
+function isNameStartCode(code: number): boolean {
+	return (
+		(code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95
+	);
+}
+
+function isNameContinueCode(code: number): boolean {
+	return isNameStartCode(code) || isDigitCode(code) || code === 45;
+}
+
+function classifySpellingKind(spelling: string): TokenKind {
+	if (spelling.length === 0) {
+		return TokenKind.WORD;
+	}
+
+	let allDigits = true;
+	for (let i = 0; i < spelling.length; i++) {
+		if (!isDigitCode(spelling.charCodeAt(i))) {
+			allDigits = false;
+			break;
+		}
+	}
+	if (allDigits) {
+		return TokenKind.NUMBER;
+	}
+
+	if (!isNameStartCode(spelling.charCodeAt(0))) {
+		return TokenKind.WORD;
+	}
+	for (let i = 1; i < spelling.length; i++) {
+		if (!isNameContinueCode(spelling.charCodeAt(i))) {
+			return TokenKind.WORD;
+		}
+	}
+	return TokenKind.NAME;
+}
 
 /**
  * Result of processing a character in a complex word.
@@ -199,9 +236,49 @@ export class Scanner {
 	}
 
 	private tryFastPath(start: SourcePosition): Token | null {
-		this.source.mark();
-		let spelling = '';
+		if (this.source instanceof StringSourceReader) {
+			const spelling = this.source.readSimpleWord();
+			if (spelling.length === 0) {
+				return null;
+			}
 
+			// Check if we hit a simple delimiter (fast path success)
+			const next = this.source.peek();
+			if (this.isWordBoundary(next)) {
+				return this.classifyWord(
+					spelling,
+					start,
+					createEmptyFlags(),
+					[]
+				);
+			}
+
+			// Hit a special char that needs slow path processing
+			this.source.rewindTo(start);
+			return null;
+		}
+
+		this.source.mark();
+		const spelling = this.readFastPathSpelling();
+
+		if (spelling.length === 0) {
+			this.source.reset();
+			return null;
+		}
+
+		// Check if we hit a simple delimiter (fast path success)
+		const next = this.source.peek();
+		if (this.isWordBoundary(next)) {
+			return this.classifyWord(spelling, start, createEmptyFlags(), []);
+		}
+
+		// Hit a special char that needs slow path processing
+		this.source.reset();
+		return null;
+	}
+
+	private readFastPathSpelling(): string {
+		let spelling = '';
 		while (!this.source.eof) {
 			const c = this.source.peek();
 
@@ -212,27 +289,7 @@ export class Scanner {
 
 			spelling += this.source.advance();
 		}
-
-		if (spelling.length === 0) {
-			this.source.reset();
-			return null;
-		}
-
-		// Check if we hit a simple delimiter (fast path success)
-		const next = this.source.peek();
-		if (this.isWordBoundary(next)) {
-			return this.classifyWord(spelling, start, createEmptyFlags(), [
-				this.createWordPart(
-					'literal',
-					spelling,
-					start.span(this.source.position)
-				),
-			]);
-		}
-
-		// Hit a special char that needs slow path processing
-		this.source.reset();
-		return null;
+		return spelling;
 	}
 
 	private readComplexWord(start: SourcePosition): Token {
@@ -583,37 +640,13 @@ export class Scanner {
 						this.createWordPart(
 							'literal',
 							spelling,
-							start.span(this.source.position),
-							this.defaultWordPartQuote(flags)
+							start.span(this.source.position)
 						),
 					];
 
 		// No keywords in the subset - commands are just words
-
-		// Number
-		if (NUMBER_PATTERN.test(spelling)) {
-			return this.makeToken(
-				TokenKind.NUMBER,
-				spelling,
-				start,
-				flags,
-				normalizedWordParts
-			);
-		}
-
-		// Valid name/identifier
-		if (NAME_PATTERN.test(spelling)) {
-			return this.makeToken(
-				TokenKind.NAME,
-				spelling,
-				start,
-				flags,
-				normalizedWordParts
-			);
-		}
-
 		return this.makeToken(
-			TokenKind.WORD,
+			classifySpellingKind(spelling),
 			spelling,
 			start,
 			flags,
@@ -722,16 +755,6 @@ export class Scanner {
 			return 'single';
 		}
 		if (this.stateCtx.inDoubleQuote) {
-			return 'double';
-		}
-		return 'none';
-	}
-
-	private defaultWordPartQuote(flags: TokenFlagsObject): TokenWordPartQuote {
-		if (flags.singleQuoted) {
-			return 'single';
-		}
-		if (flags.doubleQuoted) {
 			return 'double';
 		}
 		return 'none';
