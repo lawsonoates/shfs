@@ -215,13 +215,7 @@ export class MemoryFS implements FS {
 			const parentPath =
 				normalizedPath.substring(0, normalizedPath.lastIndexOf('/')) ||
 				'/';
-			if (
-				parentPath !== '/' &&
-				!this.directories.has(parentPath) &&
-				!this.files.has(parentPath)
-			) {
-				throw new Error(`No such file or directory: ${parentPath}`);
-			}
+			this.assertDirectoryExists(parentPath);
 			this.addDirectory(normalizedPath, new Date());
 		}
 	}
