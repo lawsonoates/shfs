@@ -2,6 +2,13 @@
 	"$schema": "https://json.schemastore.org/package.json",
 	"private": true,
 	"name": "@shfs/root",
+	"imports": {
+		"#compiler": "./packages/compiler/src/index.ts",
+		"#compiler/*": "./packages/compiler/src/*.ts",
+		"#harness": "./test/harness.ts",
+		"#shfs": "./packages/shfs/src/index.ts",
+		"#shfs/*": "./packages/shfs/src/*.ts"
+	},
 	"catalog": {
 		"@tsconfig/bun": "1.0.10",
 		"@types/bun": "1.3.11",
