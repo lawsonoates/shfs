@@ -10,7 +10,7 @@ const repeat = 45;
 const samples = 9;
 const scripts = [];
 for (let i = 0; i < repeat; i++) {
-  scripts.push(`# file ${i}\nls src packages test | grep \".${i % 7}\" > out-${i}.txt\ncat < input-${i}.txt | sort | uniq >> results.txt\necho prefix-${i}-*.ts (pwd) ${i}\nand find packages -name \"*.ts\" | grep compiler\nor echo fallback-${i}\n`);
+  scripts.push(`# file ${i}\nls src packages test | grep \".${i % 7}\" > out-${i}.txt\ncat < input-${i}.txt | sort | head >> results.txt\necho prefix-${i}-*.ts literal-${i}\nand find packages -name \"*.ts\" | grep compiler\nor echo fallback-${i}\n`);
 }
 const workload = scripts.join("\n");
 

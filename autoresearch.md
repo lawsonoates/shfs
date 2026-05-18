@@ -32,3 +32,5 @@ Optimize the TypeScript fish-subset compiler/parser hot path for repeated parsin
 
 ## What's Been Tried
 - Baseline session setup: benchmark parses and compiles a deterministic generated workload multiple times and reports medians.
+- Initial workload with `(pwd)` command substitutions crashed in `compile()` serialization; benchmark was adjusted to avoid command substitutions so the primary metric targets supported parse+compile behavior.
+- Workload also had to avoid unsupported external commands (for example `uniq`); generated commands are limited to registered compiler handlers.
