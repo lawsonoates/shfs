@@ -141,7 +141,8 @@ export class MemoryFS implements FS {
 		}
 
 		const childPrefix = `${normalizedPath}/`;
-		const hasChildren = (this.directoryChildren.get(normalizedPath)?.size ?? 0) > 0;
+		const hasChildren =
+			(this.directoryChildren.get(normalizedPath)?.size ?? 0) > 0;
 
 		if (!recursive && hasChildren) {
 			throw new Error(`Directory not empty: ${path}`);
@@ -423,9 +424,9 @@ export class MemoryFS implements FS {
 		if (cached) {
 			return cached;
 		}
-		const sorted = Array.from(this.directoryChildren.get(directoryPath) ?? []).sort(
-			(left, right) => left.localeCompare(right)
-		);
+		const sorted = Array.from(
+			this.directoryChildren.get(directoryPath) ?? []
+		).sort((left, right) => left.localeCompare(right));
 		this.sortedDirectoryChildren.set(directoryPath, sorted);
 		return sorted;
 	}
