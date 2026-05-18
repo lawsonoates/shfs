@@ -22,9 +22,7 @@ function isDigitCode(code: number): boolean {
 
 function isNameStartCode(code: number): boolean {
 	return (
-		(code >= 65 && code <= 90) ||
-		(code >= 97 && code <= 122) ||
-		code === 95
+		(code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95
 	);
 }
 
@@ -247,7 +245,12 @@ export class Scanner {
 			// Check if we hit a simple delimiter (fast path success)
 			const next = this.source.peek();
 			if (this.isWordBoundary(next)) {
-				return this.classifyWord(spelling, start, createEmptyFlags(), []);
+				return this.classifyWord(
+					spelling,
+					start,
+					createEmptyFlags(),
+					[]
+				);
 			}
 
 			// Hit a special char that needs slow path processing
@@ -630,13 +633,24 @@ export class Scanner {
 		flags: TokenFlagsObject,
 		wordParts: readonly TokenWordPart[]
 	): Token {
+		const normalizedWordParts =
+			wordParts.length > 0
+				? wordParts
+				: [
+						this.createWordPart(
+							'literal',
+							spelling,
+							start.span(this.source.position)
+						),
+					];
+
 		// No keywords in the subset - commands are just words
 		return this.makeToken(
 			classifySpellingKind(spelling),
 			spelling,
 			start,
 			flags,
-			wordParts
+			normalizedWordParts
 		);
 	}
 
@@ -745,5 +759,4 @@ export class Scanner {
 		}
 		return 'none';
 	}
-
 }

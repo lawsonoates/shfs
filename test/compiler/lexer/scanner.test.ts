@@ -25,6 +25,42 @@ function summarizeWordParts(input: string) {
 	}));
 }
 
+test('scanner emits literal word part metadata for simple fast-path words', () => {
+	expect(summarizeWordParts('foo')).toEqual([
+		{
+			end: 3,
+			escaped: false,
+			kind: 'literal',
+			quote: 'none',
+			start: 0,
+			text: 'foo',
+		},
+	]);
+	expect(summarizeWordParts('123')).toEqual([
+		{
+			end: 3,
+			escaped: false,
+			kind: 'literal',
+			quote: 'none',
+			start: 0,
+			text: '123',
+		},
+	]);
+});
+
+test('scanner emits default literal word part metadata for empty quoted words', () => {
+	expect(summarizeWordParts('""')).toEqual([
+		{
+			end: 2,
+			escaped: false,
+			kind: 'literal',
+			quote: 'none',
+			start: 0,
+			text: '',
+		},
+	]);
+});
+
 test('scanner emits mixed glob words as one token with ordered parts', () => {
 	const token = scanFirstWord('src/*.test.ts');
 
