@@ -7,6 +7,7 @@ export type { FS } from './fs';
 export class MemoryFS implements FS {
 	private readonly files = new Map<string, Uint8Array>();
 	private readonly directories = new Set<string>();
+	private readonly directoryChildren = new Map<string, Set<string>>();
 	private readonly fileMetadata = new Map<
 		string,
 		{ mtime: Date; isDirectory: boolean }
@@ -15,6 +16,7 @@ export class MemoryFS implements FS {
 	constructor() {
 		// Initialize root directory
 		this.directories.add('/');
+		this.directoryChildren.set('/', new Set());
 		this.fileMetadata.set('/', { mtime: new Date(), isDirectory: true });
 	}
 
@@ -29,6 +31,7 @@ export class MemoryFS implements FS {
 				? new TextEncoder().encode(content)
 				: content;
 		this.files.set(normalizedPath, encoded);
+		this.trackChild(normalizedPath);
 		this.fileMetadata.set(normalizedPath, {
 			mtime: new Date(),
 			isDirectory: false,
@@ -64,6 +67,7 @@ export class MemoryFS implements FS {
 		}
 		this.ensureParentDirectories(normalizedPath);
 		this.files.set(normalizedPath, content);
+		this.trackChild(normalizedPath);
 		this.fileMetadata.set(normalizedPath, {
 			mtime: new Date(),
 			isDirectory: false,
@@ -122,6 +126,7 @@ export class MemoryFS implements FS {
 			throw new Error(`File not found: ${path}`);
 		}
 		this.files.delete(normalizedPath);
+		this.untrackChild(normalizedPath);
 		this.fileMetadata.delete(normalizedPath);
 	}
 
@@ -135,16 +140,9 @@ export class MemoryFS implements FS {
 		}
 
 		const childPrefix = `${normalizedPath}/`;
-		const hasChildDirectories = Array.from(this.directories).some(
-			(directory) =>
-				directory !== normalizedPath &&
-				directory.startsWith(childPrefix)
-		);
-		const hasChildFiles = Array.from(this.files.keys()).some((filePath) =>
-			filePath.startsWith(childPrefix)
-		);
+		const hasChildren = (this.directoryChildren.get(normalizedPath)?.size ?? 0) > 0;
 
-		if (!recursive && (hasChildDirectories || hasChildFiles)) {
+		if (!recursive && hasChildren) {
 			throw new Error(`Directory not empty: ${path}`);
 		}
 
@@ -167,8 +165,10 @@ export class MemoryFS implements FS {
 				continue;
 			}
 			this.directories.delete(directory);
+			this.directoryChildren.delete(directory);
 			this.fileMetadata.delete(directory);
 		}
+		this.rebuildDirectoryChildren();
 	}
 
 	async *readdir(path: string): Stream<string> {
@@ -206,11 +206,7 @@ export class MemoryFS implements FS {
 				if (
 					!(this.directories.has(current) || this.files.has(current))
 				) {
-					this.directories.add(current);
-					this.fileMetadata.set(current, {
-						mtime: new Date(),
-						isDirectory: true,
-					});
+					this.addDirectory(current, new Date());
 				}
 			}
 		} else {
@@ -225,11 +221,7 @@ export class MemoryFS implements FS {
 			) {
 				throw new Error(`No such file or directory: ${parentPath}`);
 			}
-			this.directories.add(normalizedPath);
-			this.fileMetadata.set(normalizedPath, {
-				mtime: new Date(),
-				isDirectory: true,
-			});
+			this.addDirectory(normalizedPath, new Date());
 		}
 	}
 
@@ -272,6 +264,18 @@ export class MemoryFS implements FS {
 		);
 	}
 
+	private addDirectory(path: string, mtime: Date): void {
+		this.directories.add(path);
+		if (!this.directoryChildren.has(path)) {
+			this.directoryChildren.set(path, new Set());
+		}
+		this.trackChild(path);
+		this.fileMetadata.set(path, {
+			mtime,
+			isDirectory: true,
+		});
+	}
+
 	private ensureParentDirectories(path: string): void {
 		const parentDirectories = this.getParentDirectories(path);
 		for (const directoryPath of parentDirectories) {
@@ -283,11 +287,7 @@ export class MemoryFS implements FS {
 					`Parent path is not a directory: ${directoryPath}`
 				);
 			}
-			this.directories.add(directoryPath);
-			this.fileMetadata.set(directoryPath, {
-				mtime: new Date(),
-				isDirectory: true,
-			});
+			this.addDirectory(directoryPath, new Date());
 		}
 	}
 
@@ -299,14 +299,17 @@ export class MemoryFS implements FS {
 		}
 
 		this.files.delete(sourcePath);
+		this.untrackChild(sourcePath);
 		this.fileMetadata.delete(sourcePath);
 
 		if (this.files.has(destinationPath)) {
 			this.files.delete(destinationPath);
+			this.untrackChild(destinationPath);
 			this.fileMetadata.delete(destinationPath);
 		}
 
 		this.files.set(destinationPath, content);
+		this.trackChild(destinationPath);
 		this.fileMetadata.set(destinationPath, metadata);
 	}
 
@@ -370,6 +373,7 @@ export class MemoryFS implements FS {
 			this.files.set(nextFilePath, fileEntry.content);
 			this.fileMetadata.set(nextFilePath, fileEntry.metadata);
 		}
+		this.rebuildDirectoryChildren();
 	}
 
 	private assertDirectoryExists(directoryPath: string): void {
@@ -420,37 +424,42 @@ export class MemoryFS implements FS {
 	}
 
 	private listImmediateChildren(directoryPath: string): string[] {
-		const directoryPrefix =
-			directoryPath === '/' ? '/' : `${directoryPath}/`;
-		const children = new Set<string>();
-		const allPaths = [
-			...Array.from(this.directories.values()),
-			...Array.from(this.files.keys()),
-		];
-		for (const candidatePath of allPaths) {
-			if (candidatePath === directoryPath) {
-				continue;
-			}
-			if (!candidatePath.startsWith(directoryPrefix)) {
-				continue;
-			}
-			const relativePath = candidatePath.slice(directoryPrefix.length);
-			if (relativePath === '') {
-				continue;
-			}
-			const [firstSegment] = relativePath.split('/');
-			if (!firstSegment) {
-				continue;
-			}
-			const childPath =
-				directoryPath === '/'
-					? `/${firstSegment}`
-					: `${directoryPath}/${firstSegment}`;
-			children.add(childPath);
-		}
-		return Array.from(children).sort((left, right) =>
-			left.localeCompare(right)
+		return Array.from(this.directoryChildren.get(directoryPath) ?? []).sort(
+			(left, right) => left.localeCompare(right)
 		);
+	}
+
+	private rebuildDirectoryChildren(): void {
+		this.directoryChildren.clear();
+		for (const directory of this.directories) {
+			this.directoryChildren.set(directory, new Set());
+		}
+		for (const directory of this.directories) {
+			this.trackChild(directory);
+		}
+		for (const filePath of this.files.keys()) {
+			this.trackChild(filePath);
+		}
+	}
+
+	private trackChild(path: string): void {
+		if (path === '/') {
+			return;
+		}
+		const parentPath = this.getParentPath(path);
+		let children = this.directoryChildren.get(parentPath);
+		if (!children) {
+			children = new Set<string>();
+			this.directoryChildren.set(parentPath, children);
+		}
+		children.add(path);
+	}
+
+	private untrackChild(path: string): void {
+		if (path === '/') {
+			return;
+		}
+		this.directoryChildren.get(this.getParentPath(path))?.delete(path);
 	}
 
 	private replacePathPrefix(
