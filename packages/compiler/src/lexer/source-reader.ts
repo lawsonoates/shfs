@@ -102,27 +102,26 @@ export class StringSourceReader implements SourceReader {
 	readSimpleWord(): SimpleWordRead {
 		const start = this.pos;
 		let kind: TokenKindValue = TokenKind.NUMBER;
-		while (this.pos < this.input.length) {
+		readChars: while (this.pos < this.input.length) {
 			const code = this.input.charCodeAt(this.pos);
-			if (
-				code === 32 ||
-				code === 9 ||
-				code === 10 ||
-				code === 124 ||
-				code === 59 ||
-				code === 60 ||
-				code === 62 ||
-				code === 40 ||
-				code === 41 ||
-				code === 34 ||
-				code === 39 ||
-				code === 92 ||
-				code === 42 ||
-				code === 63 ||
-				code === 91 ||
-				code === 35
-			) {
-				break;
+			switch (code) {
+				case 9:
+				case 10:
+				case 32:
+				case 34:
+				case 35:
+				case 39:
+				case 40:
+				case 41:
+				case 42:
+				case 59:
+				case 60:
+				case 62:
+				case 63:
+				case 91:
+				case 92:
+				case 124:
+					break readChars;
 			}
 
 			if (kind !== TokenKind.WORD) {
