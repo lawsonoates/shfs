@@ -1,5 +1,4 @@
 import { LexerState, StateContext } from './context';
-import { SINGLE_CHAR_OPS, SPECIAL_CHARS, WORD_BOUNDARY_CHARS } from './operators';
 import { type SourcePosition, SourceSpan } from './position';
 import { type SourceReader, StringSourceReader } from './source-reader';
 import {
@@ -50,6 +49,62 @@ function classifySpellingKind(spelling: string): TokenKind {
 		}
 	}
 	return TokenKind.NAME;
+}
+
+function singleCharOperatorKind(c: string): TokenKind | null {
+	switch (c) {
+		case '|':
+			return TokenKind.PIPE;
+		case ';':
+			return TokenKind.SEMICOLON;
+		case '<':
+			return TokenKind.LESS;
+		case '>':
+			return TokenKind.GREAT;
+		default:
+			return null;
+	}
+}
+
+function isSpecialChar(c: string): boolean {
+	switch (c) {
+		case ' ':
+		case '\t':
+		case '\n':
+		case '|':
+		case ';':
+		case '<':
+		case '>':
+		case '(':
+		case ')':
+		case '"':
+		case "'":
+		case '\\':
+		case '*':
+		case '?':
+		case '[':
+		case '#':
+			return true;
+		default:
+			return false;
+	}
+}
+
+function isWordBoundaryChar(c: string): boolean {
+	switch (c) {
+		case ' ':
+		case '\t':
+		case '\n':
+		case '|':
+		case ';':
+		case '<':
+		case '>':
+		case ')':
+		case '\0':
+			return true;
+		default:
+			return false;
+	}
 }
 
 /**
@@ -172,8 +227,8 @@ export class Scanner {
 		}
 
 		// Single-char operators
-		const singleOp = SINGLE_CHAR_OPS.get(c0);
-		if (singleOp !== undefined) {
+		const singleOp = singleCharOperatorKind(c0);
+		if (singleOp !== null) {
 			this.source.advance();
 			return this.makeToken(singleOp, c0, start);
 		}
@@ -654,11 +709,11 @@ export class Scanner {
 	}
 
 	private isSpecialChar(c: string): boolean {
-		return SPECIAL_CHARS.has(c);
+		return isSpecialChar(c);
 	}
 
 	private isWordBoundary(c: string): boolean {
-		return WORD_BOUNDARY_CHARS.has(c) || c === '\0';
+		return isWordBoundaryChar(c);
 	}
 
 	private makeToken(
