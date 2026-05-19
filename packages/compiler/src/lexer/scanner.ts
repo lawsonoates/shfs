@@ -1,10 +1,5 @@
 import { LexerState, StateContext } from './context';
-import {
-	OPERATORS,
-	SINGLE_CHAR_OPS,
-	SPECIAL_CHARS,
-	WORD_BOUNDARY_CHARS,
-} from './operators';
+import { SINGLE_CHAR_OPS, SPECIAL_CHARS, WORD_BOUNDARY_CHARS } from './operators';
 import { type SourcePosition, SourceSpan } from './position';
 import { type SourceReader, StringSourceReader } from './source-reader';
 import {
@@ -176,12 +171,6 @@ export class Scanner {
 			return this.makeToken(TokenKind.NEWLINE, '\n', start);
 		}
 
-		// Multi-char operators (longest match first)
-		const opToken = this.tryMatchOperator(start);
-		if (opToken) {
-			return opToken;
-		}
-
 		// Single-char operators
 		const singleOp = SINGLE_CHAR_OPS.get(c0);
 		if (singleOp !== undefined) {
@@ -201,23 +190,6 @@ export class Scanner {
 
 		// Word (handles quotes, escapes, globs, etc.)
 		return this.readWord(start);
-	}
-
-	private tryMatchOperator(start: SourcePosition): Token | null {
-		// Build lookahead string (max 2 chars)
-		const chars = this.source.peek() + this.source.peek(1);
-
-		for (const op of OPERATORS) {
-			if (chars.startsWith(op.pattern)) {
-				// Consume the operator
-				for (const _ of op.pattern) {
-					this.source.advance();
-				}
-				return this.makeToken(op.kind, op.pattern, start);
-			}
-		}
-
-		return null;
 	}
 
 	// ─────────────────────────────────────────────────────────
