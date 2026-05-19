@@ -1,4 +1,24 @@
 import { SourcePosition } from './position';
+import { TokenKind, type TokenKind as TokenKindValue } from './token';
+
+export interface SimpleWordRead {
+	kind: TokenKindValue;
+	spelling: string;
+}
+
+function isDigitCode(code: number): boolean {
+	return code >= 48 && code <= 57;
+}
+
+function isNameStartCode(code: number): boolean {
+	return (
+		(code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95
+	);
+}
+
+function isNameContinueCode(code: number): boolean {
+	return isNameStartCode(code) || isDigitCode(code) || code === 45;
+}
 
 /**
  * Interface for reading source code character by character.
@@ -79,8 +99,9 @@ export class StringSourceReader implements SourceReader {
 		this.column = position.column;
 	}
 
-	readSimpleWord(): string {
+	readSimpleWord(): SimpleWordRead {
 		const start = this.pos;
+		let kind: TokenKindValue = TokenKind.NUMBER;
 		while (this.pos < this.input.length) {
 			const code = this.input.charCodeAt(this.pos);
 			if (
@@ -103,11 +124,26 @@ export class StringSourceReader implements SourceReader {
 			) {
 				break;
 			}
+
+			if (kind !== TokenKind.WORD) {
+				const offset = this.pos - start;
+				if (kind === TokenKind.NUMBER) {
+					if (!isDigitCode(code)) {
+						kind = offset === 0 && isNameStartCode(code) ? TokenKind.NAME : TokenKind.WORD;
+					}
+				} else if (!isNameContinueCode(code)) {
+					kind = TokenKind.WORD;
+				}
+			}
 			this.pos++;
 		}
+
 		const spelling = this.input.slice(start, this.pos);
 		this.column += spelling.length;
-		return spelling;
+		return {
+			kind: spelling.length === 0 ? TokenKind.WORD : kind,
+			spelling,
+		};
 	}
 
 	mark(): void {

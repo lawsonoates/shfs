@@ -264,19 +264,27 @@ export class Scanner {
 
 	private tryFastPath(start: SourcePosition): Token | null {
 		if (this.source instanceof StringSourceReader) {
-			const spelling = this.source.readSimpleWord();
-			if (spelling.length === 0) {
+			const simpleWord = this.source.readSimpleWord();
+			if (simpleWord.spelling.length === 0) {
 				return null;
 			}
 
 			// Check if we hit a simple delimiter (fast path success)
 			const next = this.source.peek();
 			if (this.isWordBoundary(next)) {
-				return this.classifyWord(
-					spelling,
-					start,
+				const span = start.span(this.source.position);
+				return new Token(
+					simpleWord.kind,
+					simpleWord.spelling,
+					span,
 					createEmptyFlags(),
-					[]
+					[
+						this.createWordPart(
+							'literal',
+							simpleWord.spelling,
+							span
+						),
+					]
 				);
 			}
 
