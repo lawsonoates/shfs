@@ -1,10 +1,4 @@
 import { LexerState, StateContext } from './context';
-import {
-	OPERATORS,
-	SINGLE_CHAR_OPS,
-	SPECIAL_CHARS,
-	WORD_BOUNDARY_CHARS,
-} from './operators';
 import { type SourcePosition, SourceSpan } from './position';
 import { type SourceReader, StringSourceReader } from './source-reader';
 import {
@@ -55,6 +49,62 @@ function classifySpellingKind(spelling: string): TokenKind {
 		}
 	}
 	return TokenKind.NAME;
+}
+
+function singleCharOperatorKind(c: string): TokenKind | null {
+	switch (c) {
+		case '|':
+			return TokenKind.PIPE;
+		case ';':
+			return TokenKind.SEMICOLON;
+		case '<':
+			return TokenKind.LESS;
+		case '>':
+			return TokenKind.GREAT;
+		default:
+			return null;
+	}
+}
+
+function isSpecialChar(c: string): boolean {
+	switch (c) {
+		case ' ':
+		case '\t':
+		case '\n':
+		case '|':
+		case ';':
+		case '<':
+		case '>':
+		case '(':
+		case ')':
+		case '"':
+		case "'":
+		case '\\':
+		case '*':
+		case '?':
+		case '[':
+		case '#':
+			return true;
+		default:
+			return false;
+	}
+}
+
+function isWordBoundaryChar(c: string): boolean {
+	switch (c) {
+		case ' ':
+		case '\t':
+		case '\n':
+		case '|':
+		case ';':
+		case '<':
+		case '>':
+		case ')':
+		case '\0':
+			return true;
+		default:
+			return false;
+	}
 }
 
 /**
@@ -176,15 +226,9 @@ export class Scanner {
 			return this.makeToken(TokenKind.NEWLINE, '\n', start);
 		}
 
-		// Multi-char operators (longest match first)
-		const opToken = this.tryMatchOperator(start);
-		if (opToken) {
-			return opToken;
-		}
-
 		// Single-char operators
-		const singleOp = SINGLE_CHAR_OPS.get(c0);
-		if (singleOp !== undefined) {
+		const singleOp = singleCharOperatorKind(c0);
+		if (singleOp !== null) {
 			this.source.advance();
 			return this.makeToken(singleOp, c0, start);
 		}
@@ -201,23 +245,6 @@ export class Scanner {
 
 		// Word (handles quotes, escapes, globs, etc.)
 		return this.readWord(start);
-	}
-
-	private tryMatchOperator(start: SourcePosition): Token | null {
-		// Build lookahead string (max 2 chars)
-		const chars = this.source.peek() + this.source.peek(1);
-
-		for (const op of OPERATORS) {
-			if (chars.startsWith(op.pattern)) {
-				// Consume the operator
-				for (const _ of op.pattern) {
-					this.source.advance();
-				}
-				return this.makeToken(op.kind, op.pattern, start);
-			}
-		}
-
-		return null;
 	}
 
 	// ─────────────────────────────────────────────────────────
@@ -237,19 +264,27 @@ export class Scanner {
 
 	private tryFastPath(start: SourcePosition): Token | null {
 		if (this.source instanceof StringSourceReader) {
-			const spelling = this.source.readSimpleWord();
-			if (spelling.length === 0) {
+			const simpleWord = this.source.readSimpleWord();
+			if (simpleWord.spelling.length === 0) {
 				return null;
 			}
 
 			// Check if we hit a simple delimiter (fast path success)
 			const next = this.source.peek();
 			if (this.isWordBoundary(next)) {
-				return this.classifyWord(
-					spelling,
-					start,
+				const span = start.span(this.source.position);
+				return new Token(
+					simpleWord.kind,
+					simpleWord.spelling,
+					span,
 					createEmptyFlags(),
-					[]
+					[
+						this.createWordPart(
+							'literal',
+							simpleWord.spelling,
+							span
+						),
+					]
 				);
 			}
 
@@ -633,22 +668,17 @@ export class Scanner {
 		flags: TokenFlagsObject,
 		wordParts: readonly TokenWordPart[]
 	): Token {
+		const span = start.span(this.source.position);
 		const normalizedWordParts =
 			wordParts.length > 0
 				? wordParts
-				: [
-						this.createWordPart(
-							'literal',
-							spelling,
-							start.span(this.source.position)
-						),
-					];
+				: [this.createWordPart('literal', spelling, span)];
 
 		// No keywords in the subset - commands are just words
-		return this.makeToken(
+		return new Token(
 			classifySpellingKind(spelling),
 			spelling,
-			start,
+			span,
 			flags,
 			normalizedWordParts
 		);
@@ -682,11 +712,11 @@ export class Scanner {
 	}
 
 	private isSpecialChar(c: string): boolean {
-		return SPECIAL_CHARS.has(c);
+		return isSpecialChar(c);
 	}
 
 	private isWordBoundary(c: string): boolean {
-		return WORD_BOUNDARY_CHARS.has(c) || c === '\0';
+		return isWordBoundaryChar(c);
 	}
 
 	private makeToken(
