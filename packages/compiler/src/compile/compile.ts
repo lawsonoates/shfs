@@ -276,9 +276,13 @@ class ProgramCompiler {
 	 * Used for storing command substitution content.
 	 */
 	private serializeProgram(program: Program): string {
-		const statements = program.statements.map((statement) =>
-			this.serializePipeline(statement.pipeline)
-		);
+		const statements = new Array<string>(program.statements.length);
+		for (let index = 0; index < program.statements.length; index++) {
+			const statement = program.statements[index];
+			if (statement) {
+				statements[index] = this.serializePipeline(statement.pipeline);
+			}
+		}
 		return statements.join('; ');
 	}
 
@@ -377,7 +381,11 @@ class ProgramCompiler {
 	}
 
 	private serializeWord(word: Word): string {
-		return word.parts.map((part) => this.serializeWordPart(part)).join('');
+		let value = '';
+		for (const part of word.parts) {
+			value += this.serializeWordPart(part);
+		}
+		return value;
 	}
 
 	private serializeWordPart(part: WordPart): string {
