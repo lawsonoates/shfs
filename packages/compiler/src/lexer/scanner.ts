@@ -660,22 +660,17 @@ export class Scanner {
 		flags: TokenFlagsObject,
 		wordParts: readonly TokenWordPart[]
 	): Token {
+		const span = start.span(this.source.position);
 		const normalizedWordParts =
 			wordParts.length > 0
 				? wordParts
-				: [
-						this.createWordPart(
-							'literal',
-							spelling,
-							start.span(this.source.position)
-						),
-					];
+				: [this.createWordPart('literal', spelling, span)];
 
 		// No keywords in the subset - commands are just words
-		return this.makeToken(
+		return new Token(
 			classifySpellingKind(spelling),
 			spelling,
-			start,
+			span,
 			flags,
 			normalizedWordParts
 		);
