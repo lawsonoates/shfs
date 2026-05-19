@@ -176,33 +176,29 @@ class ProgramCompiler {
 			return literal('');
 		}
 
-		const expandedParts = word.parts.map((part) =>
-			this.expandWordPart(part)
-		);
-		if (expandedParts.length === 1) {
-			const firstPart = expandedParts[0];
-			if (!firstPart) {
-				return literal('');
+		if (word.parts.length === 1) {
+			const firstPart = word.parts[0];
+			return firstPart ? this.expandWordPart(firstPart) : literal('');
+		}
+
+		const expandedParts = new Array<ExpandedWordPart>(word.parts.length);
+		let allLiterals = true;
+		let literalValue = '';
+		for (let index = 0; index < word.parts.length; index++) {
+			const part = word.parts[index];
+			if (!part) {
+				continue;
 			}
-			return firstPart;
+			const expandedPart = this.expandWordPart(part);
+			expandedParts[index] = expandedPart;
+			if (expandedPart.kind === 'literal') {
+				literalValue += expandedPart.value;
+			} else {
+				allLiterals = false;
+			}
 		}
 
-		const allLiterals = expandedParts.every(
-			(part) => part.kind === 'literal'
-		);
-		if (allLiterals) {
-			const value = expandedParts
-				.map((part) => {
-					if (part.kind !== 'literal') {
-						throw new Error('Expected literal word part');
-					}
-					return part.value;
-				})
-				.join('');
-			return literal(value);
-		}
-
-		return compound(expandedParts);
+		return allLiterals ? literal(literalValue) : compound(expandedParts);
 	}
 
 	/**
