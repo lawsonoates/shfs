@@ -61,11 +61,14 @@ class ProgramCompiler {
 	 * Compile a Program to a ScriptIR.
 	 */
 	compileProgram(node: Program): ScriptIR {
-		return {
-			statements: node.statements.map((statement) =>
-				this.compileStatement(statement)
-			),
-		};
+		const statements = new Array<ScriptStatementIR>(node.statements.length);
+		for (let index = 0; index < node.statements.length; index++) {
+			const statement = node.statements[index];
+			if (statement) {
+				statements[index] = this.compileStatement(statement);
+			}
+		}
+		return { statements };
 	}
 
 	/**
@@ -82,9 +85,13 @@ class ProgramCompiler {
 	 * Compile a Pipeline to a PipelineIR.
 	 */
 	compilePipeline(node: Pipeline): PipelineIR {
-		const commands: SimpleCommandIR[] = node.commands.map((cmd) =>
-			this.compileSimpleCommand(cmd)
-		);
+		const commands = new Array<SimpleCommandIR>(node.commands.length);
+		for (let index = 0; index < node.commands.length; index++) {
+			const command = node.commands[index];
+			if (command) {
+				commands[index] = this.compileSimpleCommand(command);
+			}
+		}
 
 		if (commands.length === 0) {
 			throw new Error('Pipeline must contain at least one command');
@@ -98,9 +105,13 @@ class ProgramCompiler {
 		const source = this.determineSource(firstCmd);
 
 		// Compile each command to a step
-		const steps: StepIR[] = commands.map((cmd) =>
-			this.compileCommandToStep(cmd)
-		);
+		const steps = new Array<StepIR>(commands.length);
+		for (let index = 0; index < commands.length; index++) {
+			const command = commands[index];
+			if (command) {
+				steps[index] = this.compileCommandToStep(command);
+			}
+		}
 
 		return {
 			source,
@@ -113,12 +124,26 @@ class ProgramCompiler {
 	 * Compile a SimpleCommand to a SimpleCommandIR.
 	 */
 	compileSimpleCommand(node: SimpleCommand): SimpleCommandIR {
+		const args = new Array<ExpandedWord>(node.args.length);
+		for (let index = 0; index < node.args.length; index++) {
+			const arg = node.args[index];
+			if (arg) {
+				args[index] = this.expandWord(arg);
+			}
+		}
+
+		const redirections = new Array<RedirectionIR>(node.redirections.length);
+		for (let index = 0; index < node.redirections.length; index++) {
+			const redirection = node.redirections[index];
+			if (redirection) {
+				redirections[index] = this.compileRedirection(redirection);
+			}
+		}
+
 		return {
 			name: this.expandWord(node.name),
-			args: node.args.map((arg) => this.expandWord(arg)),
-			redirections: node.redirections.map((r) =>
-				this.compileRedirection(r)
-			),
+			args,
+			redirections,
 		};
 	}
 
