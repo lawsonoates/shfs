@@ -71,6 +71,33 @@ test('2> redirects an expansion-failure diagnostic to a file, not shell stderr',
 	);
 });
 
+test('2> redirects stream collection failures to a file, not shell stderr', async () => {
+	await run('mkdir -p /w');
+	await run('cd /w');
+
+	const result = await run('cat /w/missing.txt 2> /w/stream-err.txt');
+
+	expect(result.stdout.toString()).toBe('');
+	expect(result.stderr.toString()).toBe('');
+	expect(result.exitCode).toBe(1);
+
+	const errFile = await run('cat /w/stream-err.txt');
+	expect(errFile.stdout.toString()).toContain(
+		'File not found: /w/missing.txt'
+	);
+});
+
+test('2>| pipes stream collection failures to the next command', async () => {
+	await run('mkdir -p /w');
+	await run('cd /w');
+
+	const result = await run('ls /w/missing 2>| wc -l');
+
+	expect(result.stdout.toString()).toBe('1');
+	expect(result.stderr.toString()).toBe('');
+	expect(result.exitCode).toBe(1);
+});
+
 test('reading a missing file never throws from .nothrow()', async () => {
 	await run('mkdir -p /w');
 	await run('cd /w');

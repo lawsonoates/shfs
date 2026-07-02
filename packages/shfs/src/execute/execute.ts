@@ -217,10 +217,6 @@ async function* runPipeline(
 	}
 }
 
-/**
- * Run an effect-backed step. Returns null when the step failed and the
- * failure has already been reported to the pipeline context.
- */
 async function executeActionStep(params: {
 	context: NormalizedExecuteContext;
 	fs: FS;
@@ -230,24 +226,22 @@ async function executeActionStep(params: {
 }): Promise<ExecutedStepResult | null> {
 	const { context, fs, plan, shouldPreserveStatus, step } = params;
 	const childContext = createChildContext(context);
-	const ran = await runOrReport(
+	await runOrReport(
 		CommandRegistry.executeStep({
 			step,
 			fs,
 			context: childContext,
 		}),
-		context
+		childContext
 	);
-	if (!ran.ok) {
-		return null;
-	}
+	const stderrLines = childContext.stderr.snapshot();
 	propagateChildContext(childContext, context);
 	const routed = await routeStepOutput({
 		context,
 		fs,
 		hasNextStep: false,
 		plan,
-		stderrLines: childContext.stderr.snapshot(),
+		stderrLines,
 		stdoutRecords: [],
 	});
 	return {
@@ -256,10 +250,6 @@ async function executeActionStep(params: {
 	};
 }
 
-/**
- * Run a stream-backed step. Returns null when the step failed and the
- * failure has already been reported to the pipeline context.
- */
 async function executeStreamStep(params: {
 	context: NormalizedExecuteContext;
 	fs: FS;
@@ -292,12 +282,9 @@ async function executeStreamStep(params: {
 	});
 	const collected = await runOrReport(
 		collectRecordStream(stepOutput),
-		context
+		childContext
 	);
-	if (!collected.ok) {
-		return null;
-	}
-	const stdoutRecords = collected.value;
+	const stdoutRecords = collected.ok ? collected.value : [];
 	const stderrLines = childContext.stderr.snapshot();
 	propagateChildContext(childContext, context);
 	const routed = await routeStepOutput({
