@@ -6,7 +6,6 @@
  * - Pipelines (command | command | ...)
  */
 
-import { Effect } from 'effect';
 import { SourceSpan } from '../lexer/position';
 import { TokenKind } from '../lexer/token';
 import {
@@ -21,7 +20,6 @@ import {
 } from './ast';
 import type { CommandParser } from './command';
 import type { Parser } from './parser';
-import type { ParseSyntaxError } from './syntax-error';
 
 /**
  * Parser for statements and pipelines.
@@ -41,75 +39,60 @@ export class StatementParser {
 	 * Parse a full script program.
 	 */
 	parseScript(): Program {
-		return Effect.runSync(this.parseScriptEffect());
-	}
+		const startPos = this.parser.currentToken.span.start;
+		const statements: Statement[] = [];
 
-	parseScriptEffect(): Effect.Effect<Program, ParseSyntaxError> {
-		const statementParser = this;
-		return Effect.gen(function* () {
-			const startPos = statementParser.parser.currentToken.span.start;
-			const statements: Statement[] = [];
+		// Ignore leading separators/comments and allow empty lines.
+		this.consumeSeparatorsAndComments();
 
-			// Ignore leading separators/comments and allow empty lines.
-			statementParser.consumeSeparatorsAndComments();
-
-			while (statementParser.parser.currentToken.kind !== TokenKind.EOF) {
-				const statement = yield* statementParser.parseStatementEffect();
-				if (!statement) {
-					return yield* statementParser.parser.syntacticErrorEffect(
-						'Expected command',
-						'command'
-					);
-				}
-
-				statements.push(statement);
-
-				const sawSeparator =
-					statementParser.consumeSeparatorsAndComments();
-				if (
-					(statementParser.parser.currentToken.kind as TokenKind) !==
-						TokenKind.EOF &&
-					!sawSeparator
-				) {
-					return yield* statementParser.parser.syntacticErrorEffect(
-						'Expected statement separator',
-						'newline or ;'
-					);
-				}
+		while (this.parser.currentToken.kind !== TokenKind.EOF) {
+			const statement = this.parseStatement();
+			if (!statement) {
+				return this.parser.syntacticError(
+					'Expected command',
+					'command'
+				);
 			}
 
-			const endPos = statementParser.parser.previousTokenPosition;
-			return new Program(new SourceSpan(startPos, endPos), statements);
-		});
+			statements.push(statement);
+
+			const sawSeparator = this.consumeSeparatorsAndComments();
+			if (
+				(this.parser.currentToken.kind as TokenKind) !==
+					TokenKind.EOF &&
+				!sawSeparator
+			) {
+				return this.parser.syntacticError(
+					'Expected statement separator',
+					'newline or ;'
+				);
+			}
+		}
+
+		const endPos = this.parser.previousTokenPosition;
+		return new Program(new SourceSpan(startPos, endPos), statements);
 	}
 
 	/**
 	 * Parse a single statement.
 	 */
 	parseStatement(): Statement | null {
-		return Effect.runSync(this.parseStatementEffect());
-	}
+		let chainMode: StatementChainMode = 'always';
+		const currentToken = this.parser.currentToken;
+		if (
+			!currentToken.isQuoted &&
+			this.isChainKeyword(currentToken.spelling)
+		) {
+			chainMode = currentToken.spelling === 'and' ? 'and' : 'or';
+			this.parser.advance();
+		}
 
-	parseStatementEffect(): Effect.Effect<Statement | null, ParseSyntaxError> {
-		const statementParser = this;
-		return Effect.gen(function* () {
-			let chainMode: StatementChainMode = 'always';
-			const currentToken = statementParser.parser.currentToken;
-			if (
-				!currentToken.isQuoted &&
-				statementParser.isChainKeyword(currentToken.spelling)
-			) {
-				chainMode = currentToken.spelling === 'and' ? 'and' : 'or';
-				statementParser.parser.advance();
-			}
+		const pipeline = this.parsePipeline();
+		if (!pipeline) {
+			return null;
+		}
 
-			const pipeline = yield* statementParser.parsePipelineEffect();
-			if (!pipeline) {
-				return null;
-			}
-
-			return new Statement(pipeline.span, pipeline, chainMode);
-		});
+		return new Statement(pipeline.span, pipeline, chainMode);
 	}
 
 	/**
@@ -119,73 +102,60 @@ export class StatementParser {
 	 *   pipeline ::= command ('|' command)*
 	 */
 	parsePipeline(): Pipeline | null {
-		return Effect.runSync(this.parsePipelineEffect());
-	}
+		const startPos = this.parser.currentToken.span.start;
 
-	parsePipelineEffect(): Effect.Effect<Pipeline | null, ParseSyntaxError> {
-		const statementParser = this;
-		return Effect.gen(function* () {
-			const startPos = statementParser.parser.currentToken.span.start;
+		// Parse first command
+		const firstCommand = this.commandParser.parseCommand();
+		if (!firstCommand) {
+			return null;
+		}
 
-			// Parse first command
-			const firstCommand =
-				yield* statementParser.commandParser.parseCommandEffect();
-			if (!firstCommand) {
-				return null;
+		const commands: SimpleCommand[] = [firstCommand];
+
+		// Parse remaining commands in pipeline
+		while (this.parser.currentToken.kind === TokenKind.PIPE) {
+			const pipeToken = this.parser.currentToken;
+			const previousCommand = commands.at(-1);
+			if (previousCommand) {
+				const rewrittenPreviousCommand = this.rewriteStderrPipeCommand(
+					previousCommand,
+					pipeToken.span.start.offset,
+					pipeToken.span
+				);
+				if (rewrittenPreviousCommand !== previousCommand) {
+					commands[commands.length - 1] = rewrittenPreviousCommand;
+				}
 			}
+			this.parser.advance(); // consume |
 
-			const commands: SimpleCommand[] = [firstCommand];
-
-			// Parse remaining commands in pipeline
-			while (
-				statementParser.parser.currentToken.kind === TokenKind.PIPE
+			// Skip any newlines after pipe (line continuation)
+			this.skipNewlines();
+			const tokenAfterPipe = this.parser.currentToken;
+			if (
+				tokenAfterPipe.kind === TokenKind.WORD &&
+				tokenAfterPipe.spelling === '&'
 			) {
-				const pipeToken = statementParser.parser.currentToken;
-				const previousCommand = commands.at(-1);
-				if (previousCommand) {
-					const rewrittenPreviousCommand =
-						statementParser.rewriteStderrPipeCommand(
-							previousCommand,
-							pipeToken.span.start.offset,
-							pipeToken.span
-						);
-					if (rewrittenPreviousCommand !== previousCommand) {
-						commands[commands.length - 1] =
-							rewrittenPreviousCommand;
-					}
-				}
-				statementParser.parser.advance(); // consume |
-
-				// Skip any newlines after pipe (line continuation)
-				statementParser.skipNewlines();
-				const tokenAfterPipe = statementParser.parser.currentToken;
-				if (
-					tokenAfterPipe.kind === TokenKind.WORD &&
-					tokenAfterPipe.spelling === '&'
-				) {
-					return yield* statementParser.parser.syntacticErrorEffect(
-						'Invalid fish pipeline operator',
-						'command after | (|& is unsupported; use &|)'
-					);
-				}
-
-				const command =
-					yield* statementParser.commandParser.parseCommandEffect();
-				if (!command) {
-					return yield* statementParser.parser.syntacticErrorEffect(
-						'Expected command after |',
-						'command'
-					);
-				}
-
-				commands.push(command);
+				return this.parser.syntacticError(
+					'Invalid fish pipeline operator',
+					'command after | (|& is unsupported; use &|)'
+				);
 			}
 
-			const endPos = statementParser.parser.previousTokenPosition;
-			const span = new SourceSpan(startPos, endPos);
+			const command = this.commandParser.parseCommand();
+			if (!command) {
+				return this.parser.syntacticError(
+					'Expected command after |',
+					'command'
+				);
+			}
 
-			return new Pipeline(span, commands);
-		});
+			commands.push(command);
+		}
+
+		const endPos = this.parser.previousTokenPosition;
+		const span = new SourceSpan(startPos, endPos);
+
+		return new Pipeline(span, commands);
 	}
 
 	/**

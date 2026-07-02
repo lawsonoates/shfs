@@ -1,7 +1,5 @@
-import { Effect } from 'effect';
 import { argParseError } from './diagnostics';
 import type {
-	ArgParseError,
 	ConsumedValueIndices,
 	ConsumedValueSources,
 	FlagEntry,
@@ -86,62 +84,52 @@ export function setValue(
 	value: string,
 	valueIndex: number,
 	valueSource: ParsedValueSource
-): Effect.Effect<void, ArgParseError> {
-	return Effect.gen(function* () {
-		const { canonical, def } = entry;
-		const recordValueUsage = () => {
-			recordConsumedValueIndex(
-				consumedValueIndices,
-				canonical,
-				valueIndex
-			);
-			recordConsumedValueSource(
-				consumedValueSources,
-				canonical,
-				valueSource
-			);
-			recordFlagOccurrence(
-				flagOccurrenceOrder,
-				canonical,
-				orderState.nextFlagOrder
-			);
-			orderState.nextFlagOrder += 1;
-		};
-
-		const existing = out[canonical];
-		if (existing === undefined) {
-			out[canonical] = value;
-			recordValueUsage();
-			return;
-		}
-
-		// Repeated value flags must be explicit.
-		if (!def.multiple) {
-			return yield* argParseError(
-				'duplicate-flag',
-				`Duplicate flag "${canonical}". If it is intended to repeat, set { multiple: true } in its definition.`
-			);
-		}
-
-		if (Array.isArray(existing)) {
-			existing.push(value);
-			recordValueUsage();
-			return;
-		}
-
-		// existing is string|boolean; value-flags should only ever store string here
-		if (typeof existing === 'string') {
-			out[canonical] = [existing, value];
-			recordValueUsage();
-			return;
-		}
-
-		// Should be unreachable unless user mixes boolean/value definitions for the same canonical key
-		return yield* argParseError(
-			'invalid-state',
-			`Invalid state for flag "${canonical}".`
+): void {
+	const { canonical, def } = entry;
+	const recordValueUsage = () => {
+		recordConsumedValueIndex(consumedValueIndices, canonical, valueIndex);
+		recordConsumedValueSource(consumedValueSources, canonical, valueSource);
+		recordFlagOccurrence(
+			flagOccurrenceOrder,
+			canonical,
+			orderState.nextFlagOrder
 		);
-	});
+		orderState.nextFlagOrder += 1;
+	};
+
+	const existing = out[canonical];
+	if (existing === undefined) {
+		out[canonical] = value;
+		recordValueUsage();
+		return;
+	}
+
+	// Repeated value flags must be explicit.
+	if (!def.multiple) {
+		throw argParseError(
+			'duplicate-flag',
+			`Duplicate flag "${canonical}". If it is intended to repeat, set { multiple: true } in its definition.`
+		);
+	}
+
+	if (Array.isArray(existing)) {
+		existing.push(value);
+		recordValueUsage();
+		return;
+	}
+
+	// existing is string|boolean; value-flags should only ever store string here
+	if (typeof existing === 'string') {
+		out[canonical] = [existing, value];
+		recordValueUsage();
+		return;
+	}
+
+	// Should be unreachable unless user mixes boolean/value definitions for the same canonical key
+	throw argParseError(
+		'invalid-state',
+		`Invalid state for flag "${canonical}".`
+	);
 }
 
 function recordConsumedValueIndex(

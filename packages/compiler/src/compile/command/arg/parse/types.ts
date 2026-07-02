@@ -1,4 +1,4 @@
-import { type Effect, Schema } from 'effect';
+import { Schema } from 'effect';
 import type { Flag } from '../flag';
 
 export type FlagDef = Flag & {
@@ -138,4 +138,4 @@ export type TokenParser = (
 	consumedValueSources: ConsumedValueSources,
 	flagOccurrenceOrder: FlagOccurrenceOrder,
 	orderState: ParseOrderState
-) => Effect.Effect<number, ArgParseError>;
+) => number;

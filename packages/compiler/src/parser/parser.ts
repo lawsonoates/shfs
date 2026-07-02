@@ -35,6 +35,7 @@ import { CommandParser } from './command';
 import { ErrorReporter } from './error-reporter';
 import { StatementParser } from './statement';
 import {
+	isParseSyntaxError,
 	ParseSyntaxError,
 	UnexpectedEOFError,
 	UnexpectedTokenError,
@@ -98,11 +99,7 @@ export class Parser {
 	 * @throws SyntaxError if the input is invalid
 	 */
 	parse(): Program {
-		return Effect.runSync(this.parseEffect());
-	}
-
-	parseEffect(): Effect.Effect<Program, ParseSyntaxError> {
-		return this.parseProgramEffect();
+		return this.statementParser.parseScript();
 	}
 
 	/**
@@ -150,22 +147,15 @@ export class Parser {
 	 * @throws SyntaxError if the current token doesn't match
 	 */
 	match(expected: TokenKind): void {
-		Effect.runSync(this.matchEffect(expected));
-	}
-
-	matchEffect(expected: TokenKind): Effect.Effect<void, ParseSyntaxError> {
-		const parser = this;
-		return Effect.gen(function* () {
-			if (parser._currentToken.kind === expected) {
-				parser._previousTokenPosition = parser._currentToken.span.end;
-				parser._currentToken = parser.scanner.getToken();
-				return;
-			}
-			return yield* parser.syntacticErrorEffect(
-				`Expected ${Token.kindName(expected)}`,
-				Token.kindName(expected)
-			);
-		});
+		if (this._currentToken.kind === expected) {
+			this._previousTokenPosition = this._currentToken.span.end;
+			this._currentToken = this.scanner.getToken();
+			return;
+		}
+		this.syntacticError(
+			`Expected ${Token.kindName(expected)}`,
+			Token.kindName(expected)
+		);
 	}
 
 	/**
@@ -225,40 +215,26 @@ export class Parser {
 	 * @throws SyntaxError always
 	 */
 	syntacticError(_message: string, expected: string): never {
-		return Effect.runSync(this.syntacticErrorEffect(_message, expected));
-	}
+		const span = this._currentToken.span;
 
-	syntacticErrorEffect(
-		_message: string,
-		expected: string
-	): Effect.Effect<never, ParseSyntaxError> {
-		const parser = this;
-		return Effect.gen(function* () {
-			const span = parser._currentToken.span;
-
-			if (parser._currentToken.kind === TokenKind.EOF) {
-				parser.errorReporter.reportError(
-					`Unexpected end of input, expected ${expected}`,
-					span,
-					'unexpected-eof'
-				);
-				return yield* new UnexpectedEOFError(expected, span);
-			}
-
-			const found =
-				parser._currentToken.spelling ||
-				Token.kindName(parser._currentToken.kind);
-			parser.errorReporter.reportError(
-				`Unexpected token '${found}', expected ${expected}`,
+		if (this._currentToken.kind === TokenKind.EOF) {
+			this.errorReporter.reportError(
+				`Unexpected end of input, expected ${expected}`,
 				span,
-				'unexpected-token'
+				'unexpected-eof'
 			);
-			return yield* new UnexpectedTokenError(found, expected, span);
-		});
-	}
+			throw new UnexpectedEOFError(expected, span);
+		}
 
-	private parseProgramEffect(): Effect.Effect<Program, ParseSyntaxError> {
-		return this.statementParser.parseScriptEffect();
+		const found =
+			this._currentToken.spelling ||
+			Token.kindName(this._currentToken.kind);
+		this.errorReporter.reportError(
+			`Unexpected token '${found}', expected ${expected}`,
+			span,
+			'unexpected-token'
+		);
+		throw new UnexpectedTokenError(found, expected, span);
 	}
 
 	/**
@@ -269,32 +245,23 @@ export class Parser {
 	 * @returns The parsed program
 	 */
 	parseSubstitution(input: string): Program {
-		return Effect.runSync(this.parseSubstitutionEffect(input));
-	}
-
-	parseSubstitutionEffect(
-		input: string
-	): Effect.Effect<Program, ParseSyntaxError> {
-		const parser = this;
-		return Effect.gen(function* () {
-			if (parser.substitutionDepth >= Parser.MAX_SUBSTITUTION_DEPTH) {
-				return yield* new ParseSyntaxError(
-					'Maximum command substitution depth exceeded',
-					parser._currentToken.span,
-					{
-						code: 'max-substitution-depth',
-					}
-				);
-			}
-
-			const innerParser = new Parser(
-				input,
-				parser.errorReporter,
-				parser.substitutionDepth + 1
+		if (this.substitutionDepth >= Parser.MAX_SUBSTITUTION_DEPTH) {
+			throw new ParseSyntaxError(
+				'Maximum command substitution depth exceeded',
+				this._currentToken.span,
+				{
+					code: 'max-substitution-depth',
+				}
 			);
+		}
 
-			return yield* innerParser.parseEffect();
-		});
+		const innerParser = new Parser(
+			input,
+			this.errorReporter,
+			this.substitutionDepth + 1
+		);
+
+		return innerParser.parse();
 	}
 }
 
@@ -317,5 +284,16 @@ export function parse(input: string): Program {
 export const parseEffect: (
 	input: string
 ) => Effect.Effect<Program, ParseSyntaxError> = Effect.fn('Parser.parse')(
-	(input) => new Parser(input).parseEffect()
+	function* (input: string) {
+		return yield* Effect.suspend(() => {
+			try {
+				return Effect.succeed(new Parser(input).parse());
+			} catch (error) {
+				if (isParseSyntaxError(error)) {
+					return Effect.fail(error);
+				}
+				throw error;
+			}
+		});
+	}
 );

@@ -6,12 +6,10 @@
  * - Redirections (< > Phase 2)
  */
 
-import { Effect } from 'effect';
 import { SourceSpan } from '../lexer/position';
 import { TokenKind } from '../lexer/token';
 import { LiteralPart, Redirection, SimpleCommand, Word } from './ast';
 import type { Parser } from './parser';
-import type { ParseSyntaxError } from './syntax-error';
 import type { WordParser } from './word';
 
 const DIGITS_ONLY_REGEX = /^[0-9]+$/;
@@ -41,14 +39,7 @@ export class CommandParser {
 	 * Returns null if no command is present.
 	 */
 	parseCommand(): SimpleCommand | null {
-		return Effect.runSync(this.parseCommandEffect());
-	}
-
-	parseCommandEffect(): Effect.Effect<
-		SimpleCommand | null,
-		ParseSyntaxError
-	> {
-		return this.parseSimpleCommandEffect();
+		return this.parseSimpleCommand();
 	}
 
 	/**
@@ -58,59 +49,49 @@ export class CommandParser {
 	 *   simple_command ::= word+ (redirection)*
 	 */
 	parseSimpleCommand(): SimpleCommand | null {
-		return Effect.runSync(this.parseSimpleCommandEffect());
-	}
+		const startPos = this.parser.currentToken.span.start;
 
-	parseSimpleCommandEffect(): Effect.Effect<
-		SimpleCommand | null,
-		ParseSyntaxError
-	> {
-		const commandParser = this;
-		return Effect.gen(function* () {
-			const startPos = commandParser.parser.currentToken.span.start;
+		// Parse command name (first word)
+		const name = this.wordParser.parseWord();
+		if (!name) {
+			return null;
+		}
 
-			// Parse command name (first word)
-			const name = yield* commandParser.wordParser.parseWordEffect();
-			if (!name) {
-				return null;
+		// Parse arguments and redirections
+		const args: Word[] = [];
+		const redirections: Redirection[] = [];
+
+		while (!this.isCommandTerminator()) {
+			// Check for redirection
+			const redir = this.parseRedirection();
+			if (redir) {
+				redirections.push(redir);
+				continue;
 			}
 
-			// Parse arguments and redirections
-			const args: Word[] = [];
-			const redirections: Redirection[] = [];
-
-			while (!commandParser.isCommandTerminator()) {
-				// Check for redirection
-				const redir = yield* commandParser.parseRedirectionEffect();
-				if (redir) {
-					redirections.push(redir);
-					continue;
-				}
-
-				// Try to parse a word argument
-				const word = yield* commandParser.wordParser.parseWordEffect();
-				if (word) {
-					args.push(word);
-				} else {
-					// No more words or redirections
-					break;
-				}
+			// Try to parse a word argument
+			const word = this.wordParser.parseWord();
+			if (word) {
+				args.push(word);
+			} else {
+				// No more words or redirections
+				break;
 			}
+		}
 
-			const endPos = commandParser.parser.previousTokenPosition;
-			const span = new SourceSpan(startPos, endPos);
-			const normalized = commandParser.normalizeRedirectionPrefixes(
-				args,
-				redirections
-			);
+		const endPos = this.parser.previousTokenPosition;
+		const span = new SourceSpan(startPos, endPos);
+		const normalized = this.normalizeRedirectionPrefixes(
+			args,
+			redirections
+		);
 
-			return new SimpleCommand(
-				span,
-				name,
-				normalized.args,
-				normalized.redirections
-			);
-		});
+		return new SimpleCommand(
+			span,
+			name,
+			normalized.args,
+			normalized.redirections
+		);
 	}
 
 	/**
@@ -123,158 +104,115 @@ export class CommandParser {
 	 *   <&3, <&-, <?file, >&2, >&-, 2>|, >?file, >>?file.
 	 */
 	parseRedirection(): Redirection | null {
-		return Effect.runSync(this.parseRedirectionEffect());
+		const token = this.parser.currentToken;
+		if (token.kind === TokenKind.LESS) {
+			return this.parseInputRedirection(token);
+		}
+		if (token.kind === TokenKind.GREAT) {
+			return this.parseOutputRedirection(token);
+		}
+
+		return null;
 	}
 
-	parseRedirectionEffect(): Effect.Effect<
-		Redirection | null,
-		ParseSyntaxError
-	> {
-		const commandParser = this;
-		return Effect.gen(function* () {
-			const token = commandParser.parser.currentToken;
-			if (token.kind === TokenKind.LESS) {
-				return yield* commandParser.parseInputRedirectionEffect(token);
-			}
-			if (token.kind === TokenKind.GREAT) {
-				return yield* commandParser.parseOutputRedirectionEffect(token);
-			}
+	private parseInputRedirection(token: { span: SourceSpan }): Redirection {
+		const startPos = token.span.start;
+		this.parser.advance();
+		this.validateInputTargetPrefix();
 
-			return null;
+		const parsedTarget = this.parseInputTargetAfterLess();
+		const fdMode = this.parseFdMode(parsedTarget.target, '<&N or <&-');
+		const endPos = this.parser.previousTokenPosition;
+		const span = new SourceSpan(startPos, endPos);
+		return new Redirection(span, 'input', parsedTarget.target, {
+			mode: fdMode.mode,
+			optional: parsedTarget.optional,
+			targetFd: fdMode.targetFd,
 		});
 	}
 
-	private parseInputRedirectionEffect(token: {
-		span: SourceSpan;
-	}): Effect.Effect<Redirection, ParseSyntaxError> {
-		const commandParser = this;
-		return Effect.gen(function* () {
-			const startPos = token.span.start;
-			commandParser.parser.advance();
-			yield* commandParser.validateInputTargetPrefixEffect();
+	private parseOutputRedirection(token: { span: SourceSpan }): Redirection {
+		const startPos = token.span.start;
+		this.parser.advance();
 
-			const parsedTarget =
-				yield* commandParser.parseInputTargetAfterLessEffect();
-			const fdMode = yield* commandParser.parseFdModeEffect(
-				parsedTarget.target,
-				'<&N or <&-'
-			);
-			const endPos = commandParser.parser.previousTokenPosition;
-			const span = new SourceSpan(startPos, endPos);
-			return new Redirection(span, 'input', parsedTarget.target, {
-				mode: fdMode.mode,
-				optional: parsedTarget.optional,
-				targetFd: fdMode.targetFd,
-			});
-		});
-	}
+		const append = this.consumeAppendMarker();
+		const noclobber = this.consumeNoclobberMarker();
 
-	private parseOutputRedirectionEffect(token: {
-		span: SourceSpan;
-	}): Effect.Effect<Redirection, ParseSyntaxError> {
-		const commandParser = this;
-		return Effect.gen(function* () {
-			const startPos = token.span.start;
-			commandParser.parser.advance();
-
-			const append = commandParser.consumeAppendMarker();
-			const noclobber = commandParser.consumeNoclobberMarker();
-
-			if (commandParser.parser.currentToken.kind === TokenKind.PIPE) {
-				const pipeToken = commandParser.parser.currentToken;
-				return new Redirection(
-					new SourceSpan(
-						startPos,
-						commandParser.parser.previousTokenPosition
-					),
-					'output',
-					commandParser.createLiteralWord('|', pipeToken.span),
-					{
-						append,
-						mode: 'pipe',
-						noclobber,
-					}
-				);
-			}
-
-			const target = yield* commandParser.wordParser.parseWordEffect();
-			if (!target) {
-				return yield* commandParser.parser.syntacticErrorEffect(
-					'Expected filename after >',
-					'word'
-				);
-			}
-			const fdMode = yield* commandParser.parseFdModeEffect(
-				target,
-				'>&N or >&-'
-			);
-			const endPos = commandParser.parser.previousTokenPosition;
-			const span = new SourceSpan(startPos, endPos);
-			return new Redirection(span, 'output', target, {
-				append,
-				mode: fdMode.mode,
-				noclobber,
-				targetFd: fdMode.targetFd,
-			});
-		});
-	}
-
-	private validateInputTargetPrefixEffect(): Effect.Effect<
-		void,
-		ParseSyntaxError
-	> {
-		const commandParser = this;
-		return Effect.gen(function* () {
-			if (commandParser.parser.currentToken.kind !== TokenKind.WORD) {
-				return;
-			}
-			const spelling = commandParser.parser.currentToken.spelling;
-			if (spelling.startsWith('?&') || spelling.startsWith('&?')) {
-				return yield* commandParser.parser.syntacticErrorEffect(
-					'Invalid redirection target after <',
-					'<path, <?path, <&N, or <&-'
-				);
-			}
-		});
-	}
-
-	private parseInputTargetAfterLessEffect(): Effect.Effect<
-		{ optional: boolean; target: Word },
-		ParseSyntaxError
-	> {
-		const commandParser = this;
-		return Effect.gen(function* () {
-			let optional = false;
-			let target = yield* commandParser.wordParser.parseWordEffect();
-			if (!target) {
-				return yield* commandParser.parser.syntacticErrorEffect(
-					'Expected filename after <',
-					'word'
-				);
-			}
-			const targetLiteral = target.literalValue;
-			if (!targetLiteral?.startsWith('?')) {
-				return { optional, target };
-			}
-			optional = true;
-			if (targetLiteral === '?') {
-				const explicitTarget =
-					yield* commandParser.wordParser.parseWordEffect();
-				if (!explicitTarget) {
-					return yield* commandParser.parser.syntacticErrorEffect(
-						'Expected filename after <?',
-						'word'
-					);
+		if (this.parser.currentToken.kind === TokenKind.PIPE) {
+			const pipeToken = this.parser.currentToken;
+			return new Redirection(
+				new SourceSpan(startPos, this.parser.previousTokenPosition),
+				'output',
+				this.createLiteralWord('|', pipeToken.span),
+				{
+					append,
+					mode: 'pipe',
+					noclobber,
 				}
-				target = explicitTarget;
-				return { optional, target };
-			}
-			target = commandParser.cloneLiteralWord(
-				target,
-				targetLiteral.slice(1)
 			);
-			return { optional, target };
+		}
+
+		const target = this.wordParser.parseWord();
+		if (!target) {
+			return this.parser.syntacticError(
+				'Expected filename after >',
+				'word'
+			);
+		}
+		const fdMode = this.parseFdMode(target, '>&N or >&-');
+		const endPos = this.parser.previousTokenPosition;
+		const span = new SourceSpan(startPos, endPos);
+		return new Redirection(span, 'output', target, {
+			append,
+			mode: fdMode.mode,
+			noclobber,
+			targetFd: fdMode.targetFd,
 		});
+	}
+
+	private validateInputTargetPrefix(): void {
+		if (this.parser.currentToken.kind !== TokenKind.WORD) {
+			return;
+		}
+		const spelling = this.parser.currentToken.spelling;
+		if (spelling.startsWith('?&') || spelling.startsWith('&?')) {
+			this.parser.syntacticError(
+				'Invalid redirection target after <',
+				'<path, <?path, <&N, or <&-'
+			);
+		}
+	}
+
+	private parseInputTargetAfterLess(): {
+		optional: boolean;
+		target: Word;
+	} {
+		let optional = false;
+		let target = this.wordParser.parseWord();
+		if (!target) {
+			return this.parser.syntacticError(
+				'Expected filename after <',
+				'word'
+			);
+		}
+		const targetLiteral = target.literalValue;
+		if (!targetLiteral?.startsWith('?')) {
+			return { optional, target };
+		}
+		optional = true;
+		if (targetLiteral === '?') {
+			const explicitTarget = this.wordParser.parseWord();
+			if (!explicitTarget) {
+				return this.parser.syntacticError(
+					'Expected filename after <?',
+					'word'
+				);
+			}
+			target = explicitTarget;
+			return { optional, target };
+		}
+		target = this.cloneLiteralWord(target, targetLiteral.slice(1));
+		return { optional, target };
 	}
 
 	private consumeAppendMarker(): boolean {
@@ -296,32 +234,26 @@ export class CommandParser {
 		return true;
 	}
 
-	private parseFdModeEffect(
+	private parseFdMode(
 		target: Word,
 		expected: string
-	): Effect.Effect<
-		{ mode: Redirection['mode']; targetFd: number | null },
-		ParseSyntaxError
-	> {
-		const commandParser = this;
-		return Effect.gen(function* () {
-			const targetLiteral = target.literalValue;
-			if (!targetLiteral?.startsWith('&')) {
-				return { mode: 'file', targetFd: null };
-			}
+	): { mode: Redirection['mode']; targetFd: number | null } {
+		const targetLiteral = target.literalValue;
+		if (!targetLiteral?.startsWith('&')) {
+			return { mode: 'file', targetFd: null };
+		}
 
-			const fdTarget = targetLiteral.slice(1);
-			if (fdTarget === '-') {
-				return { mode: 'close', targetFd: null };
-			}
-			if (DIGITS_ONLY_REGEX.test(fdTarget)) {
-				return { mode: 'fd', targetFd: Number(fdTarget) };
-			}
-			return yield* commandParser.parser.syntacticErrorEffect(
-				'Invalid file descriptor duplication target',
-				expected
-			);
-		});
+		const fdTarget = targetLiteral.slice(1);
+		if (fdTarget === '-') {
+			return { mode: 'close', targetFd: null };
+		}
+		if (DIGITS_ONLY_REGEX.test(fdTarget)) {
+			return { mode: 'fd', targetFd: Number(fdTarget) };
+		}
+		return this.parser.syntacticError(
+			'Invalid file descriptor duplication target',
+			expected
+		);
 	}
 
 	/**
