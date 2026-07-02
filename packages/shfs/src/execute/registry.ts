@@ -40,6 +40,7 @@ import {
 	resolvePathsFromCwd,
 } from './path';
 import { files } from './producers';
+import { fromRecordGenerator, type RecordStream } from './record-stream';
 import { toFormattedLineStream } from './records';
 import {
 	resolveInputRedirectEffect,
@@ -123,7 +124,7 @@ type StreamCommandHandler<TCommand extends StreamCommand = StreamCommand> =
 		input: Stream<ShellRecord> | null;
 		context: ExecuteStepContext;
 		resolvedOutputRedirectPath?: string;
-	}) => Stream<ShellRecord>;
+	}) => RecordStream;
 
 type ActionCommandHandler<TCommand extends ActionCommand = ActionCommand> =
 	(params: {
@@ -207,12 +208,14 @@ function verifyCommandRegistries(): ShellRuntimeError | null {
 function failedStreamCommand(
 	context: ExecuteStepContext,
 	error: ShellRuntimeError
-): Stream<ShellRecord> {
+): RecordStream {
 	context.status = error.exitCode;
 	context.stderr.append(error.message);
-	return (async function* (): Stream<ShellRecord> {
-		// no records
-	})();
+	return fromRecordGenerator(
+		(async function* (): Stream<ShellRecord> {
+			// no records
+		})()
+	);
 }
 
 function executeStreamStep({
@@ -221,7 +224,7 @@ function executeStreamStep({
 	input,
 	context,
 	resolvedOutputRedirectPath,
-}: ExecuteStreamStepParams): Stream<ShellRecord> {
+}: ExecuteStreamStepParams): RecordStream {
 	const verificationError = verifyCommandRegistries();
 	if (verificationError) {
 		return failedStreamCommand(context, verificationError);
@@ -351,13 +354,13 @@ function isActionStep(step: StepIR): step is ActionStep {
 	return ACTION_COMMAND_SET.has(step.cmd);
 }
 
-function executeStep(params: ExecuteStreamStepParams): Stream<ShellRecord>;
+function executeStep(params: ExecuteStreamStepParams): RecordStream;
 function executeStep(
 	params: ExecuteActionStepParams
 ): Effect.Effect<void, ShellErrorCause>;
 function executeStep(
 	params: ExecuteStreamStepParams | ExecuteActionStepParams
-): Stream<ShellRecord> | Effect.Effect<void, ShellErrorCause> {
+): RecordStream | Effect.Effect<void, ShellErrorCause> {
 	if (isActionStep(params.step)) {
 		return executeActionStep(params as ExecuteActionStepParams);
 	}
@@ -375,454 +378,487 @@ export const CommandRegistry = {
 CommandRegistry.register('cat', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
-		return (async function* (): Stream<ShellRecord> {
-			const options = {
-				numberLines: step.args.numberLines,
-				numberNonBlank: step.args.numberNonBlank,
-				showAll: step.args.showAll,
-				showEnds: step.args.showEnds,
-				showNonprinting: step.args.showNonprinting,
-				showTabs: step.args.showTabs,
-				squeezeBlank: step.args.squeezeBlank,
-			};
-			const inputPathResult = await runOrReport(
-				resolveRedirectPathEffect(
-					step.cmd,
-					step.redirections,
-					'input',
-					fs,
+		return fromRecordGenerator(
+			(async function* (): Stream<ShellRecord> {
+				const options = {
+					numberLines: step.args.numberLines,
+					numberNonBlank: step.args.numberNonBlank,
+					showAll: step.args.showAll,
+					showEnds: step.args.showEnds,
+					showNonprinting: step.args.showNonprinting,
+					showTabs: step.args.showTabs,
+					squeezeBlank: step.args.squeezeBlank,
+				};
+				const inputPathResult = await runOrReport(
+					resolveRedirectPathEffect(
+						step.cmd,
+						step.redirections,
+						'input',
+						fs,
+						context
+					),
 					context
-				),
-				context
-			);
-			if (!inputPathResult.ok) {
-				return;
-			}
-			const expandedFiles = await runOrReport(
-				evaluateExpandedPathWordsEffect(
-					'cat',
-					step.args.files,
-					fs,
+				);
+				if (!inputPathResult.ok) {
+					return;
+				}
+				const expandedFiles = await runOrReport(
+					evaluateExpandedPathWordsEffect(
+						'cat',
+						step.args.files,
+						fs,
+						context
+					),
 					context
-				),
-				context
-			);
-			if (!expandedFiles.ok) {
-				return;
-			}
-			const filePaths = withInputRedirect(
-				resolvePathsFromCwd(context.cwd, expandedFiles.value),
-				inputPathResult.value
-			);
-			if (filePaths.length > 0) {
-				yield* cat(fs, options)(files(...filePaths));
+				);
+				if (!expandedFiles.ok) {
+					return;
+				}
+				const filePaths = withInputRedirect(
+					resolvePathsFromCwd(context.cwd, expandedFiles.value),
+					inputPathResult.value
+				);
+				if (filePaths.length > 0) {
+					yield* cat(fs, options)(files(...filePaths));
+					context.status = 0;
+					return;
+				}
+				if (input) {
+					yield* cat(fs, options)(toFormattedLineStream(input));
+				}
 				context.status = 0;
-				return;
-			}
-			if (input) {
-				yield* cat(fs, options)(toFormattedLineStream(input));
-			}
-			context.status = 0;
-		})();
+			})()
+		);
 	},
 });
 
 CommandRegistry.register('grep', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context, resolvedOutputRedirectPath }) => {
-		return (async function* (): Stream<ShellRecord> {
-			const result = await runGrepCommand({
-				context,
-				fs,
-				input,
-				parsed: step.args,
-				redirections: step.redirections,
-				resolvedOutputRedirectPath,
-				stdin: createShellInput(input),
-			});
-			context.status = result.exitCode;
-			context.stderr.appendLines(result.stderr);
-			for (const text of result.stdout) {
-				yield {
-					kind: 'line',
-					text,
-				};
-			}
-		})();
+		return fromRecordGenerator(
+			(async function* (): Stream<ShellRecord> {
+				const result = await runGrepCommand({
+					context,
+					fs,
+					input,
+					parsed: step.args,
+					redirections: step.redirections,
+					resolvedOutputRedirectPath,
+					stdin: createShellInput(input),
+				});
+				context.status = result.exitCode;
+				context.stderr.appendLines(result.stderr);
+				for (const text of result.stdout) {
+					yield {
+						kind: 'line',
+						text,
+					};
+				}
+			})()
+		);
 	},
 });
 
 CommandRegistry.register('find', {
 	kind: 'stream',
 	handler: ({ step, fs, context }) => {
-		return find(fs, context, step.args);
+		return fromRecordGenerator(find(fs, context, step.args));
 	},
 });
 
 CommandRegistry.register('xargs', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
-		return (async function* (): Stream<ShellRecord> {
-			const inputPath = await runOrReport(
-				resolveRedirectPathEffect(
-					step.cmd,
-					step.redirections,
-					'input',
-					fs,
+		return fromRecordGenerator(
+			(async function* (): Stream<ShellRecord> {
+				const inputPath = await runOrReport(
+					resolveRedirectPathEffect(
+						step.cmd,
+						step.redirections,
+						'input',
+						fs,
+						context
+					),
 					context
-				),
-				context
-			);
-			if (!inputPath.ok) {
-				return;
-			}
-			const result = await runXargsCommand({
-				context,
-				fs,
-				input,
-				inputPath: inputPath.value,
-				parsed: step.args,
-				stdin: createShellInput(input),
-			});
-			context.status = result.exitCode;
-			context.stderr.appendLines(result.stderr);
-			for (const text of result.stdout) {
-				yield {
-					kind: 'line',
-					text,
-				};
-			}
-		})();
+				);
+				if (!inputPath.ok) {
+					return;
+				}
+				const result = await runXargsCommand({
+					context,
+					fs,
+					input,
+					inputPath: inputPath.value,
+					parsed: step.args,
+					stdin: createShellInput(input),
+				});
+				context.status = result.exitCode;
+				context.stderr.appendLines(result.stderr);
+				for (const text of result.stdout) {
+					yield {
+						kind: 'line',
+						text,
+					};
+				}
+			})()
+		);
 	},
 });
 
 CommandRegistry.register('wc', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
-		return (async function* (): Stream<ShellRecord> {
-			const inputPath = await runOrReport(
-				resolveRedirectPathEffect(
-					step.cmd,
-					step.redirections,
-					'input',
-					fs,
+		return fromRecordGenerator(
+			(async function* (): Stream<ShellRecord> {
+				const inputPath = await runOrReport(
+					resolveRedirectPathEffect(
+						step.cmd,
+						step.redirections,
+						'input',
+						fs,
+						context
+					),
 					context
-				),
-				context
-			);
-			if (!inputPath.ok) {
-				return;
-			}
-			const result = await runWcCommand({
-				context,
-				fs,
-				input,
-				inputPath: inputPath.value,
-				parsed: step.args,
-				stdin: createShellInput(input),
-			});
-			context.status = result.exitCode;
-			context.stderr.appendLines(result.stderr);
-			for (const text of result.stdout) {
-				yield {
-					kind: 'line',
-					text,
-				};
-			}
-		})();
+				);
+				if (!inputPath.ok) {
+					return;
+				}
+				const result = await runWcCommand({
+					context,
+					fs,
+					input,
+					inputPath: inputPath.value,
+					parsed: step.args,
+					stdin: createShellInput(input),
+				});
+				context.status = result.exitCode;
+				context.stderr.appendLines(result.stderr);
+				for (const text of result.stdout) {
+					yield {
+						kind: 'line',
+						text,
+					};
+				}
+			})()
+		);
 	},
 });
 
 CommandRegistry.register('sort', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
-		return (async function* (): Stream<ShellRecord> {
-			const inputPath = await runOrReport(
-				resolveRedirectPathEffect(
-					step.cmd,
-					step.redirections,
-					'input',
-					fs,
+		return fromRecordGenerator(
+			(async function* (): Stream<ShellRecord> {
+				const inputPath = await runOrReport(
+					resolveRedirectPathEffect(
+						step.cmd,
+						step.redirections,
+						'input',
+						fs,
+						context
+					),
 					context
-				),
-				context
-			);
-			if (!inputPath.ok) {
-				return;
-			}
-			const result = await runSortCommand({
-				context,
-				fs,
-				input,
-				inputPath: inputPath.value,
-				parsed: step.args,
-				stdin: createShellInput(input),
-			});
-			context.status = result.exitCode;
-			context.stderr.appendLines(result.stderr);
-			for (const text of result.stdout) {
-				yield { kind: 'line', text };
-			}
-		})();
+				);
+				if (!inputPath.ok) {
+					return;
+				}
+				const result = await runSortCommand({
+					context,
+					fs,
+					input,
+					inputPath: inputPath.value,
+					parsed: step.args,
+					stdin: createShellInput(input),
+				});
+				context.status = result.exitCode;
+				context.stderr.appendLines(result.stderr);
+				for (const text of result.stdout) {
+					yield { kind: 'line', text };
+				}
+			})()
+		);
 	},
 });
 
 CommandRegistry.register('tree', {
 	kind: 'stream',
 	handler: ({ step, fs, context }) => {
-		return (async function* (): Stream<ShellRecord> {
-			const expandedPaths = await runOrReport(
-				evaluateExpandedPathWordsEffect(
-					'tree',
-					step.args.paths,
-					fs,
+		return fromRecordGenerator(
+			(async function* (): Stream<ShellRecord> {
+				const expandedPaths = await runOrReport(
+					evaluateExpandedPathWordsEffect(
+						'tree',
+						step.args.paths,
+						fs,
+						context
+					),
 					context
-				),
-				context
-			);
-			if (!expandedPaths.ok) {
-				return;
-			}
-			const paths = resolvePathsFromCwd(context.cwd, expandedPaths.value);
-			const includePatterns = await runOrReport(
-				evaluateExpandedWordsEffect(
-					step.args.includePatterns,
-					fs,
+				);
+				if (!expandedPaths.ok) {
+					return;
+				}
+				const paths = resolvePathsFromCwd(
+					context.cwd,
+					expandedPaths.value
+				);
+				const includePatterns = await runOrReport(
+					evaluateExpandedWordsEffect(
+						step.args.includePatterns,
+						fs,
+						context
+					),
 					context
-				),
-				context
-			);
-			if (!includePatterns.ok) {
-				return;
-			}
-			const excludePatterns = await runOrReport(
-				evaluateExpandedWordsEffect(
-					step.args.excludePatterns,
-					fs,
+				);
+				if (!includePatterns.ok) {
+					return;
+				}
+				const excludePatterns = await runOrReport(
+					evaluateExpandedWordsEffect(
+						step.args.excludePatterns,
+						fs,
+						context
+					),
 					context
-				),
-				context
-			);
-			if (!excludePatterns.ok) {
-				return;
-			}
-			const result = await runTreeCommand(
-				fs,
-				context.cwd,
-				createTreeResolvedArgs({
-					...step.args,
-					excludePatterns: excludePatterns.value,
-					includePatterns: includePatterns.value,
-					paths,
-				})
-			);
-			context.status = result.exitCode;
-			context.stderr.appendLines(result.stderr);
-			for (const text of result.stdout) {
-				yield { kind: 'line', text };
-			}
-		})();
+				);
+				if (!excludePatterns.ok) {
+					return;
+				}
+				const result = await runTreeCommand(
+					fs,
+					context.cwd,
+					createTreeResolvedArgs({
+						...step.args,
+						excludePatterns: excludePatterns.value,
+						includePatterns: includePatterns.value,
+						paths,
+					})
+				);
+				context.status = result.exitCode;
+				context.stderr.appendLines(result.stderr);
+				for (const text of result.stdout) {
+					yield { kind: 'line', text };
+				}
+			})()
+		);
 	},
 });
 
 CommandRegistry.register('head', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
-		return (async function* (): Stream<ShellRecord> {
-			const inputPath = await runOrReport(
-				resolveRedirectPathEffect(
-					step.cmd,
-					step.redirections,
-					'input',
-					fs,
+		return fromRecordGenerator(
+			(async function* (): Stream<ShellRecord> {
+				const inputPath = await runOrReport(
+					resolveRedirectPathEffect(
+						step.cmd,
+						step.redirections,
+						'input',
+						fs,
+						context
+					),
 					context
-				),
-				context
-			);
-			if (!inputPath.ok) {
-				return;
-			}
-			const expandedFiles = await runOrReport(
-				evaluateExpandedPathWordsEffect(
-					'head',
-					step.args.files,
-					fs,
+				);
+				if (!inputPath.ok) {
+					return;
+				}
+				const expandedFiles = await runOrReport(
+					evaluateExpandedPathWordsEffect(
+						'head',
+						step.args.files,
+						fs,
+						context
+					),
 					context
-				),
-				context
-			);
-			if (!expandedFiles.ok) {
-				return;
-			}
-			const filePaths = withInputRedirect(
-				resolvePathsFromCwd(context.cwd, expandedFiles.value),
-				inputPath.value
-			);
-			if (filePaths.length > 0) {
-				yield* headWithN(fs, step.args.n)(files(...filePaths));
+				);
+				if (!expandedFiles.ok) {
+					return;
+				}
+				const filePaths = withInputRedirect(
+					resolvePathsFromCwd(context.cwd, expandedFiles.value),
+					inputPath.value
+				);
+				if (filePaths.length > 0) {
+					yield* headWithN(fs, step.args.n)(files(...filePaths));
+					context.status = 0;
+					return;
+				}
+				if (input) {
+					yield* headLines(step.args.n)(toFormattedLineStream(input));
+				}
 				context.status = 0;
-				return;
-			}
-			if (input) {
-				yield* headLines(step.args.n)(toFormattedLineStream(input));
-			}
-			context.status = 0;
-		})();
+			})()
+		);
 	},
 });
 
 CommandRegistry.register('ls', {
 	kind: 'stream',
 	handler: ({ step, fs, context }) => {
-		return (async function* (): Stream<ShellRecord> {
-			const paths = await runOrReport(
-				evaluateExpandedPathWordsEffect(
-					'ls',
-					step.args.paths,
-					fs,
+		return fromRecordGenerator(
+			(async function* (): Stream<ShellRecord> {
+				const paths = await runOrReport(
+					evaluateExpandedPathWordsEffect(
+						'ls',
+						step.args.paths,
+						fs,
+						context
+					),
 					context
-				),
-				context
-			);
-			if (!paths.ok) {
-				return;
-			}
-			for (const inputPath of paths.value) {
-				const resolvedPath = resolveLsPath(inputPath, context.cwd);
-				for await (const fileRecord of ls(fs, resolvedPath, {
-					showAll: step.args.showAll,
-				})) {
-					if (step.args.longFormat) {
-						const stat = await fs.stat(fileRecord.path);
-						yield {
-							kind: 'line',
-							text: formatLongListing(fileRecord.path, stat),
-						} as const;
-						continue;
-					}
-					yield fileRecord;
+				);
+				if (!paths.ok) {
+					return;
 				}
-			}
-			context.status = 0;
-		})();
+				for (const inputPath of paths.value) {
+					const resolvedPath = resolveLsPath(inputPath, context.cwd);
+					for await (const fileRecord of ls(fs, resolvedPath, {
+						showAll: step.args.showAll,
+					})) {
+						if (step.args.longFormat) {
+							const stat = await fs.stat(fileRecord.path);
+							yield {
+								kind: 'line',
+								text: formatLongListing(fileRecord.path, stat),
+							} as const;
+							continue;
+						}
+						yield fileRecord;
+					}
+				}
+				context.status = 0;
+			})()
+		);
 	},
 });
 
 CommandRegistry.register('tail', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
-		return (async function* (): Stream<ShellRecord> {
-			const inputPath = await runOrReport(
-				resolveRedirectPathEffect(
-					step.cmd,
-					step.redirections,
-					'input',
-					fs,
+		return fromRecordGenerator(
+			(async function* (): Stream<ShellRecord> {
+				const inputPath = await runOrReport(
+					resolveRedirectPathEffect(
+						step.cmd,
+						step.redirections,
+						'input',
+						fs,
+						context
+					),
 					context
-				),
-				context
-			);
-			if (!inputPath.ok) {
-				return;
-			}
-			const expandedFiles = await runOrReport(
-				evaluateExpandedPathWordsEffect(
-					'tail',
-					step.args.files,
-					fs,
+				);
+				if (!inputPath.ok) {
+					return;
+				}
+				const expandedFiles = await runOrReport(
+					evaluateExpandedPathWordsEffect(
+						'tail',
+						step.args.files,
+						fs,
+						context
+					),
 					context
-				),
-				context
-			);
-			if (!expandedFiles.ok) {
-				return;
-			}
-			const filePaths = withInputRedirect(
-				resolvePathsFromCwd(context.cwd, expandedFiles.value),
-				inputPath.value
-			);
-			if (filePaths.length > 0) {
-				for (const filePath of filePaths) {
-					yield* tail(step.args.n)(cat(fs)(files(filePath)));
+				);
+				if (!expandedFiles.ok) {
+					return;
+				}
+				const filePaths = withInputRedirect(
+					resolvePathsFromCwd(context.cwd, expandedFiles.value),
+					inputPath.value
+				);
+				if (filePaths.length > 0) {
+					for (const filePath of filePaths) {
+						yield* tail(step.args.n)(cat(fs)(files(filePath)));
+					}
+					context.status = 0;
+					return;
+				}
+				if (input) {
+					yield* tail(step.args.n)(toFormattedLineStream(input));
 				}
 				context.status = 0;
-				return;
-			}
-			if (input) {
-				yield* tail(step.args.n)(toFormattedLineStream(input));
-			}
-			context.status = 0;
-		})();
+			})()
+		);
 	},
 });
 
 CommandRegistry.register('pwd', {
 	kind: 'stream',
 	handler: ({ context }) => {
-		return (async function* (): Stream<ShellRecord> {
-			yield* pwd(context.cwd);
-			context.status = 0;
-		})();
+		return fromRecordGenerator(
+			(async function* (): Stream<ShellRecord> {
+				yield* pwd(context.cwd);
+				context.status = 0;
+			})()
+		);
 	},
 });
 
 CommandRegistry.register('echo', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
-		return echo(createBuiltinRuntime(fs, context, input), step.args);
+		return fromRecordGenerator(
+			echo(createBuiltinRuntime(fs, context, input), step.args)
+		);
 	},
 });
 
 CommandRegistry.register('set', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
-		return set(createBuiltinRuntime(fs, context, input), step.args);
+		return fromRecordGenerator(
+			set(createBuiltinRuntime(fs, context, input), step.args)
+		);
 	},
 });
 
 CommandRegistry.register('test', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
-		return test(createBuiltinRuntime(fs, context, input), step.args);
+		return fromRecordGenerator(
+			test(createBuiltinRuntime(fs, context, input), step.args)
+		);
 	},
 });
 
 CommandRegistry.register('read', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
-		return (async function* (): Stream<ShellRecord> {
-			const resolvedInput = await runOrReport(
-				resolveInputRedirectEffect(
-					step.cmd,
-					step.redirections,
-					fs,
+		return fromRecordGenerator(
+			(async function* (): Stream<ShellRecord> {
+				const resolvedInput = await runOrReport(
+					resolveInputRedirectEffect(
+						step.cmd,
+						step.redirections,
+						fs,
+						context
+					),
 					context
-				),
-				context
-			);
-			if (!resolvedInput.ok) {
-				return;
-			}
-			if (resolvedInput.value.closed) {
-				context.stderr.append('read: stdin is closed');
-				context.status = 1;
-				return;
-			}
-			const redirectedInput = resolvedInput.value.path
-				? lineRecordsFromPath(fs, resolvedInput.value.path)
-				: input;
-			yield* read(
-				createBuiltinRuntime(fs, context, redirectedInput),
-				step.args
-			);
-		})();
+				);
+				if (!resolvedInput.ok) {
+					return;
+				}
+				if (resolvedInput.value.closed) {
+					context.stderr.append('read: stdin is closed');
+					context.status = 1;
+					return;
+				}
+				const redirectedInput = resolvedInput.value.path
+					? lineRecordsFromPath(fs, resolvedInput.value.path)
+					: input;
+				yield* read(
+					createBuiltinRuntime(fs, context, redirectedInput),
+					step.args
+				);
+			})()
+		);
 	},
 });
 
 CommandRegistry.register('string', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
-		return string(createBuiltinRuntime(fs, context, input), step.args);
+		return fromRecordGenerator(
+			string(createBuiltinRuntime(fs, context, input), step.args)
+		);
 	},
 });
 

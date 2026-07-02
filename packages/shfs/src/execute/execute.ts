@@ -21,7 +21,7 @@ import {
 	normalizeCwd,
 	resolvePathFromCwd,
 } from './path';
-import { collectRecordStream, fromRecordGenerator } from './record-stream';
+import { collectRecordStream } from './record-stream';
 import {
 	ensureNoclobberWritable,
 	getRedirectionMode,
@@ -380,7 +380,7 @@ async function executeStreamStep(params: {
 		resolvedOutputRedirectPath,
 	});
 	const collected = await runOrReport(
-		collectRecordStream(fromRecordGenerator(stepOutput)),
+		collectRecordStream(stepOutput),
 		context
 	);
 	if (!collected.ok) {
