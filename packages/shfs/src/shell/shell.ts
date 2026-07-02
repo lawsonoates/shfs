@@ -1,18 +1,8 @@
-import {
-	compileEffect,
-	isCompileError,
-	isParseSyntaxError,
-	parseEffect,
-	type ScriptIR,
-} from '@shfs/compiler';
+import { compileEffect, parseEffect, type ScriptIR } from '@shfs/compiler';
 import { Effect } from 'effect';
 
 import { collect } from '../consumer/consumer';
-import {
-	isShellDiagnosticError,
-	isShellRuntimeError,
-	writeDiagnosticsToStderr,
-} from '../diagnostics';
+import { isShellFailure, reportShellFailure } from '../diagnostics';
 import { type ExecuteResult, execute } from '../execute/execute';
 import type { FS } from '../fs/fs';
 import {
@@ -21,12 +11,7 @@ import {
 	ShellOutput,
 } from '../output-channels';
 import { formatRecord, type Record } from '../record';
-import {
-	BufferedOutputStream,
-	formatStderr,
-	type OutputStream,
-} from '../stderr';
-import { lazy } from '../util/lazy';
+import { BufferedOutputStream, formatStderr } from '../stderr';
 
 const ROOT_DIRECTORY = '/';
 const MULTIPLE_SLASH_REGEX = /\/+/g;
@@ -260,12 +245,10 @@ export class Shell {
 	private _exec(strings: TemplateStringsArray, ...exprs: unknown[]) {
 		const source = String.raw(strings, ...exprs);
 		const fs = this.fs;
-		const ir = lazy<Effect.Effect<ScriptIR, unknown>>(() =>
-			Effect.gen(function* () {
-				const ast = yield* parseEffect(source);
-				return yield* compileEffect(ast);
-			})
-		);
+		const ir = Effect.gen(function* () {
+			const ast = yield* parseEffect(source);
+			return yield* compileEffect(ast);
+		});
 
 		return createShellCommand(
 			new ShellPromise(async (cwdOverride) => {
@@ -280,27 +263,33 @@ export class Shell {
 					localVars: new Map<string, string>(),
 				};
 				const runCommand = Effect.gen(function* () {
-					const script: ScriptIR = yield* ir();
-					const stdout: Record[] = yield* Effect.promise(() =>
-						collectStdoutRecords(execute(script, fs, context))
-					);
+					const script: ScriptIR = yield* ir;
+					const stdout: Record[] = yield* Effect.tryPromise({
+						try: () =>
+							collectStdoutRecords(execute(script, fs, context)),
+						catch: (cause) => cause,
+					});
 					return {
 						stdout,
 						stderr: context.stderr.snapshot(),
 						exitCode: context.status,
 					};
 				}).pipe(
-					Effect.catchIf(
-						(error: unknown): error is unknown => true,
-						(error: unknown) =>
-							Effect.sync(() => {
-								handleDiagnosticFailure(error, context);
-								return {
-									stdout: [],
-									stderr: context.stderr.snapshot(),
-									exitCode: context.status ?? 1,
-								};
-							})
+					Effect.catch((error: unknown) =>
+						Effect.sync(() => {
+							if (!isShellFailure(error)) {
+								// Unknown errors are bugs; surface them to
+								// the caller like a plain throw would.
+								context.status = 1;
+								throw error;
+							}
+							reportShellFailure(context, error);
+							return {
+								stdout: [],
+								stderr: context.stderr.snapshot(),
+								exitCode: context.status ?? 1,
+							};
+						})
 					),
 					Effect.ensuring(
 						Effect.sync(() => {
@@ -319,37 +308,4 @@ export class Shell {
 			})
 		);
 	}
-}
-
-function handleDiagnosticFailure(
-	error: unknown,
-	context: {
-		status?: number;
-		stderr: OutputStream;
-	}
-): void {
-	if (isParseSyntaxError(error)) {
-		context.status = 1;
-		writeDiagnosticsToStderr(context, [error.diagnostic]);
-		return;
-	}
-	if (isCompileError(error)) {
-		context.status = 1;
-		writeDiagnosticsToStderr(context, [error.diagnostic]);
-		return;
-	}
-	if (isShellDiagnosticError(error)) {
-		context.status = error.exitCode;
-		writeDiagnosticsToStderr(context, error.diagnostics);
-		return;
-	}
-	if (isShellRuntimeError(error)) {
-		context.status = error.exitCode;
-		if (error.message !== '') {
-			context.stderr.append(error.message);
-		}
-		return;
-	}
-	context.status = 1;
-	throw error;
 }

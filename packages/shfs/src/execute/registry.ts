@@ -8,11 +8,10 @@ import { string } from '../builtin/string/string';
 import { test } from '../builtin/test/test';
 import type { BuiltinContext, BuiltinRuntime } from '../builtin/types';
 import {
-	isShellDiagnosticError,
 	isShellRuntimeError,
+	runOrReport,
 	type ShellErrorCause,
 	ShellRuntimeError,
-	writeDiagnosticsToStderr,
 } from '../diagnostics';
 import type { FS } from '../fs/fs';
 import { cat } from '../operator/cat/cat';
@@ -143,13 +142,6 @@ type CommandRegistryEntry =
 			handler: EffectCommandHandler;
 	  };
 
-type CommandEffectResult<T> =
-	| { ok: false }
-	| {
-			ok: true;
-			value: T;
-	  };
-
 interface StreamCommandEntry<TCommand extends StreamCommand> {
 	kind: 'stream';
 	handler: StreamCommandHandler<TCommand>;
@@ -189,45 +181,6 @@ function commandKindError(
 		exitCode: 1,
 		message: `Command "${command}" is not a ${kind} command`,
 	});
-}
-
-function reportCommandFailure(
-	context: ExecuteStepContext,
-	error: unknown
-): void {
-	if (isShellDiagnosticError(error)) {
-		context.status = error.exitCode;
-		writeDiagnosticsToStderr(context, error.diagnostics);
-		return;
-	}
-	if (isShellRuntimeError(error)) {
-		context.status = error.exitCode;
-		if (error.message !== '') {
-			context.stderr.append(error.message);
-		}
-		return;
-	}
-	context.status = 1;
-	context.stderr.append(
-		error instanceof Error ? error.message : String(error)
-	);
-}
-
-async function runOrReport<T>(
-	effect: Effect.Effect<T, unknown>,
-	context: ExecuteStepContext
-): Promise<CommandEffectResult<T>> {
-	return Effect.runPromise(
-		effect.pipe(
-			Effect.match({
-				onFailure: (error) => {
-					reportCommandFailure(context, error);
-					return { ok: false } as const;
-				},
-				onSuccess: (value) => ({ ok: true, value }) as const,
-			})
-		)
-	);
 }
 
 function verifyCommandRegistries(): ShellRuntimeError | null {
@@ -339,7 +292,7 @@ function formatLongListing(
 	return `${mode} ${size} ${stat.mtime.toISOString()} ${path}`;
 }
 
-function normalizeLsPath(path: string, cwd: string): string {
+function resolveLsPath(path: string, cwd: string): string {
 	if (path === '.' || path === './') {
 		return cwd;
 	}
@@ -350,10 +303,6 @@ function normalizeLsPath(path: string, cwd: string): string {
 		return path;
 	}
 	return `${cwd}/${path}`;
-}
-
-function resolveLsPath(path: string, cwd: string): string {
-	return normalizeLsPath(path, cwd);
 }
 
 const commands = new Map<StepIR['cmd'], CommandRegistryEntry>();
@@ -486,11 +435,7 @@ CommandRegistry.register('grep', {
 				context,
 				fs,
 				input,
-				// @shfs/compiler can be consumed as a built package in this workspace,
-				// so grep args may type as legacy argv until compiler is rebuilt.
-				parsed: step.args as unknown as Parameters<
-					typeof runGrepCommand
-				>[0]['parsed'],
+				parsed: step.args,
 				redirections: step.redirections,
 				resolvedOutputRedirectPath,
 				stdin: createShellInput(input),

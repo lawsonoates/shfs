@@ -1,16 +1,11 @@
-import {
-	expandedWordToString,
-	type RedirectionIR,
-	type StepIR,
-} from '@shfs/compiler';
+import { expandedWordToString, type RedirectionIR } from '@shfs/compiler';
 import { Effect } from 'effect';
 import type { BuiltinContext } from '../builtin/types';
-import { ShellRuntimeError } from '../diagnostics';
+import { type ShellErrorCause, ShellRuntimeError } from '../diagnostics';
 import type { FS } from '../fs/fs';
 import type { Record as ShellRecord } from '../record';
 import type { Stream } from '../stream';
 import { evaluateExpandedSinglePathEffect, resolvePathFromCwd } from './path';
-import { formatRecord } from './records';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -120,7 +115,7 @@ function resolveFileRedirectEffect(
 	redirection: RedirectionIR,
 	fs: FS,
 	context: BuiltinContext
-): Effect.Effect<ResolvedFileRedirect, unknown> {
+): Effect.Effect<ResolvedFileRedirect, ShellErrorCause> {
 	return Effect.gen(function* () {
 		const targetPath = yield* evaluateExpandedSinglePathEffect(
 			command,
@@ -163,7 +158,7 @@ function applyInputRedirectionEffect(params: {
 	descriptors: Map<number, InputDescriptor>;
 	fs: FS;
 	redirection: RedirectionIR;
-}): Effect.Effect<void, unknown> {
+}): Effect.Effect<void, ShellErrorCause> {
 	return Effect.gen(function* () {
 		const { command, context, descriptors, fs, redirection } = params;
 		if (redirection.kind !== 'input') {
@@ -179,12 +174,10 @@ function applyInputRedirectionEffect(params: {
 		if (mode === 'fd') {
 			const targetFd = getTargetFd(redirection);
 			if (targetFd === null) {
-				return yield* Effect.fail(
-					new ShellRuntimeError({
-						exitCode: 1,
-						message: `${command}: invalid file descriptor duplication target`,
-					})
-				);
+				return yield* new ShellRuntimeError({
+					exitCode: 1,
+					message: `${command}: invalid file descriptor duplication target`,
+				});
 			}
 			descriptors.set(
 				sourceFd,
@@ -226,23 +219,12 @@ function applyInputRedirectionEffect(params: {
 	});
 }
 
-export async function resolveInputRedirect(
-	command: string,
-	redirections: RedirectionIR[] | undefined,
-	fs: FS,
-	context: BuiltinContext
-): Promise<ResolvedInputRedirect> {
-	return Effect.runPromise(
-		resolveInputRedirectEffect(command, redirections, fs, context)
-	);
-}
-
 export function resolveInputRedirectEffect(
 	command: string,
 	redirections: RedirectionIR[] | undefined,
 	fs: FS,
 	context: BuiltinContext
-): Effect.Effect<ResolvedInputRedirect, unknown> {
+): Effect.Effect<ResolvedInputRedirect, ShellErrorCause> {
 	return Effect.gen(function* () {
 		if (!redirections || redirections.length === 0) {
 			return { path: null, closed: false };
@@ -278,25 +260,13 @@ export function hasRedirect(
 	return getLastDefaultFileRedirect(redirections, kind) !== null;
 }
 
-export async function resolveRedirectPath(
-	command: string,
-	redirections: RedirectionIR[] | undefined,
-	kind: RedirectionIR['kind'],
-	fs: FS,
-	context: BuiltinContext
-): Promise<string | null> {
-	return Effect.runPromise(
-		resolveRedirectPathEffect(command, redirections, kind, fs, context)
-	);
-}
-
 export function resolveRedirectPathEffect(
 	command: string,
 	redirections: RedirectionIR[] | undefined,
 	kind: RedirectionIR['kind'],
 	fs: FS,
 	context: BuiltinContext
-): Effect.Effect<string | null, unknown> {
+): Effect.Effect<string | null, ShellErrorCause> {
 	return Effect.gen(function* () {
 		if (kind === 'input') {
 			const resolvedInput = yield* resolveInputRedirectEffect(
@@ -333,17 +303,11 @@ export function withInputRedirect(
 }
 
 async function readExistingFileText(fs: FS, path: string): Promise<string> {
-	return Effect.runPromise(
-		Effect.tryPromise({
-			try: () => fs.readFile(path),
-			catch: (error) => error,
-		}).pipe(
-			Effect.match({
-				onFailure: () => '',
-				onSuccess: (bytes) => textDecoder.decode(bytes),
-			})
-		)
-	);
+	try {
+		return textDecoder.decode(await fs.readFile(path));
+	} catch {
+		return '';
+	}
 }
 
 export async function writeTextToFile(
@@ -382,79 +346,4 @@ export async function ensureNoclobberWritable(
 
 export function isNullDevicePath(path: string): boolean {
 	return path === NULL_DEVICE_PATH;
-}
-
-export function applyOutputRedirect(
-	result: ExecuteResult,
-	step: StepIR,
-	fs: FS,
-	context: BuiltinContext,
-	resolvedOutputPath?: string
-): ExecuteResult {
-	if (!hasRedirect(step.redirections, 'output')) {
-		return result;
-	}
-
-	if (result.kind === 'stream') {
-		return {
-			kind: 'sink',
-			value: (async () => {
-				const outputPath =
-					resolvedOutputPath ??
-					(await resolveRedirectPath(
-						step.cmd,
-						step.redirections,
-						'output',
-						fs,
-						context
-					));
-				if (!outputPath) {
-					throw new Error(
-						`${step.cmd}: output redirection missing target`
-					);
-				}
-				await writeStreamToFile(result.value, outputPath, fs);
-			})(),
-		};
-	}
-
-	return {
-		kind: 'sink',
-		value: (async () => {
-			const outputPath =
-				resolvedOutputPath ??
-				(await resolveRedirectPath(
-					step.cmd,
-					step.redirections,
-					'output',
-					fs,
-					context
-				));
-			if (!outputPath) {
-				throw new Error(
-					`${step.cmd}: output redirection missing target`
-				);
-			}
-			await result.value;
-			await fs.writeFile(outputPath, textEncoder.encode(''));
-		})(),
-	};
-}
-
-export async function writeStreamToFile(
-	stream: Stream<ShellRecord>,
-	path: string,
-	fs: FS
-): Promise<void> {
-	if (isNullDevicePath(path)) {
-		for await (const _record of stream) {
-			// Drain the stream so command side effects and status updates complete.
-		}
-		return;
-	}
-	const outputChunks: string[] = [];
-	for await (const record of stream) {
-		outputChunks.push(formatRecord(record));
-	}
-	await fs.writeFile(path, textEncoder.encode(outputChunks.join('\n')));
 }

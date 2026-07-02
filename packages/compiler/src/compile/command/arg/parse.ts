@@ -1,10 +1,7 @@
 import { Effect } from 'effect';
 import type { ExpandedWord } from '../../../ir';
 import { expandedWordToString } from '../../../ir';
-import {
-	parseArgsWithIndex,
-	parseArgsWithIndexEffect,
-} from './parse/engine';
+import { parseArgsWithIndex, parseArgsWithIndexEffect } from './parse/engine';
 import { buildFlagIndex } from './parse/flag-index';
 import type {
 	ArgParseError,

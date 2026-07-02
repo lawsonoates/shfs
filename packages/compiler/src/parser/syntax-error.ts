@@ -98,7 +98,6 @@ export class UnexpectedEOFError extends ParseSyntaxError {
 		super(`Unexpected end of input, expected ${expected}`, span, {
 			code: 'unexpected-eof',
 		});
-		this.name = 'UnexpectedEOFError';
 	}
 }
 
@@ -113,7 +112,6 @@ export class UnexpectedTokenError extends ParseSyntaxError {
 		super(`Unexpected token '${found}', expected ${expected}`, span, {
 			code: 'unexpected-token',
 		});
-		this.name = 'UnexpectedTokenError';
 		this.found = found;
 		this.expected = expected;
 	}
@@ -127,7 +125,6 @@ export class UnmatchedParenError extends ParseSyntaxError {
 		super('Unmatched parenthesis', span, {
 			code: 'unmatched-parenthesis',
 		});
-		this.name = 'UnmatchedParenError';
 	}
 }
 
@@ -145,7 +142,6 @@ export class UnterminatedQuoteError extends ParseSyntaxError {
 				code: 'unterminated-quote',
 			}
 		);
-		this.name = 'UnterminatedQuoteError';
 		this.quoteChar = quoteChar;
 	}
 }

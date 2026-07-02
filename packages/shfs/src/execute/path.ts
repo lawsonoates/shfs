@@ -162,13 +162,6 @@ async function readDirectoryPaths(
 	return children;
 }
 
-export async function walkFilesystemEntries(
-	fs: FS,
-	rootDir = ROOT_DIRECTORY
-): Promise<FsEntry[]> {
-	return Effect.runPromise(walkFilesystemEntriesEffect(fs, rootDir));
-}
-
 function walkFilesystemEntriesEffect(
 	fs: FS,
 	rootDir = ROOT_DIRECTORY
@@ -363,17 +356,6 @@ export const evaluateExpandedPathWordsEffect: (
 	return resolvedWords;
 });
 
-export async function evaluateExpandedPathWord(
-	command: string,
-	word: ExpandedWord,
-	fs: FS,
-	context: BuiltinContext
-): Promise<string[]> {
-	return Effect.runPromise(
-		evaluateExpandedPathWordEffect(command, word, fs, context)
-	);
-}
-
 export const evaluateExpandedPathWordEffect: (
 	command: string,
 	word: ExpandedWord,
@@ -406,26 +388,6 @@ export const evaluateExpandedPathWordEffect: (
 	}
 	return matches;
 });
-
-export async function evaluateExpandedSinglePath(
-	command: string,
-	expectation: string,
-	word: ExpandedWord,
-	fs: FS,
-	context: BuiltinContext,
-	options?: { allowEmpty?: boolean }
-): Promise<string> {
-	return Effect.runPromise(
-		evaluateExpandedSinglePathEffect(
-			command,
-			expectation,
-			word,
-			fs,
-			context,
-			options
-		)
-	);
-}
 
 export const evaluateExpandedSinglePathEffect: (
 	command: string,

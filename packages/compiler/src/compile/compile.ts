@@ -116,16 +116,6 @@ class ProgramCompiler {
 				}
 			}
 
-			if (commands.length === 0) {
-				return yield* new CompileError(
-					createCommandDiagnostic(
-						'<pipeline>',
-						'empty-pipeline',
-						'Pipeline must contain at least one command'
-					)
-				);
-			}
-
 			// First command determines the source
 			const firstCmd = commands[0];
 			if (!firstCmd) {

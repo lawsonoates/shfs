@@ -9,7 +9,7 @@ import {
 	type GrepOptionsIR,
 	type RedirectionIR,
 } from '@shfs/compiler';
-import { Effect } from 'effect';
+import { Effect, Result } from 'effect';
 import picomatch from 'picomatch';
 
 import type { BuiltinContext } from '../../builtin/types';
@@ -120,12 +120,6 @@ let corpusEntries: CorpusEntry[] | null = null;
 export async function runGrepCommand(
 	options: RunGrepCommandOptions
 ): Promise<RunGrepCommandResult> {
-	return runGrepCommandInner(options);
-}
-
-async function runGrepCommandInner(
-	options: RunGrepCommandOptions
-): Promise<RunGrepCommandResult> {
 	const parsed = options.parsed;
 	if (parsed.options.help) {
 		return {
@@ -167,46 +161,39 @@ async function runGrepCommandInner(
 	}
 
 	const inputRedirect = await Effect.runPromise(
-		resolveRedirectPathEffect(
-			'grep',
-			options.redirections,
-			'input',
-			options.fs,
-			options.context
-		).pipe(
-			Effect.match({
-				onFailure: () => ({ ok: false }) as const,
-				onSuccess: (path) => ({ ok: true, path }) as const,
-			})
+		Effect.result(
+			resolveRedirectPathEffect(
+				'grep',
+				options.redirections,
+				'input',
+				options.fs,
+				options.context
+			)
 		)
 	);
-	if (!inputRedirect.ok) {
+	if (Result.isFailure(inputRedirect)) {
 		hadError = true;
 	}
-	const inputRedirectPath = inputRedirect.ok ? inputRedirect.path : null;
-	const resolvedOutputRedirect =
+	const inputRedirectPath = Result.getOrElse(inputRedirect, () => null);
+
+	const outputRedirect =
 		options.resolvedOutputRedirectPath === undefined
 			? await Effect.runPromise(
-					resolveRedirectPathEffect(
-						'grep',
-						options.redirections,
-						'output',
-						options.fs,
-						options.context
-					).pipe(
-						Effect.match({
-							onFailure: () => ({ ok: false }) as const,
-							onSuccess: (path) => ({ ok: true, path }) as const,
-						})
+					Effect.result(
+						resolveRedirectPathEffect(
+							'grep',
+							options.redirections,
+							'output',
+							options.fs,
+							options.context
+						)
 					)
 				)
-			: ({ ok: true, path: options.resolvedOutputRedirectPath } as const);
-	if (!resolvedOutputRedirect.ok) {
+			: Result.succeed<string | null>(options.resolvedOutputRedirectPath);
+	if (Result.isFailure(outputRedirect)) {
 		hadError = true;
 	}
-	const outputRedirectPath = resolvedOutputRedirect.ok
-		? resolvedOutputRedirect.path
-		: null;
+	const outputRedirectPath = Result.getOrElse(outputRedirect, () => null);
 
 	if (
 		hasInputOutputConflict(

@@ -8,10 +8,9 @@ import {
 } from '@shfs/compiler';
 import { Effect } from 'effect';
 import {
-	isShellDiagnosticError,
-	isShellRuntimeError,
+	runOrReport,
+	type ShellErrorCause,
 	ShellRuntimeError,
-	writeDiagnosticsToStderr,
 } from '../diagnostics';
 import type { FS } from '../fs/fs';
 import { formatRecord, type Record as ShellRecord } from '../record';
@@ -74,14 +73,6 @@ interface RoutedOutput {
 interface ExecutedStepResult extends RoutedOutput {
 	preservedStatus: number | null;
 }
-
-type ExecutedStepOutcome =
-	| { kind: 'failure'; error: unknown }
-	| { kind: 'success'; result: ExecutedStepResult };
-
-type RoutingPlanResult =
-	| { kind: 'failure'; error: unknown }
-	| { kind: 'success'; plan: StepRoutingPlan };
 
 const ROOT_DIRECTORY = '/';
 const FD_TARGET_REGEX = /^&[0-9]+$/;
@@ -260,19 +251,14 @@ async function* runPipeline(
 			return;
 		}
 
-		const planResult: RoutingPlanResult = await Effect.runPromise(
-			resolveRoutingPlanEffect(step, fs, context, isLastStep).pipe(
-				Effect.match({
-					onFailure: (error) => ({ kind: 'failure', error }) as const,
-					onSuccess: (plan) => ({ kind: 'success', plan }) as const,
-				})
-			)
+		const resolvedPlan = await runOrReport(
+			resolveRoutingPlanEffect(step, fs, context, isLastStep),
+			context
 		);
-		if (planResult.kind === 'failure') {
-			recordExecutionFailure(planResult.error, context);
+		if (!resolvedPlan.ok) {
 			return;
 		}
-		const plan = planResult.plan;
+		const plan = resolvedPlan.value;
 		const shouldPreserveStatus = shouldPreserveProducerStatus(
 			plan,
 			!isLastStep
@@ -285,28 +271,27 @@ async function* runPipeline(
 			return;
 		}
 
-		const executed: ExecutedStepOutcome = CommandRegistry.isEffectStep(step)
-			? await executeEffectStep({
-					context,
-					fs,
-					plan,
-					shouldPreserveStatus,
-					step,
-				})
-			: await executeStreamStep({
-					context,
-					fs,
-					hasNextStep: !isLastStep,
-					inputRecords: pipeInputRecords,
-					plan,
-					shouldPreserveStatus,
-					step,
-				});
-		if (executed.kind === 'failure') {
-			recordExecutionFailure(executed.error, context);
+		const stepResult: ExecutedStepResult | null =
+			CommandRegistry.isEffectStep(step)
+				? await executeEffectStep({
+						context,
+						fs,
+						plan,
+						shouldPreserveStatus,
+						step,
+					})
+				: await executeStreamStep({
+						context,
+						fs,
+						hasNextStep: !isLastStep,
+						inputRecords: pipeInputRecords,
+						plan,
+						shouldPreserveStatus,
+						step,
+					});
+		if (stepResult === null) {
 			return;
 		}
-		const stepResult: ExecutedStepResult = executed.result;
 		if (stepResult.preservedStatus !== null) {
 			preservedPipelineStatus = stepResult.preservedStatus;
 		}
@@ -320,29 +305,29 @@ async function* runPipeline(
 	}
 }
 
+/**
+ * Run an effect-backed step. Returns null when the step failed and the
+ * failure has already been reported to the pipeline context.
+ */
 async function executeEffectStep(params: {
 	context: NormalizedExecuteContext;
 	fs: FS;
 	plan: StepRoutingPlan;
 	shouldPreserveStatus: boolean;
 	step: EffectStep;
-}): Promise<ExecutedStepOutcome> {
+}): Promise<ExecutedStepResult | null> {
 	const { context, fs, plan, shouldPreserveStatus, step } = params;
 	const childContext = createChildContext(context);
-	const error = await Effect.runPromise(
+	const ran = await runOrReport(
 		CommandRegistry.executeStep({
 			step,
 			fs,
 			context: childContext,
-		}).pipe(
-			Effect.match({
-				onFailure: (cause) => cause,
-				onSuccess: () => null,
-			})
-		)
+		}),
+		context
 	);
-	if (error !== null) {
-		return { kind: 'failure', error };
+	if (!ran.ok) {
+		return null;
 	}
 	propagateChildContext(childContext, context);
 	const routed = await routeStepOutput({
@@ -354,11 +339,8 @@ async function executeEffectStep(params: {
 		stdoutRecords: [],
 	});
 	return {
-		kind: 'success',
-		result: {
-			...routed,
-			preservedStatus: shouldPreserveStatus ? childContext.status : null,
-		},
+		...routed,
+		preservedStatus: shouldPreserveStatus ? childContext.status : null,
 	};
 }
 
@@ -370,7 +352,7 @@ async function executeStreamStep(params: {
 	plan: StepRoutingPlan;
 	shouldPreserveStatus: boolean;
 	step: Exclude<StepIR, EffectStep>;
-}): Promise<ExecutedStepOutcome> {
+}): Promise<ExecutedStepResult> {
 	const {
 		context,
 		fs,
@@ -404,11 +386,8 @@ async function executeStreamStep(params: {
 		stdoutRecords,
 	});
 	return {
-		kind: 'success',
-		result: {
-			...routed,
-			preservedStatus: shouldPreserveStatus ? childContext.status : null,
-		},
+		...routed,
+		preservedStatus: shouldPreserveStatus ? childContext.status : null,
 	};
 }
 
@@ -486,7 +465,7 @@ function resolveFileDestinationEffect(
 	redirection: RedirectionIR,
 	fs: FS,
 	context: NormalizedExecuteContext
-): Effect.Effect<OutputDestination, unknown> {
+): Effect.Effect<OutputDestination, ShellErrorCause> {
 	return Effect.gen(function* () {
 		const targetPath = yield* evaluateExpandedSinglePathEffect(
 			command,
@@ -510,8 +489,7 @@ function resolveFileDestinationEffect(
 
 function destinationForFd(
 	routing: StepRoutingPlan,
-	fd: number,
-	_isLastStep: boolean
+	fd: number
 ): OutputDestination {
 	if (fd === 1) {
 		return routing.fd1;
@@ -539,16 +517,15 @@ function defaultStdoutDestination(
 function resolveOutputRedirectionDestinationEffect(params: {
 	context: NormalizedExecuteContext;
 	fs: FS;
-	isLastStep: boolean;
 	redirection: RedirectionIR;
 	routing: StepRoutingPlan;
 	step: StepIR;
 }): Effect.Effect<
 	{ destination: OutputDestination; sourceFd: 1 | 2 } | null,
-	unknown
+	ShellErrorCause
 > {
 	return Effect.gen(function* () {
-		const { context, fs, isLastStep, redirection, routing, step } = params;
+		const { context, fs, redirection, routing, step } = params;
 		if (redirection.kind !== 'output') {
 			return null;
 		}
@@ -566,16 +543,12 @@ function resolveOutputRedirectionDestinationEffect(params: {
 		} else if (mode === 'fd') {
 			const targetFd = getTargetFd(redirection);
 			if (targetFd === null) {
-				return yield* Effect.fail(
-					new ShellRuntimeError({
-						exitCode: 1,
-						message: `${step.cmd}: invalid file descriptor duplication target`,
-					})
-				);
+				return yield* new ShellRuntimeError({
+					exitCode: 1,
+					message: `${step.cmd}: invalid file descriptor duplication target`,
+				});
 			}
-			destination = cloneDestination(
-				destinationForFd(routing, targetFd, isLastStep)
-			);
+			destination = cloneDestination(destinationForFd(routing, targetFd));
 		} else if (mode === 'file') {
 			destination = yield* resolveFileDestinationEffect(
 				step.cmd,
@@ -599,7 +572,7 @@ function resolveRoutingPlanEffect(
 	fs: FS,
 	context: NormalizedExecuteContext,
 	isLastStep: boolean
-): Effect.Effect<StepRoutingPlan, unknown> {
+): Effect.Effect<StepRoutingPlan, ShellErrorCause> {
 	return Effect.gen(function* () {
 		const stepRedirections = step.redirections ?? [];
 		const hasNonStdoutPipeRedirect = stepRedirections.some(
@@ -631,7 +604,6 @@ function resolveRoutingPlanEffect(
 			const resolved = yield* resolveOutputRedirectionDestinationEffect({
 				context,
 				fs,
-				isLastStep,
 				redirection,
 				routing,
 				step,
@@ -682,10 +654,6 @@ function recordsToText(records: readonly ShellRecord[]): string {
 	return records.map((record) => formatRecord(record)).join('\n');
 }
 
-function linesToText(lines: readonly string[]): string {
-	return lines.join('\n');
-}
-
 function mergeChannelText(stdoutText: string, stderrText: string): string {
 	if (stdoutText === '') {
 		return stderrText;
@@ -696,33 +664,6 @@ function mergeChannelText(stdoutText: string, stderrText: string): string {
 	return `${stdoutText}\n${stderrText}`;
 }
 
-function toErrorMessage(error: unknown): string {
-	if (error instanceof Error) {
-		return error.message;
-	}
-	return String(error);
-}
-
-function recordExecutionFailure(
-	error: unknown,
-	context: NormalizedExecuteContext
-): void {
-	if (isShellDiagnosticError(error)) {
-		context.status = error.exitCode;
-		writeDiagnosticsToStderr(context, error.diagnostics);
-		return;
-	}
-	if (isShellRuntimeError(error)) {
-		context.status = error.exitCode;
-		if (error.message !== '') {
-			context.stderr.append(error.message);
-		}
-		return;
-	}
-	context.status = 1;
-	context.stderr.append(toErrorMessage(error));
-}
-
 async function writeToFileOrReport(params: {
 	append: boolean;
 	content: string;
@@ -731,20 +672,13 @@ async function writeToFileOrReport(params: {
 	path: string;
 }): Promise<void> {
 	const { append, content, context, fs, path } = params;
-	const error = await Effect.runPromise(
-		Effect.tryPromise({
-			try: () => writeTextToFile(fs, path, content, { append }),
-			catch: (cause) => cause,
-		}).pipe(
-			Effect.match({
-				onFailure: (cause) => cause,
-				onSuccess: () => null,
-			})
-		)
-	);
-	if (error !== null) {
+	try {
+		await writeTextToFile(fs, path, content, { append });
+	} catch (error) {
 		context.status = 1;
-		context.stderr.append(toErrorMessage(error));
+		context.stderr.append(
+			error instanceof Error ? error.message : String(error)
+		);
 	}
 }
 
@@ -786,7 +720,7 @@ async function routeStepOutput(params: {
 	if (writesToSameFile) {
 		const mergedText = mergeChannelText(
 			recordsToText(stdoutRecords),
-			linesToText(stderrLines)
+			stderrLines.join('\n')
 		);
 		await writeToFileOrReport({
 			append: stdoutDestination.append && stderrDestination.append,
@@ -907,7 +841,7 @@ async function routeStderr(
 		case 'file':
 			await writeToFileOrReport({
 				append: destination.append,
-				content: linesToText(stderrLines),
+				content: stderrLines.join('\n'),
 				context,
 				fs,
 				path: destination.path,
