@@ -30,8 +30,8 @@ import {
 	writeTextToFile,
 } from './redirection';
 import {
+	type ActionStep,
 	CommandRegistry,
-	type EffectStep,
 	type ExecuteStepContext,
 } from './registry';
 
@@ -128,7 +128,7 @@ function isPipelineSink(pipeline: PipelineIR): boolean {
 		return false;
 	}
 	return (
-		CommandRegistry.isEffectStep(finalStep) ||
+		CommandRegistry.isActionStep(finalStep) ||
 		hasRedirect(finalStep.redirections, 'output')
 	);
 }
@@ -243,7 +243,7 @@ async function* runPipeline(
 
 	for (const [index, step] of pipeline.steps.entries()) {
 		const isLastStep = index === pipeline.steps.length - 1;
-		if (CommandRegistry.isEffectStep(step) && !isLastStep) {
+		if (CommandRegistry.isActionStep(step) && !isLastStep) {
 			context.status = 1;
 			context.stderr.append(
 				`Unsupported pipeline: "${step.cmd}" must be the final command`
@@ -272,8 +272,8 @@ async function* runPipeline(
 		}
 
 		const stepResult: ExecutedStepResult | null =
-			CommandRegistry.isEffectStep(step)
-				? await executeEffectStep({
+			CommandRegistry.isActionStep(step)
+				? await executeActionStep({
 						context,
 						fs,
 						plan,
@@ -309,12 +309,12 @@ async function* runPipeline(
  * Run an effect-backed step. Returns null when the step failed and the
  * failure has already been reported to the pipeline context.
  */
-async function executeEffectStep(params: {
+async function executeActionStep(params: {
 	context: NormalizedExecuteContext;
 	fs: FS;
 	plan: StepRoutingPlan;
 	shouldPreserveStatus: boolean;
-	step: EffectStep;
+	step: ActionStep;
 }): Promise<ExecutedStepResult | null> {
 	const { context, fs, plan, shouldPreserveStatus, step } = params;
 	const childContext = createChildContext(context);
@@ -351,7 +351,7 @@ async function executeStreamStep(params: {
 	inputRecords: ShellRecord[] | null;
 	plan: StepRoutingPlan;
 	shouldPreserveStatus: boolean;
-	step: Exclude<StepIR, EffectStep>;
+	step: Exclude<StepIR, ActionStep>;
 }): Promise<ExecutedStepResult> {
 	const {
 		context,

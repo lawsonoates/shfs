@@ -27,7 +27,7 @@ export type Builtin<A = void> = (
 	args: A
 ) => Stream<ShellRecord>;
 
-export type EffectBuiltin<A = void> = (
+export type ActionBuiltin<A = void> = (
 	runtime: BuiltinRuntime,
 	args: A
 ) => Effect.Effect<void, ShellErrorCause>;

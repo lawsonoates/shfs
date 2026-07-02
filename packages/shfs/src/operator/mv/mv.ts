@@ -1,7 +1,7 @@
 import { Effect } from 'effect';
 import { ShellRuntimeError } from '../../diagnostics';
 import type { FS } from '../../fs/fs';
-import type { CommandEffect } from '../types';
+import type { ActionEffect } from '../types';
 
 const TRAILING_SLASH_REGEX = /\/+$/;
 const MULTIPLE_SLASH_REGEX = /\/+/g;
@@ -81,7 +81,7 @@ const assertCanMoveToDestination = Effect.fnUntraced(function* (
 	}
 });
 
-export function mv(fs: FS): CommandEffect<MvArgs> {
+export function mv(fs: FS): ActionEffect<MvArgs> {
 	return Effect.fn('mv')(function* ({
 		srcs,
 		dest,

@@ -1,7 +1,7 @@
 import { Effect } from 'effect';
 import { ShellRuntimeError } from '../../diagnostics';
 import type { FS } from '../../fs/fs';
-import type { CommandEffect } from '../types';
+import type { ActionEffect } from '../types';
 
 const TRAILING_SLASH_REGEX = /\/+$/;
 const MULTIPLE_SLASH_REGEX = /\/+/g;
@@ -227,7 +227,7 @@ const copyDirectoryRecursive = Effect.fnUntraced(function* (
 	}
 });
 
-export function cp(fs: FS): CommandEffect<CpArgs> {
+export function cp(fs: FS): ActionEffect<CpArgs> {
 	return Effect.fn('cp')(function* ({
 		srcs,
 		dest,

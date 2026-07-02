@@ -1,7 +1,7 @@
 import { Effect } from 'effect';
 import { ShellRuntimeError } from '../../diagnostics';
 import type { FS } from '../../fs/fs';
-import type { CommandEffect } from '../types';
+import type { ActionEffect } from '../types';
 
 export interface TouchArgs {
 	files: string[];
@@ -9,7 +9,7 @@ export interface TouchArgs {
 	modificationTimeOnly?: boolean;
 }
 
-export function touch(fs: FS): CommandEffect<TouchArgs> {
+export function touch(fs: FS): ActionEffect<TouchArgs> {
 	return Effect.fn('touch')(function* ({
 		files,
 		accessTimeOnly = false,

@@ -1,7 +1,7 @@
 import { Effect } from 'effect';
 import { ShellRuntimeError } from '../../diagnostics';
 import type { FS } from '../../fs/fs';
-import type { CommandEffect } from '../types';
+import type { ActionEffect } from '../types';
 
 export interface RmArgs {
 	path: string;
@@ -10,7 +10,7 @@ export interface RmArgs {
 	interactive?: boolean;
 }
 
-export function rm(fs: FS): CommandEffect<RmArgs> {
+export function rm(fs: FS): ActionEffect<RmArgs> {
 	return Effect.fn('rm')(function* ({
 		path,
 		recursive,

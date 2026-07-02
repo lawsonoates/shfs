@@ -5,9 +5,9 @@ import {
 	evaluateExpandedSinglePathEffect,
 	resolvePathFromCwd,
 } from '../../execute/path';
-import type { EffectBuiltin } from '../types';
+import type { ActionBuiltin } from '../types';
 
-export const cd: EffectBuiltin<CdStep['args']> = Effect.fn('cd')(
+export const cd: ActionBuiltin<CdStep['args']> = Effect.fn('cd')(
 	function* (runtime, args) {
 		const requestedPath = yield* evaluateExpandedSinglePathEffect(
 			'cd',

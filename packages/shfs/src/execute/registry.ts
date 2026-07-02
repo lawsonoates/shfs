@@ -47,12 +47,12 @@ import {
 	withInputRedirect,
 } from './redirection';
 
-export type EffectStep = Extract<
+export type ActionStep = Extract<
 	StepIR,
 	{ cmd: 'cd' | 'cp' | 'mkdir' | 'mv' | 'rm' | 'touch' }
 >;
-type StreamStep = Exclude<StepIR, EffectStep>;
-type EffectCommand = EffectStep['cmd'];
+type StreamStep = Exclude<StepIR, ActionStep>;
+type ActionCommand = ActionStep['cmd'];
 type StreamCommand = StreamStep['cmd'];
 
 export type ExecuteStepContext = BuiltinContext;
@@ -65,14 +65,14 @@ interface ExecuteStreamStepParams {
 	resolvedOutputRedirectPath?: string;
 }
 
-interface ExecuteEffectStepParams {
-	step: EffectStep;
+interface ExecuteActionStepParams {
+	step: ActionStep;
 	fs: FS;
 	context: ExecuteStepContext;
 }
 
-const EFFECT_COMMANDS = ['cd', 'cp', 'mkdir', 'mv', 'rm', 'touch'] as const;
-const EFFECT_COMMAND_SET = new Set<StepIR['cmd']>(EFFECT_COMMANDS);
+const ACTION_COMMANDS = ['cd', 'cp', 'mkdir', 'mv', 'rm', 'touch'] as const;
+const ACTION_COMMAND_SET = new Set<StepIR['cmd']>(ACTION_COMMANDS);
 const STREAM_COMMANDS = [
 	'cat',
 	'echo',
@@ -111,8 +111,8 @@ type StreamStepForCommand<TCommand extends StreamCommand> = Extract<
 	StreamStep,
 	{ cmd: TCommand }
 >;
-type EffectStepForCommand<TCommand extends EffectCommand> = Extract<
-	EffectStep,
+type ActionStepForCommand<TCommand extends ActionCommand> = Extract<
+	ActionStep,
 	{ cmd: TCommand }
 >;
 
@@ -125,9 +125,9 @@ type StreamCommandHandler<TCommand extends StreamCommand = StreamCommand> =
 		resolvedOutputRedirectPath?: string;
 	}) => Stream<ShellRecord>;
 
-type EffectCommandHandler<TCommand extends EffectCommand = EffectCommand> =
+type ActionCommandHandler<TCommand extends ActionCommand = ActionCommand> =
 	(params: {
-		step: EffectStepForCommand<TCommand>;
+		step: ActionStepForCommand<TCommand>;
 		fs: FS;
 		context: ExecuteStepContext;
 	}) => Effect.Effect<void, ShellErrorCause>;
@@ -138,8 +138,8 @@ type CommandRegistryEntry =
 			handler: StreamCommandHandler;
 	  }
 	| {
-			kind: 'effect';
-			handler: EffectCommandHandler;
+			kind: 'action';
+			handler: ActionCommandHandler;
 	  };
 
 interface StreamCommandEntry<TCommand extends StreamCommand> {
@@ -147,9 +147,9 @@ interface StreamCommandEntry<TCommand extends StreamCommand> {
 	handler: StreamCommandHandler<TCommand>;
 }
 
-interface EffectCommandEntry<TCommand extends EffectCommand> {
-	kind: 'effect';
-	handler: EffectCommandHandler<TCommand>;
+interface ActionCommandEntry<TCommand extends ActionCommand> {
+	kind: 'action';
+	handler: ActionCommandHandler<TCommand>;
 }
 
 function isStreamCommand(command: StepIR['cmd']): command is StreamCommand {
@@ -188,9 +188,9 @@ function verifyCommandRegistries(): ShellRuntimeError | null {
 		return null;
 	}
 
-	for (const command of EFFECT_COMMANDS) {
-		if (commands.get(command)?.kind !== 'effect') {
-			return missingCommandHandlerError(command, 'effect');
+	for (const command of ACTION_COMMANDS) {
+		if (commands.get(command)?.kind !== 'action') {
+			return missingCommandHandlerError(command, 'action');
 		}
 	}
 
@@ -245,11 +245,11 @@ function executeStreamStep({
 	});
 }
 
-function executeEffectStep({
+function executeActionStep({
 	step,
 	fs,
 	context,
-}: ExecuteEffectStepParams): Effect.Effect<void, ShellErrorCause> {
+}: ExecuteActionStepParams): Effect.Effect<void, ShellErrorCause> {
 	return Effect.gen(function* () {
 		const verificationError = verifyCommandRegistries();
 		if (verificationError) {
@@ -311,9 +311,9 @@ function register<TCommand extends StreamCommand>(
 	command: TCommand,
 	entry: StreamCommandEntry<TCommand>
 ): void;
-function register<TCommand extends EffectCommand>(
+function register<TCommand extends ActionCommand>(
 	command: TCommand,
-	entry: EffectCommandEntry<TCommand>
+	entry: ActionCommandEntry<TCommand>
 ): void;
 function register(command: StepIR['cmd'], entry: CommandRegistryEntry): void {
 	commands.set(command, entry);
@@ -332,34 +332,34 @@ function getStream<TCommand extends StreamCommand>(
 	return entry.handler as unknown as StreamCommandHandler<TCommand>;
 }
 
-function getEffect<TCommand extends EffectCommand>(
+function getEffect<TCommand extends ActionCommand>(
 	command: TCommand
-): Effect.Effect<EffectCommandHandler<TCommand>, ShellErrorCause> {
+): Effect.Effect<ActionCommandHandler<TCommand>, ShellErrorCause> {
 	const entry = commands.get(command);
 	if (!entry) {
 		return Effect.fail(unknownCommandError(command));
 	}
-	if (entry.kind !== 'effect') {
-		return Effect.fail(commandKindError(command, 'effect'));
+	if (entry.kind !== 'action') {
+		return Effect.fail(commandKindError(command, 'action'));
 	}
 	return Effect.succeed(
-		entry.handler as unknown as EffectCommandHandler<TCommand>
+		entry.handler as unknown as ActionCommandHandler<TCommand>
 	);
 }
 
-function isEffectStep(step: StepIR): step is EffectStep {
-	return EFFECT_COMMAND_SET.has(step.cmd);
+function isActionStep(step: StepIR): step is ActionStep {
+	return ACTION_COMMAND_SET.has(step.cmd);
 }
 
 function executeStep(params: ExecuteStreamStepParams): Stream<ShellRecord>;
 function executeStep(
-	params: ExecuteEffectStepParams
+	params: ExecuteActionStepParams
 ): Effect.Effect<void, ShellErrorCause>;
 function executeStep(
-	params: ExecuteStreamStepParams | ExecuteEffectStepParams
+	params: ExecuteStreamStepParams | ExecuteActionStepParams
 ): Stream<ShellRecord> | Effect.Effect<void, ShellErrorCause> {
-	if (isEffectStep(params.step)) {
-		return executeEffectStep(params as ExecuteEffectStepParams);
+	if (isActionStep(params.step)) {
+		return executeActionStep(params as ExecuteActionStepParams);
 	}
 	return executeStreamStep(params as ExecuteStreamStepParams);
 }
@@ -368,7 +368,7 @@ export const CommandRegistry = {
 	executeStep,
 	getEffect,
 	getStream,
-	isEffectStep,
+	isActionStep,
 	register,
 };
 
@@ -827,14 +827,14 @@ CommandRegistry.register('string', {
 });
 
 CommandRegistry.register('cd', {
-	kind: 'effect',
+	kind: 'action',
 	handler: Effect.fn('CommandRegistry.cd')(function* ({ step, fs, context }) {
 		yield* cd(createBuiltinRuntime(fs, context, null), step.args);
 	}),
 });
 
 CommandRegistry.register('cp', {
-	kind: 'effect',
+	kind: 'action',
 	handler: Effect.fn('CommandRegistry.cp')(function* ({ step, fs, context }) {
 		const srcValues = yield* evaluateExpandedPathWordsEffect(
 			'cp',
@@ -872,7 +872,7 @@ CommandRegistry.register('cp', {
 });
 
 CommandRegistry.register('mkdir', {
-	kind: 'effect',
+	kind: 'action',
 	handler: Effect.fn('CommandRegistry.mkdir')(function* ({
 		step,
 		fs,
@@ -893,7 +893,7 @@ CommandRegistry.register('mkdir', {
 });
 
 CommandRegistry.register('mv', {
-	kind: 'effect',
+	kind: 'action',
 	handler: Effect.fn('CommandRegistry.mv')(function* ({ step, fs, context }) {
 		const srcValues = yield* evaluateExpandedPathWordsEffect(
 			'mv',
@@ -930,7 +930,7 @@ CommandRegistry.register('mv', {
 });
 
 CommandRegistry.register('rm', {
-	kind: 'effect',
+	kind: 'action',
 	handler: Effect.fn('CommandRegistry.rm')(function* ({ step, fs, context }) {
 		const pathValues = yield* evaluateExpandedPathWordsEffect(
 			'rm',
@@ -952,7 +952,7 @@ CommandRegistry.register('rm', {
 });
 
 CommandRegistry.register('touch', {
-	kind: 'effect',
+	kind: 'action',
 	handler: Effect.fn('CommandRegistry.touch')(function* ({
 		step,
 		fs,

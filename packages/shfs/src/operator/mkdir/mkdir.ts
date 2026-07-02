@@ -1,9 +1,9 @@
 import { Effect } from 'effect';
 import { ShellRuntimeError } from '../../diagnostics';
 import type { FS } from '../../fs/fs';
-import type { CommandEffect } from '../types';
+import type { ActionEffect } from '../types';
 
-export function mkdir(fs: FS): CommandEffect<{
+export function mkdir(fs: FS): ActionEffect<{
 	path: string;
 	recursive: boolean;
 }> {
