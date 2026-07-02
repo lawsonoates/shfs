@@ -21,6 +21,7 @@ import {
 	normalizeCwd,
 	resolvePathFromCwd,
 } from './path';
+import { collectRecordStream, fromRecordGenerator } from './record-stream';
 import {
 	ensureNoclobberWritable,
 	getRedirectionMode,
@@ -344,6 +345,10 @@ async function executeActionStep(params: {
 	};
 }
 
+/**
+ * Run a stream-backed step. Returns null when the step failed and the
+ * failure has already been reported to the pipeline context.
+ */
 async function executeStreamStep(params: {
 	context: NormalizedExecuteContext;
 	fs: FS;
@@ -352,7 +357,7 @@ async function executeStreamStep(params: {
 	plan: StepRoutingPlan;
 	shouldPreserveStatus: boolean;
 	step: Exclude<StepIR, ActionStep>;
-}): Promise<ExecutedStepResult> {
+}): Promise<ExecutedStepResult | null> {
 	const {
 		context,
 		fs,
@@ -374,7 +379,14 @@ async function executeStreamStep(params: {
 		context: childContext,
 		resolvedOutputRedirectPath,
 	});
-	const stdoutRecords = await collectRecords(stepOutput);
+	const collected = await runOrReport(
+		collectRecordStream(fromRecordGenerator(stepOutput)),
+		context
+	);
+	if (!collected.ok) {
+		return null;
+	}
+	const stdoutRecords = collected.value;
 	const stderrLines = childContext.stderr.snapshot();
 	propagateChildContext(childContext, context);
 	const routed = await routeStepOutput({

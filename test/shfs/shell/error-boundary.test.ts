@@ -71,9 +71,7 @@ test('2> redirects an expansion-failure diagnostic to a file, not shell stderr',
 	);
 });
 
-// TODO(effect-stream): enable once stream errors ride the typed error channel (roadmap step 5).
-// biome-ignore lint/suspicious/noSkippedTests: pending fix — enabled in roadmap step 5.
-test.skip('reading a missing file never throws from .nothrow()', async () => {
+test('reading a missing file never throws from .nothrow()', async () => {
 	await run('mkdir -p /w');
 	await run('cd /w');
 
@@ -83,9 +81,7 @@ test.skip('reading a missing file never throws from .nothrow()', async () => {
 	expect(result.stderr.toString()).not.toBe('');
 });
 
-// TODO(effect-stream): enable once stream errors ride the typed error channel (roadmap step 5).
-// biome-ignore lint/suspicious/noSkippedTests: pending fix — enabled in roadmap step 5.
-test.skip('a missing-file read reports an error but the script continues', async () => {
+test('a missing-file read reports an error but the script continues', async () => {
 	await run('mkdir -p /w');
 	await run('cd /w');
 

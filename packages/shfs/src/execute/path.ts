@@ -5,8 +5,6 @@ import {
 	type ExpandedWordPart,
 	expandedWordHasGlob,
 	expandedWordParts,
-	isCompileError,
-	isParseSyntaxError,
 	parseEffect,
 } from '@shfs/compiler';
 
@@ -20,6 +18,11 @@ import {
 } from '../diagnostics';
 import type { FS } from '../fs/fs';
 import { formatRecord, type Record as ShellRecord } from '../record';
+import { toShellFailure } from './record-stream';
+
+function toShellErrorCause(cause: unknown): ShellErrorCause {
+	return toShellFailure(cause) as ShellErrorCause;
+}
 
 interface FsEntry {
 	path: string;
@@ -49,20 +52,6 @@ async function collectOutputRecords(
 		outputs.push(formatRecord(record));
 	}
 	return outputs;
-}
-
-function toShellErrorCause(cause: unknown): ShellErrorCause {
-	if (isParseSyntaxError(cause)) {
-		return createDiagnosticError(cause.diagnostic);
-	}
-	if (isCompileError(cause)) {
-		return createDiagnosticError(cause.diagnostic);
-	}
-	return new ShellRuntimeError({
-		cause,
-		exitCode: 1,
-		message: cause instanceof Error ? cause.message : String(cause),
-	});
 }
 
 function evaluateCommandSubstitutionEffect(
