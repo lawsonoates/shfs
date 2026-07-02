@@ -1,31 +1,50 @@
-import type { DiagnosticLocation, ShellDiagnostic } from '@shfs/compiler';
+import {
+	type DiagnosticLocation,
+	type ShellDiagnostic,
+	ShellDiagnosticSchema,
+} from '@shfs/compiler';
+import { Schema } from 'effect';
 
 import { appendStderrLines, type StderrSink } from './stderr';
 
 const FIRST_ARGUMENT_NUMBER = 1;
 
-export class ShellDiagnosticError extends Error {
-	readonly diagnostics: readonly ShellDiagnostic[];
-	readonly exitCode: number;
-
+export class ShellDiagnosticError extends Schema.TaggedErrorClass<ShellDiagnosticError>()(
+	'ShellDiagnosticError',
+	{
+		diagnostics: Schema.Array(ShellDiagnosticSchema),
+		exitCode: Schema.Number,
+		message: Schema.String,
+	}
+) {
 	constructor(
 		diagnostics: readonly ShellDiagnostic[],
 		exitCode = exitCodeForDiagnostics(diagnostics)
 	) {
-		super(
-			diagnostics
+		super({
+			diagnostics,
+			exitCode,
+			message: diagnostics
 				.map((diagnostic) => toErrorMessage(diagnostic))
-				.join('\n')
-		);
-		this.name = 'ShellDiagnosticError';
-		this.diagnostics = diagnostics;
-		this.exitCode = exitCode;
+				.join('\n'),
+		});
 	}
 
 	get status(): number {
 		return this.exitCode;
 	}
 }
+
+export class ShellRuntimeError extends Schema.TaggedErrorClass<ShellRuntimeError>()(
+	'ShellRuntimeError',
+	{
+		cause: Schema.optional(Schema.Defect()),
+		exitCode: Schema.Number,
+		message: Schema.String,
+	}
+) {}
+
+export type ShellErrorCause = ShellDiagnosticError | ShellRuntimeError;
 
 export function createDiagnosticError(
 	diagnostics: readonly ShellDiagnostic[] | ShellDiagnostic,
@@ -65,7 +84,25 @@ export function writeDiagnosticsToStderr(
 export function isShellDiagnosticError(
 	error: unknown
 ): error is ShellDiagnosticError {
-	return error instanceof ShellDiagnosticError;
+	return (
+		error instanceof ShellDiagnosticError ||
+		(typeof error === 'object' &&
+			error !== null &&
+			'_tag' in error &&
+			error._tag === 'ShellDiagnosticError')
+	);
+}
+
+export function isShellRuntimeError(
+	error: unknown
+): error is ShellRuntimeError {
+	return (
+		error instanceof ShellRuntimeError ||
+		(typeof error === 'object' &&
+			error !== null &&
+			'_tag' in error &&
+			error._tag === 'ShellRuntimeError')
+	);
 }
 
 export function exitCodeForDiagnostics(

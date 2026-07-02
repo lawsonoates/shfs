@@ -1,13 +1,14 @@
 import {
-	compile,
-	parse,
+	compileEffect,
+	parseEffect,
 	type XargsArgsIR,
 	type XargsStep,
 } from '@shfs/compiler';
+import { Effect } from 'effect';
 
 import type { BuiltinContext } from '../../builtin/types';
 import { createShellInput, type ShellInput } from '../../execute/io';
-import { evaluateExpandedWords } from '../../execute/path';
+import { evaluateExpandedWordsEffect } from '../../execute/path';
 import type { FS } from '../../fs/fs';
 import { formatRecord, type Record as ShellRecord } from '../../record';
 import { BufferedOutputStream } from '../../stderr';
@@ -47,23 +48,42 @@ const LEADING_WHITESPACE_REGEX = /^\s+/u;
 export async function runXargsCommand(
 	options: RunXargsCommandOptions
 ): Promise<RunXargsCommandResult> {
-	try {
-		return await runXargsCommandInner(options);
-	} catch {
-		return { exitCode: 1, stderr: [], stdout: [] };
-	}
+	return runXargsCommandInner(options);
 }
 
 async function runXargsCommandInner(
 	options: RunXargsCommandOptions
 ): Promise<RunXargsCommandResult> {
-	const input = await readInput(options);
-	const command = await evaluateExpandedWords(
-		options.parsed.command,
-		options.fs,
-		options.context
+	const input = await Effect.runPromise(
+		readInputEffect(options).pipe(
+			Effect.match({
+				onFailure: () => null,
+				onSuccess: (text) => text,
+			})
+		)
 	);
+	if (input === null) {
+		return { exitCode: 1, stderr: [], stdout: [] };
+	}
+	const command = await Effect.runPromise(
+		evaluateExpandedWordsEffect(
+			options.parsed.command,
+			options.fs,
+			options.context
+		).pipe(
+			Effect.match({
+				onFailure: () => null,
+				onSuccess: (words) => words,
+			})
+		)
+	);
+	if (command === null) {
+		return { exitCode: 1, stderr: [], stdout: [] };
+	}
 	const batches = buildBatches(input, options.parsed);
+	if (batches === null) {
+		return { exitCode: 1, stderr: [], stdout: [] };
+	}
 
 	if (batches.length === 0 && options.parsed.noRunIfEmpty) {
 		return { exitCode: 0, stderr: [], stdout: [] };
@@ -89,26 +109,38 @@ async function runXargsCommandInner(
 	return { exitCode, stderr, stdout };
 }
 
-async function readInput(options: RunXargsCommandOptions): Promise<string> {
-	if (options.inputPath) {
-		return TEXT_DECODER.decode(
-			await options.fs.readFile(options.inputPath)
-		);
-	}
-	if (!options.input) {
-		return '';
-	}
+function readInputEffect(
+	options: RunXargsCommandOptions
+): Effect.Effect<string, unknown> {
+	return Effect.gen(function* () {
+		if (options.inputPath) {
+			return TEXT_DECODER.decode(
+				yield* Effect.tryPromise({
+					try: () => options.fs.readFile(options.inputPath ?? ''),
+					catch: (cause) => cause,
+				})
+			);
+		}
+		if (!options.input) {
+			return '';
+		}
 
-	const records: string[] = [];
-	for await (const line of (
-		options.stdin ?? createShellInput(options.input)
-	).lines()) {
-		records.push(line);
-	}
-	return records.join('\n');
+		const records: string[] = [];
+		yield* Effect.tryPromise({
+			try: async () => {
+				for await (const line of (
+					options.stdin ?? createShellInput(options.input)
+				).lines()) {
+					records.push(line);
+				}
+			},
+			catch: (cause) => cause,
+		});
+		return records.join('\n');
+	});
 }
 
-function buildBatches(input: string, args: XargsArgsIR): string[][] {
+function buildBatches(input: string, args: XargsArgsIR): string[][] | null {
 	if (args.replace) {
 		return replacementBatches(input, args);
 	}
@@ -118,8 +150,11 @@ function buildBatches(input: string, args: XargsArgsIR): string[][] {
 
 	const items =
 		args.delimiter === null
-			? tokenize(input, args.eof).items
+			? tokenize(input, args.eof)?.items
 			: splitDelimited(input, args.delimiter);
+	if (!items) {
+		return null;
+	}
 	return chunkItems(items, args.maxArgs ?? DEFAULT_MAX_ARGS);
 }
 
@@ -138,13 +173,16 @@ function replacementBatches(input: string, args: XargsArgsIR): string[][] {
 	return batches;
 }
 
-function lineBatches(input: string, args: XargsArgsIR): string[][] {
+function lineBatches(input: string, args: XargsArgsIR): string[][] | null {
 	const batches: string[][] = [];
 	let current: string[] = [];
 	let lineCount = 0;
 
 	for (const line of splitInputLines(input)) {
 		const parsed = tokenize(line, args.eof);
+		if (!parsed) {
+			return null;
+		}
 		if (parsed.items.length === 0) {
 			if (parsed.stopped) {
 				break;
@@ -205,7 +243,7 @@ function splitInputLines(input: string): string[] {
 	return lines;
 }
 
-function tokenize(input: string, eof: string | null): TokenizeResult {
+function tokenize(input: string, eof: string | null): TokenizeResult | null {
 	const items: string[] = [];
 	const state: TokenizeState = {
 		current: '',
@@ -235,10 +273,10 @@ function tokenize(input: string, eof: string | null): TokenizeResult {
 	}
 
 	if (state.quote) {
-		throw new Error(`xargs: unterminated quote ${state.quote}`);
+		return null;
 	}
 	if (state.escaped) {
-		throw new Error('xargs: unterminated escape');
+		return null;
 	}
 	return { items, stopped: pushToken(items, state.current, eof) };
 }
@@ -317,11 +355,23 @@ async function runCommand(
 		stderr: new BufferedOutputStream(),
 	};
 	const executeModule = await import('../../execute/execute');
-	const result = executeModule.execute(
-		compile(parse(argv.map(quoteShellWord).join(' '))),
-		fs,
-		childContext
+	const ir = await Effect.runPromise(
+		Effect.gen(function* () {
+			const parsed = yield* parseEffect(
+				argv.map(quoteShellWord).join(' ')
+			);
+			return yield* compileEffect(parsed);
+		}).pipe(
+			Effect.match({
+				onFailure: () => null,
+				onSuccess: (script) => script,
+			})
+		)
 	);
+	if (ir === null) {
+		return { exitCode: 1, stderr: [], stdout: [] };
+	}
+	const result = executeModule.execute(ir, fs, childContext);
 	const stdout = await collectStdout(result);
 	return {
 		exitCode: childContext.status,

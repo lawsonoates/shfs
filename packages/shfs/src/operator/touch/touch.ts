@@ -1,5 +1,7 @@
+import { Effect } from 'effect';
+import { ShellRuntimeError } from '../../diagnostics';
 import type { FS } from '../../fs/fs';
-import type { Effect } from '../types';
+import type { CommandEffect } from '../types';
 
 export interface TouchArgs {
 	files: string[];
@@ -7,24 +9,69 @@ export interface TouchArgs {
 	modificationTimeOnly?: boolean;
 }
 
-export function touch(fs: FS): Effect<TouchArgs> {
-	return async ({
+export function touch(fs: FS): CommandEffect<TouchArgs> {
+	return Effect.fn('touch')(function* ({
 		files,
 		accessTimeOnly = false,
 		modificationTimeOnly = false,
-	}) => {
+	}) {
 		const shouldUpdateMtime = !accessTimeOnly || modificationTimeOnly;
 
 		for (const file of files) {
-			if (!(await fs.exists(file))) {
-				await fs.writeFile(file, new Uint8Array());
+			const exists = yield* Effect.tryPromise({
+				try: () => fs.exists(file),
+				catch: (cause) =>
+					new ShellRuntimeError({
+						cause,
+						exitCode: 1,
+						message:
+							cause instanceof Error
+								? cause.message
+								: String(cause),
+					}),
+			});
+			if (!exists) {
+				yield* Effect.tryPromise({
+					try: () => fs.writeFile(file, new Uint8Array()),
+					catch: (cause) =>
+						new ShellRuntimeError({
+							cause,
+							exitCode: 1,
+							message:
+								cause instanceof Error
+									? cause.message
+									: String(cause),
+						}),
+				});
 				continue;
 			}
 
 			if (shouldUpdateMtime) {
-				const content = await fs.readFile(file);
-				await fs.writeFile(file, content);
+				const content = yield* Effect.tryPromise({
+					try: () => fs.readFile(file),
+					catch: (cause) =>
+						new ShellRuntimeError({
+							cause,
+							exitCode: 1,
+							message:
+								cause instanceof Error
+									? cause.message
+									: String(cause),
+						}),
+				});
+				yield* Effect.tryPromise({
+					try: () => fs.writeFile(file, content),
+					catch: (cause) =>
+						new ShellRuntimeError({
+							cause,
+							exitCode: 1,
+							message:
+								cause instanceof Error
+									? cause.message
+									: String(cause),
+						}),
+				});
 			}
 		}
-	};
+	});
 }

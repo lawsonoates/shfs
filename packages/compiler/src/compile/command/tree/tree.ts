@@ -2,6 +2,8 @@
  * tree command handler for the AST-based compiler.
  */
 
+import { Effect } from 'effect';
+import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
 	expandedWordToString,
@@ -11,7 +13,7 @@ import {
 	type TreeArgsIR,
 } from '../../../ir';
 import {
-	createWordParser,
+	createWordParserEffect,
 	type FlagDef,
 	type ParseWordsResult,
 } from '../arg/parse';
@@ -42,53 +44,82 @@ const flags: Record<string, FlagDef> = {
 
 type ParsedTreeWords = ParseWordsResult<ExpandedWord>;
 
-const parseTreeArgs = createWordParser<ExpandedWord>(
+const parseTreeArgs = createWordParserEffect<ExpandedWord>(
 	flags,
 	expandedWordToString
 );
 
 export function compileTree(command: SimpleCommandIR): StepIR {
-	const parsed = parseTreeArgs(command.args);
-
-	return {
-		cmd: 'tree',
-		args: {
-			ascii: parsed.flags.ascii === true,
-			classify: parsed.flags.classify === true,
-			dirsOnly: parsed.flags.dirsOnly === true,
-			excludePatterns: collectExpandedValues(
-				parsed,
-				command.args,
-				'excludePattern'
-			),
-			fullPath: parsed.flags.fullPath === true,
-			includePatterns: collectExpandedValues(
-				parsed,
-				command.args,
-				'includePattern'
-			),
-			matchDirs: parsed.flags.matchDirs === true,
-			maxDepth: parseMaxDepth(parsed.flags.maxDepth),
-			noReport: parsed.flags.noReport === true,
-			paths:
-				parsed.positionalWords.length === 0
-					? [literal('.')]
-					: parsed.positionalWords,
-			prune: parsed.flags.prune === true,
-			showAll: parsed.flags.showAll === true,
-		} satisfies TreeArgsIR,
-	} as const;
+	return Effect.runSync(compileTreeEffect(command));
 }
 
-function parseMaxDepth(value: unknown): number | null {
-	if (typeof value !== 'string') {
-		return null;
+export const compileTreeEffect: (
+	command: SimpleCommandIR
+) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.tree')(
+	function* (command) {
+		const parsed = yield* parseTreeArgs(command.args).pipe(
+			Effect.mapError(
+				(cause) =>
+					new CompileError(
+						createCommandDiagnostic(
+							'tree',
+							'invalid-option',
+							cause.message
+						)
+					)
+			)
+		);
+
+		return {
+			cmd: 'tree',
+			args: {
+				ascii: parsed.flags.ascii === true,
+				classify: parsed.flags.classify === true,
+				dirsOnly: parsed.flags.dirsOnly === true,
+				excludePatterns: collectExpandedValues(
+					parsed,
+					command.args,
+					'excludePattern'
+				),
+				fullPath: parsed.flags.fullPath === true,
+				includePatterns: collectExpandedValues(
+					parsed,
+					command.args,
+					'includePattern'
+				),
+				matchDirs: parsed.flags.matchDirs === true,
+				maxDepth: yield* parseMaxDepth(parsed.flags.maxDepth),
+				noReport: parsed.flags.noReport === true,
+				paths:
+					parsed.positionalWords.length === 0
+						? [literal('.')]
+						: parsed.positionalWords,
+				prune: parsed.flags.prune === true,
+				showAll: parsed.flags.showAll === true,
+			} satisfies TreeArgsIR,
+		} as const;
 	}
-	const maxDepth = Number.parseInt(value, 10);
-	if (!Number.isFinite(maxDepth) || maxDepth < 0) {
-		throw new Error(`tree: invalid level, '${value}'`);
-	}
-	return maxDepth;
+);
+
+function parseMaxDepth(
+	value: unknown
+): Effect.Effect<number | null, CompileError> {
+	return Effect.gen(function* () {
+		if (typeof value !== 'string') {
+			return null;
+		}
+		const maxDepth = Number.parseInt(value, 10);
+		if (!Number.isFinite(maxDepth) || maxDepth < 0) {
+			return yield* new CompileError(
+				createCommandDiagnostic(
+					'tree',
+					'invalid-level',
+					`tree: invalid level, '${value}'`
+				)
+			);
+		}
+		return maxDepth;
+	});
 }
 
 function collectExpandedValues(

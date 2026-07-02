@@ -4,19 +4,26 @@
  * Includes position information for error reporting.
  */
 
-import { createParserDiagnostic, type ShellDiagnostic } from '../diagnostic';
+import { Schema } from 'effect';
+import {
+	createParserDiagnostic,
+	ShellDiagnosticSchema,
+	SourceSpanSchema,
+} from '../diagnostic';
 import type { SourceSpan } from '../lexer/position';
 
 /**
  * Exception thrown when a syntax error is encountered during parsing.
  */
-export class ParseSyntaxError extends Error {
-	readonly diagnostic: ShellDiagnostic;
-	/** The source span where the error occurred */
-	readonly span: SourceSpan;
-	/** Additional context about the error */
-	readonly context?: string;
-
+export class ParseSyntaxError extends Schema.TaggedErrorClass<ParseSyntaxError>()(
+	'ParseSyntaxError',
+	{
+		context: Schema.optional(Schema.String),
+		diagnostic: ShellDiagnosticSchema,
+		message: Schema.String,
+		span: SourceSpanSchema,
+	}
+) {
 	constructor(
 		message: string,
 		span: SourceSpan,
@@ -25,13 +32,19 @@ export class ParseSyntaxError extends Error {
 			context?: string;
 		} = {}
 	) {
-		super(ParseSyntaxError.formatMessage(message, span, options.context));
-		this.name = 'ParseSyntaxError';
-		this.diagnostic = createParserDiagnostic(message, span, {
+		const diagnostic = createParserDiagnostic(message, span, {
 			code: options.code,
 		});
-		this.span = span;
-		this.context = options.context;
+		super({
+			context: options.context,
+			diagnostic,
+			message: ParseSyntaxError.formatMessage(
+				message,
+				span,
+				options.context
+			),
+			span,
+		});
 
 		// Maintain proper stack trace in V8 environments
 		if (Error.captureStackTrace) {
@@ -65,6 +78,16 @@ export class ParseSyntaxError extends Error {
 	get column(): number {
 		return this.span.start.column;
 	}
+}
+
+export function isParseSyntaxError(error: unknown): error is ParseSyntaxError {
+	return (
+		error instanceof ParseSyntaxError ||
+		(typeof error === 'object' &&
+			error !== null &&
+			'_tag' in error &&
+			error._tag === 'ParseSyntaxError')
+	);
 }
 
 /**

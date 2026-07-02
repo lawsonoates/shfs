@@ -1,4 +1,5 @@
 import type { TreeArgsIR } from '@shfs/compiler';
+import { Effect } from 'effect';
 import picomatch from 'picomatch';
 
 import { normalizeAbsolutePath, resolvePathFromCwd } from '../../execute/path';
@@ -78,10 +79,8 @@ export async function runTreeCommand(
 
 	for (const path of args.paths) {
 		const resolvedPath = resolvePathFromCwd(cwd, path);
-		let stat: Awaited<ReturnType<FS['stat']>>;
-		try {
-			stat = await fs.stat(resolvedPath);
-		} catch {
+		const stat = await statOrNull(fs, resolvedPath);
+		if (stat === null) {
 			stderr.push(`tree: ${path}: No such file or directory`);
 			exitCode = 1;
 			continue;
@@ -206,14 +205,27 @@ async function buildChildEntries({
 	fs: FS;
 	path: string;
 }): Promise<TreeEntry[]> {
-	const childPaths = await readSortedChildren(fs, path);
+	const childPaths = await Effect.runPromise(
+		Effect.tryPromise({
+			try: () => readSortedChildren(fs, path),
+			catch: (error) => error,
+		}).pipe(
+			Effect.match({
+				onFailure: () => [],
+				onSuccess: (paths) => paths,
+			})
+		)
+	);
 	const entries: TreeEntry[] = [];
 	for (const childPath of childPaths) {
 		const childDepth = depth + 1;
 		if (args.maxDepth !== null && childDepth > args.maxDepth) {
 			continue;
 		}
-		const stat = await fs.stat(childPath);
+		const stat = await statOrNull(fs, childPath);
+		if (stat === null) {
+			continue;
+		}
 		const childEntry = await buildTreeEntry({
 			args,
 			depth: childDepth,
@@ -239,6 +251,23 @@ async function readSortedChildren(fs: FS, path: string): Promise<string[]> {
 		basename(left).localeCompare(basename(right))
 	);
 	return children;
+}
+
+function statOrNull(
+	fs: FS,
+	path: string
+): Promise<Awaited<ReturnType<FS['stat']>> | null> {
+	return Effect.runPromise(
+		Effect.tryPromise({
+			try: () => fs.stat(path),
+			catch: (error) => error,
+		}).pipe(
+			Effect.match({
+				onFailure: () => null,
+				onSuccess: (stat) => stat,
+			})
+		)
+	);
 }
 
 function appendRenderedTree(

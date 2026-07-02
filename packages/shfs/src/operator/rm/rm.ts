@@ -1,5 +1,7 @@
+import { Effect } from 'effect';
+import { ShellRuntimeError } from '../../diagnostics';
 import type { FS } from '../../fs/fs';
-import type { Effect } from '../types';
+import type { CommandEffect } from '../types';
 
 export interface RmArgs {
 	path: string;
@@ -8,30 +10,71 @@ export interface RmArgs {
 	interactive?: boolean;
 }
 
-export function rm(fs: FS): Effect<RmArgs> {
-	return async ({ path, recursive, force = false, interactive = false }) => {
+export function rm(fs: FS): CommandEffect<RmArgs> {
+	return Effect.fn('rm')(function* ({
+		path,
+		recursive,
+		force = false,
+		interactive = false,
+	}) {
 		if (interactive) {
-			throw new Error(`rm: interactive mode is not supported: ${path}`);
+			return yield* new ShellRuntimeError({
+				exitCode: 1,
+				message: `rm: interactive mode is not supported: ${path}`,
+			});
 		}
 
-		let stat: Awaited<ReturnType<FS['stat']>> | null = null;
-		try {
-			stat = await fs.stat(path);
-		} catch {
-			if (force) {
-				return;
-			}
-			throw new Error(`File not found: ${path}`);
+		const stat = yield* Effect.tryPromise({
+			try: () => fs.stat(path),
+			catch: (cause) =>
+				new ShellRuntimeError({
+					cause,
+					exitCode: force ? 0 : 1,
+					message: force ? '' : `File not found: ${path}`,
+				}),
+		}).pipe(
+			Effect.catchTag('ShellRuntimeError', (error) => {
+				if (force) {
+					return Effect.succeed(null);
+				}
+				return Effect.fail(error);
+			})
+		);
+		if (!stat) {
+			return;
 		}
 
 		if (!stat.isDirectory) {
-			await fs.deleteFile(path);
+			yield* Effect.tryPromise({
+				try: () => fs.deleteFile(path),
+				catch: (cause) =>
+					new ShellRuntimeError({
+						cause,
+						exitCode: 1,
+						message:
+							cause instanceof Error
+								? cause.message
+								: String(cause),
+					}),
+			});
 			return;
 		}
 
 		if (!recursive) {
-			throw new Error(`rm: cannot remove '${path}': Is a directory`);
+			return yield* new ShellRuntimeError({
+				exitCode: 1,
+				message: `rm: cannot remove '${path}': Is a directory`,
+			});
 		}
-		await fs.deleteDirectory(path, true);
-	};
+		yield* Effect.tryPromise({
+			try: () => fs.deleteDirectory(path, true),
+			catch: (cause) =>
+				new ShellRuntimeError({
+					cause,
+					exitCode: 1,
+					message:
+						cause instanceof Error ? cause.message : String(cause),
+				}),
+		});
+	});
 }

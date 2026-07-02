@@ -1,4 +1,7 @@
+import { Effect } from 'effect';
+import { argParseError } from './diagnostics';
 import type {
+	ArgParseError,
 	FlagEntry,
 	FlagIndex,
 	NormalizedParseOptions,
@@ -20,28 +23,40 @@ export function getNegativeNumberValueEntry(
 	options: NormalizedParseOptions,
 	index: FlagIndex
 ): FlagEntry | undefined {
-	if (options.negativeNumberPolicy === 'positional') {
-		return undefined;
-	}
+	return Effect.runSync(getNegativeNumberValueEntryEffect(options, index));
+}
 
-	if (!options.negativeNumberFlag) {
-		throw new Error(
-			'negativeNumberFlag is required when negativeNumberPolicy is "value".'
-		);
-	}
+export function getNegativeNumberValueEntryEffect(
+	options: NormalizedParseOptions,
+	index: FlagIndex
+): Effect.Effect<FlagEntry | undefined, ArgParseError> {
+	return Effect.gen(function* () {
+		if (options.negativeNumberPolicy === 'positional') {
+			return undefined;
+		}
 
-	const entry = index.canonical.get(options.negativeNumberFlag);
-	if (!entry) {
-		throw new Error(
-			`Unknown negativeNumberFlag: "${options.negativeNumberFlag}".`
-		);
-	}
+		if (!options.negativeNumberFlag) {
+			return yield* argParseError(
+				'invalid-option',
+				'negativeNumberFlag is required when negativeNumberPolicy is "value".'
+			);
+		}
 
-	if (!entry.def.takesValue) {
-		throw new Error(
-			`negativeNumberFlag "${options.negativeNumberFlag}" must reference a flag that takes a value.`
-		);
-	}
+		const entry = index.canonical.get(options.negativeNumberFlag);
+		if (!entry) {
+			return yield* argParseError(
+				'invalid-option',
+				`Unknown negativeNumberFlag: "${options.negativeNumberFlag}".`
+			);
+		}
 
-	return entry;
+		if (!entry.def.takesValue) {
+			return yield* argParseError(
+				'invalid-option',
+				`negativeNumberFlag "${options.negativeNumberFlag}" must reference a flag that takes a value.`
+			);
+		}
+
+		return entry;
+	});
 }

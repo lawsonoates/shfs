@@ -1,13 +1,16 @@
 import {
-	compile,
-	ParseSyntaxError,
-	parse,
+	compileEffect,
+	isCompileError,
+	isParseSyntaxError,
+	parseEffect,
 	type ScriptIR,
 } from '@shfs/compiler';
+import { Effect } from 'effect';
 
 import { collect } from '../consumer/consumer';
 import {
 	isShellDiagnosticError,
+	isShellRuntimeError,
 	writeDiagnosticsToStderr,
 } from '../diagnostics';
 import { type ExecuteResult, execute } from '../execute/execute';
@@ -257,10 +260,12 @@ export class Shell {
 	private _exec(strings: TemplateStringsArray, ...exprs: unknown[]) {
 		const source = String.raw(strings, ...exprs);
 		const fs = this.fs;
-		const ir = lazy<ScriptIR>(() => {
-			const ast = parse(source);
-			return compile(ast);
-		});
+		const ir = lazy<Effect.Effect<ScriptIR, unknown>>(() =>
+			Effect.gen(function* () {
+				const ast = yield* parseEffect(source);
+				return yield* compileEffect(ast);
+			})
+		);
 
 		return createShellCommand(
 			new ShellPromise(async (cwdOverride) => {
@@ -274,30 +279,43 @@ export class Shell {
 					globalVars: this.globalVars,
 					localVars: new Map<string, string>(),
 				};
-				try {
+				const runCommand = Effect.gen(function* () {
+					const script: ScriptIR = yield* ir();
+					const stdout: Record[] = yield* Effect.promise(() =>
+						collectStdoutRecords(execute(script, fs, context))
+					);
 					return {
-						stdout: await collectStdoutRecords(
-							execute(ir(), fs, context)
-						),
+						stdout,
 						stderr: context.stderr.snapshot(),
 						exitCode: context.status,
 					};
-				} catch (error) {
-					handleDiagnosticFailure(error, context);
-					return {
-						stdout: [],
-						stderr: context.stderr.snapshot(),
-						exitCode: context.status ?? 1,
-					};
-				} finally {
-					this.currentStatus = context.status ?? this.currentStatus;
-					if (
-						cwdOverride === undefined ||
-						context.cwd !== commandStartCwd
-					) {
-						this.currentCwd = context.cwd;
-					}
-				}
+				}).pipe(
+					Effect.catchIf(
+						(error: unknown): error is unknown => true,
+						(error: unknown) =>
+							Effect.sync(() => {
+								handleDiagnosticFailure(error, context);
+								return {
+									stdout: [],
+									stderr: context.stderr.snapshot(),
+									exitCode: context.status ?? 1,
+								};
+							})
+					),
+					Effect.ensuring(
+						Effect.sync(() => {
+							this.currentStatus =
+								context.status ?? this.currentStatus;
+							if (
+								cwdOverride === undefined ||
+								context.cwd !== commandStartCwd
+							) {
+								this.currentCwd = context.cwd;
+							}
+						})
+					)
+				);
+				return await Effect.runPromise(runCommand);
 			})
 		);
 	}
@@ -310,7 +328,12 @@ function handleDiagnosticFailure(
 		stderr: OutputStream;
 	}
 ): void {
-	if (error instanceof ParseSyntaxError) {
+	if (isParseSyntaxError(error)) {
+		context.status = 1;
+		writeDiagnosticsToStderr(context, [error.diagnostic]);
+		return;
+	}
+	if (isCompileError(error)) {
 		context.status = 1;
 		writeDiagnosticsToStderr(context, [error.diagnostic]);
 		return;
@@ -318,6 +341,13 @@ function handleDiagnosticFailure(
 	if (isShellDiagnosticError(error)) {
 		context.status = error.exitCode;
 		writeDiagnosticsToStderr(context, error.diagnostics);
+		return;
+	}
+	if (isShellRuntimeError(error)) {
+		context.status = error.exitCode;
+		if (error.message !== '') {
+			context.stderr.append(error.message);
+		}
 		return;
 	}
 	context.status = 1;

@@ -3,11 +3,13 @@ import {
 	type RedirectionIR,
 	type StepIR,
 } from '@shfs/compiler';
+import { Effect } from 'effect';
 import type { BuiltinContext } from '../builtin/types';
+import { ShellRuntimeError } from '../diagnostics';
 import type { FS } from '../fs/fs';
 import type { Record as ShellRecord } from '../record';
 import type { Stream } from '../stream';
-import { evaluateExpandedSinglePath, resolvePathFromCwd } from './path';
+import { evaluateExpandedSinglePathEffect, resolvePathFromCwd } from './path';
 import { formatRecord } from './records';
 
 const textEncoder = new TextEncoder();
@@ -113,24 +115,26 @@ function getLastDefaultFileRedirect(
 	return redirect;
 }
 
-async function resolveFileRedirect(
+function resolveFileRedirectEffect(
 	command: string,
 	redirection: RedirectionIR,
 	fs: FS,
 	context: BuiltinContext
-): Promise<ResolvedFileRedirect> {
-	const targetPath = await evaluateExpandedSinglePath(
-		command,
-		'redirection target must expand to exactly 1 path',
-		redirection.target,
-		fs,
-		context
-	);
-	return {
-		path: resolvePathFromCwd(context.cwd, targetPath),
-		append: redirection.append ?? false,
-		noclobber: redirection.noclobber ?? false,
-	};
+): Effect.Effect<ResolvedFileRedirect, unknown> {
+	return Effect.gen(function* () {
+		const targetPath = yield* evaluateExpandedSinglePathEffect(
+			command,
+			'redirection target must expand to exactly 1 path',
+			redirection.target,
+			fs,
+			context
+		);
+		return {
+			path: resolvePathFromCwd(context.cwd, targetPath),
+			append: redirection.append ?? false,
+			noclobber: redirection.noclobber ?? false,
+		};
+	});
 }
 
 function updateDescriptor(descriptor: InputDescriptor, path: string): void {
@@ -153,69 +157,118 @@ function ensureInputDescriptor(
 	return descriptor;
 }
 
-export async function resolveInputRedirect(
-	command: string,
-	redirections: RedirectionIR[] | undefined,
-	fs: FS,
-	context: BuiltinContext
-): Promise<ResolvedInputRedirect> {
-	if (!redirections || redirections.length === 0) {
-		return { path: null, closed: false };
-	}
-
-	const descriptors = new Map<number, InputDescriptor>();
-
-	for (const redirection of redirections) {
+function applyInputRedirectionEffect(params: {
+	command: string;
+	context: BuiltinContext;
+	descriptors: Map<number, InputDescriptor>;
+	fs: FS;
+	redirection: RedirectionIR;
+}): Effect.Effect<void, unknown> {
+	return Effect.gen(function* () {
+		const { command, context, descriptors, fs, redirection } = params;
 		if (redirection.kind !== 'input') {
-			continue;
+			return;
 		}
 
 		const sourceFd = getSourceFd(redirection);
 		const mode = getRedirectionMode(redirection);
 		if (mode === 'close') {
 			descriptors.set(sourceFd, { kind: 'closed' });
-			continue;
+			return;
 		}
 		if (mode === 'fd') {
 			const targetFd = getTargetFd(redirection);
 			if (targetFd === null) {
-				throw new Error(
-					`${command}: invalid file descriptor duplication target`
+				return yield* Effect.fail(
+					new ShellRuntimeError({
+						exitCode: 1,
+						message: `${command}: invalid file descriptor duplication target`,
+					})
 				);
 			}
 			descriptors.set(
 				sourceFd,
 				ensureInputDescriptor(descriptors, targetFd)
 			);
-			continue;
+			return;
 		}
 		if (mode !== 'file') {
-			continue;
+			return;
 		}
 
-		const resolved = await resolveFileRedirect(
+		const resolved = yield* resolveFileRedirectEffect(
 			command,
 			redirection,
 			fs,
 			context
 		);
-		if (isOptionalInput(redirection) && !(await fs.exists(resolved.path))) {
-			continue;
+		const optionalMissing =
+			isOptionalInput(redirection) &&
+			!(yield* Effect.tryPromise({
+				try: () => fs.exists(resolved.path),
+				catch: (cause) =>
+					new ShellRuntimeError({
+						cause,
+						exitCode: 1,
+						message:
+							cause instanceof Error
+								? cause.message
+								: String(cause),
+					}),
+			}));
+		if (optionalMissing) {
+			return;
 		}
 		updateDescriptor(
 			ensureInputDescriptor(descriptors, sourceFd),
 			resolved.path
 		);
-	}
+	});
+}
 
-	const stdinDescriptor = ensureInputDescriptor(descriptors, 0);
-	return {
-		path:
-			stdinDescriptor.kind === 'path'
-				? (stdinDescriptor.path ?? null)
-				: null,
-		closed: stdinDescriptor.kind === 'closed',
-	};
+export async function resolveInputRedirect(
+	command: string,
+	redirections: RedirectionIR[] | undefined,
+	fs: FS,
+	context: BuiltinContext
+): Promise<ResolvedInputRedirect> {
+	return Effect.runPromise(
+		resolveInputRedirectEffect(command, redirections, fs, context)
+	);
+}
+
+export function resolveInputRedirectEffect(
+	command: string,
+	redirections: RedirectionIR[] | undefined,
+	fs: FS,
+	context: BuiltinContext
+): Effect.Effect<ResolvedInputRedirect, unknown> {
+	return Effect.gen(function* () {
+		if (!redirections || redirections.length === 0) {
+			return { path: null, closed: false };
+		}
+
+		const descriptors = new Map<number, InputDescriptor>();
+
+		for (const redirection of redirections) {
+			yield* applyInputRedirectionEffect({
+				command,
+				context,
+				descriptors,
+				fs,
+				redirection,
+			});
+		}
+
+		const stdinDescriptor = ensureInputDescriptor(descriptors, 0);
+		return {
+			path:
+				stdinDescriptor.kind === 'path'
+					? (stdinDescriptor.path ?? null)
+					: null,
+			closed: stdinDescriptor.kind === 'closed',
+		};
+	});
 }
 
 export function hasRedirect(
@@ -232,22 +285,41 @@ export async function resolveRedirectPath(
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string | null> {
-	if (kind === 'input') {
-		const resolvedInput = await resolveInputRedirect(
+	return Effect.runPromise(
+		resolveRedirectPathEffect(command, redirections, kind, fs, context)
+	);
+}
+
+export function resolveRedirectPathEffect(
+	command: string,
+	redirections: RedirectionIR[] | undefined,
+	kind: RedirectionIR['kind'],
+	fs: FS,
+	context: BuiltinContext
+): Effect.Effect<string | null, unknown> {
+	return Effect.gen(function* () {
+		if (kind === 'input') {
+			const resolvedInput = yield* resolveInputRedirectEffect(
+				command,
+				redirections,
+				fs,
+				context
+			);
+			return resolvedInput.path;
+		}
+
+		const redirect = getLastDefaultFileRedirect(redirections, kind);
+		if (!redirect) {
+			return null;
+		}
+		const resolved = yield* resolveFileRedirectEffect(
 			command,
-			redirections,
+			redirect,
 			fs,
 			context
 		);
-		return resolvedInput.path;
-	}
-
-	const redirect = getLastDefaultFileRedirect(redirections, kind);
-	if (!redirect) {
-		return null;
-	}
-	const resolved = await resolveFileRedirect(command, redirect, fs, context);
-	return resolved.path;
+		return resolved.path;
+	});
 }
 
 export function withInputRedirect(
@@ -261,11 +333,17 @@ export function withInputRedirect(
 }
 
 async function readExistingFileText(fs: FS, path: string): Promise<string> {
-	try {
-		return textDecoder.decode(await fs.readFile(path));
-	} catch {
-		return '';
-	}
+	return Effect.runPromise(
+		Effect.tryPromise({
+			try: () => fs.readFile(path),
+			catch: (error) => error,
+		}).pipe(
+			Effect.match({
+				onFailure: () => '',
+				onSuccess: (bytes) => textDecoder.decode(bytes),
+			})
+		)
+	);
 }
 
 export async function writeTextToFile(

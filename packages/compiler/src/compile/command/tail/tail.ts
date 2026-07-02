@@ -2,6 +2,8 @@
  * tail command handler for the AST-based compiler.
  */
 
+import { Effect } from 'effect';
+import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
 	expandedWordToString,
@@ -9,89 +11,124 @@ import {
 	type StepIR,
 } from '../../../ir';
 import {
-	createWordParser,
+	createWordParserEffect,
 	type FlagDef,
 	type ParsedFlagValue,
+	type ParseWordsResult,
 } from '../arg/parse';
 
 const DEFAULT_LINE_COUNT = 10;
 const flags: Record<string, FlagDef> = {
 	lines: { multiple: true, short: 'n', takesValue: true },
 };
-const parseTailArgs = createWordParser<ExpandedWord>(
+const parseTailArgs = createWordParserEffect<ExpandedWord>(
 	flags,
 	expandedWordToString
 );
-const MISSING_N_VALUE_PREFIX = 'Flag -n requires a value';
-const UNKNOWN_FLAG_PREFIX = 'Unknown flag:';
 
 /**
  * Compile a tail command from SimpleCommandIR to StepIR.
  */
 export function compileTail(cmd: SimpleCommandIR): StepIR {
-	const parsed = parseTailArgsOrThrow(cmd.args);
-
-	const n = parseTailCount(parsed.flags.lines);
-	const files = parsed.positionalWords;
-
-	return {
-		cmd: 'tail',
-		args: { files, n },
-	} as const;
+	return Effect.runSync(compileTailEffect(cmd));
 }
 
-function parseTailCount(value: ParsedFlagValue | undefined): number {
-	const lastValue = getLastValueToken(value);
-	if (lastValue === undefined) {
-		return DEFAULT_LINE_COUNT;
-	}
+export const compileTailEffect: (
+	cmd: SimpleCommandIR
+) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.tail')(
+	function* (cmd) {
+		const parsed = yield* parseTailArgsEffect(cmd.args);
 
-	const parsedValue = Number(lastValue);
-	if (!Number.isFinite(parsedValue)) {
-		throw new Error('Invalid tail count');
-	}
+		const n = yield* parseTailCount(parsed.flags.lines);
+		const files = parsed.positionalWords;
 
-	return parsedValue;
+		return {
+			cmd: 'tail',
+			args: { files, n },
+		} as const;
+	}
+);
+
+function parseTailCount(
+	value: ParsedFlagValue | undefined
+): Effect.Effect<number, CompileError> {
+	return Effect.gen(function* () {
+		const lastValue = yield* getLastValueToken(value);
+		if (lastValue === undefined) {
+			return DEFAULT_LINE_COUNT;
+		}
+
+		const parsedValue = Number(lastValue);
+		if (!Number.isFinite(parsedValue)) {
+			return yield* new CompileError(
+				createCommandDiagnostic(
+					'tail',
+					'invalid-count',
+					'Invalid tail count'
+				)
+			);
+		}
+
+		return parsedValue;
+	});
 }
 
 function getLastValueToken(
 	value: ParsedFlagValue | undefined
-): string | undefined {
-	if (value === undefined) {
-		return undefined;
-	}
-	if (typeof value === 'string') {
-		return value;
-	}
-	if (Array.isArray(value)) {
-		const lastValue = value.at(-1);
-		return lastValue;
-	}
-	throw new Error('Invalid tail count');
+): Effect.Effect<string | undefined, CompileError> {
+	return Effect.gen(function* () {
+		if (value === undefined) {
+			return undefined;
+		}
+		if (typeof value === 'string') {
+			return value;
+		}
+		if (Array.isArray(value)) {
+			const lastValue = value.at(-1);
+			return lastValue;
+		}
+		return yield* new CompileError(
+			createCommandDiagnostic(
+				'tail',
+				'invalid-count',
+				'Invalid tail count'
+			)
+		);
+	});
 }
 
-function parseTailArgsOrThrow(
+function parseTailArgsEffect(
 	args: readonly ExpandedWord[]
-): ReturnType<typeof parseTailArgs> {
-	try {
-		return parseTailArgs(args, {
-			negativeNumberFlag: 'lines',
-			negativeNumberPolicy: 'value',
-		});
-	} catch (error) {
-		throw normalizeTailParseError(error);
-	}
+): Effect.Effect<ParseWordsResult<ExpandedWord>, CompileError> {
+	return parseTailArgs(args, {
+		negativeNumberFlag: 'lines',
+		negativeNumberPolicy: 'value',
+	}).pipe(Effect.mapError(normalizeTailParseError));
 }
 
-function normalizeTailParseError(error: unknown): Error {
-	if (!(error instanceof Error)) {
-		return new Error('Unknown tail option');
+function normalizeTailParseError(cause: {
+	readonly code: string;
+	readonly message: string;
+}): CompileError {
+	if (cause.code === 'missing-value') {
+		return new CompileError(
+			createCommandDiagnostic(
+				'tail',
+				'missing-count',
+				'tail -n requires a number'
+			)
+		);
 	}
-	if (error.message.startsWith(MISSING_N_VALUE_PREFIX)) {
-		return new Error('tail -n requires a number');
+	if (cause.code === 'unknown-flag') {
+		return new CompileError(
+			createCommandDiagnostic(
+				'tail',
+				'unknown-option',
+				'Unknown tail option'
+			)
+		);
 	}
-	if (error.message.startsWith(UNKNOWN_FLAG_PREFIX)) {
-		return new Error('Unknown tail option');
-	}
-	return error;
+	return new CompileError(
+		createCommandDiagnostic('tail', 'invalid-option', cause.message)
+	);
 }

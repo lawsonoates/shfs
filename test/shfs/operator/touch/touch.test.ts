@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { Effect } from 'effect';
 
 import { MemoryFS } from '#shfs/fs/memory';
 import { touch } from '#shfs/operator/touch/touch';
@@ -7,7 +8,7 @@ test('touch creates new empty file', async () => {
 	const fs = new MemoryFS();
 
 	const effect = touch(fs);
-	await effect({ files: ['/newfile.txt'] });
+	await Effect.runPromise(effect({ files: ['/newfile.txt'] }));
 
 	const content = await fs.readFile('/newfile.txt');
 	expect(content.byteLength).toBe(0);
@@ -17,7 +18,9 @@ test('touch creates multiple files', async () => {
 	const fs = new MemoryFS();
 
 	const effect = touch(fs);
-	await effect({ files: ['/file1.txt', '/file2.txt', '/file3.txt'] });
+	await Effect.runPromise(
+		effect({ files: ['/file1.txt', '/file2.txt', '/file3.txt'] })
+	);
 
 	for (const path of ['/file1.txt', '/file2.txt', '/file3.txt']) {
 		const content = await fs.readFile(path);
@@ -31,7 +34,7 @@ test('touch does not overwrite existing file', async () => {
 	fs.setFile('/file.txt', existingContent);
 
 	const effect = touch(fs);
-	await effect({ files: ['/file.txt'] });
+	await Effect.runPromise(effect({ files: ['/file.txt'] }));
 
 	const content = await fs.readFile('/file.txt');
 	expect(new TextDecoder().decode(content)).toBe(existingContent);
@@ -41,7 +44,7 @@ test('touch with absolute path', async () => {
 	const fs = new MemoryFS();
 
 	const effect = touch(fs);
-	await effect({ files: ['/tmp/newfile.txt'] });
+	await Effect.runPromise(effect({ files: ['/tmp/newfile.txt'] }));
 
 	const content = await fs.readFile('/tmp/newfile.txt');
 	expect(content.byteLength).toBe(0);

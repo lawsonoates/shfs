@@ -1,5 +1,7 @@
+import { Effect } from 'effect';
+import { ShellRuntimeError } from '../../diagnostics';
 import type { FS } from '../../fs/fs';
-import type { Effect } from '../types';
+import type { CommandEffect } from '../types';
 
 const TRAILING_SLASH_REGEX = /\/+$/;
 const MULTIPLE_SLASH_REGEX = /\/+/g;
@@ -35,80 +37,142 @@ function basename(path: string): string {
 	return normalized.slice(slashIndex + 1);
 }
 
-async function isDirectory(fs: FS, path: string): Promise<boolean> {
-	try {
-		const stat = await fs.stat(path);
-		return stat.isDirectory;
-	} catch {
-		return false;
-	}
-}
+const isDirectory = Effect.fnUntraced(function* (fs: FS, path: string) {
+	return yield* Effect.tryPromise({
+		try: () => fs.stat(path),
+		catch: () =>
+			new ShellRuntimeError({
+				exitCode: 1,
+				message: '',
+			}),
+	}).pipe(
+		Effect.match({
+			onFailure: () => false,
+			onSuccess: (stat) => stat.isDirectory,
+		})
+	);
+});
 
-async function assertCanWriteDestination(
+const assertCanWriteDestination = Effect.fnUntraced(function* (
 	fs: FS,
 	path: string,
 	force: boolean,
 	interactive: boolean
-): Promise<void> {
-	const exists = await fs.exists(path);
+) {
+	const exists = yield* Effect.tryPromise({
+		try: () => fs.exists(path),
+		catch: (cause) =>
+			new ShellRuntimeError({
+				cause,
+				exitCode: 1,
+				message: cause instanceof Error ? cause.message : String(cause),
+			}),
+	});
 	if (!exists) {
 		return;
 	}
 	if (interactive) {
-		throw new Error(`cp: destination exists (interactive): ${path}`);
+		return yield* new ShellRuntimeError({
+			exitCode: 1,
+			message: `cp: destination exists (interactive): ${path}`,
+		});
 	}
 	if (!force) {
-		throw new Error(
-			`cp: destination exists (use -f to overwrite): ${path}`
-		);
+		return yield* new ShellRuntimeError({
+			exitCode: 1,
+			message: `cp: destination exists (use -f to overwrite): ${path}`,
+		});
 	}
-}
+});
 
-async function copyFileWithPolicy(
+const copyFileWithPolicy = Effect.fnUntraced(function* (
 	fs: FS,
 	src: string,
 	dest: string,
 	force: boolean,
 	interactive: boolean
-): Promise<void> {
-	await assertCanWriteDestination(fs, dest, force, interactive);
-	const content = await fs.readFile(src);
-	await fs.writeFile(dest, content);
-}
+) {
+	yield* assertCanWriteDestination(fs, dest, force, interactive);
+	const content = yield* Effect.tryPromise({
+		try: () => fs.readFile(src),
+		catch: (cause) =>
+			new ShellRuntimeError({
+				cause,
+				exitCode: 1,
+				message: cause instanceof Error ? cause.message : String(cause),
+			}),
+	});
+	yield* Effect.tryPromise({
+		try: () => fs.writeFile(dest, content),
+		catch: (cause) =>
+			new ShellRuntimeError({
+				cause,
+				exitCode: 1,
+				message: cause instanceof Error ? cause.message : String(cause),
+			}),
+	});
+});
 
-async function copyDirectoryRecursive(
+const copyDirectoryRecursive = Effect.fnUntraced(function* (
 	fs: FS,
 	srcDir: string,
 	destDir: string,
 	force: boolean,
 	interactive: boolean
-): Promise<void> {
-	const readDirectory = async (directoryPath: string): Promise<string[]> => {
+) {
+	const readDirectory = Effect.fnUntraced(function* (directoryPath: string) {
 		const children: string[] = [];
-		for await (const childPath of fs.readdir(directoryPath)) {
-			children.push(childPath);
-		}
+		yield* Effect.tryPromise({
+			try: async () => {
+				for await (const childPath of fs.readdir(directoryPath)) {
+					children.push(childPath);
+				}
+			},
+			catch: (cause) =>
+				new ShellRuntimeError({
+					cause,
+					exitCode: 1,
+					message:
+						cause instanceof Error ? cause.message : String(cause),
+				}),
+		});
 		children.sort((left, right) => left.localeCompare(right));
 		return children;
-	};
+	});
 
-	const ensureDirectory = async (path: string): Promise<void> => {
-		try {
-			const stat = await fs.stat(path);
+	const ensureDirectory = Effect.fnUntraced(function* (path: string) {
+		const stat = yield* Effect.tryPromise({
+			try: () => fs.stat(path),
+			catch: (cause) =>
+				new ShellRuntimeError({
+					cause,
+					exitCode: 1,
+					message:
+						cause instanceof Error ? cause.message : String(cause),
+				}),
+		}).pipe(
+			Effect.catchTag('ShellRuntimeError', () => Effect.succeed(null))
+		);
+		if (stat) {
 			if (stat.isDirectory) {
 				return;
 			}
-			throw new Error(`cp: destination is not a directory: ${path}`);
-		} catch (error) {
-			if (
-				error instanceof Error &&
-				error.message === `cp: destination is not a directory: ${path}`
-			) {
-				throw error;
-			}
-			await fs.mkdir(path, true);
+			return yield* new ShellRuntimeError({
+				exitCode: 1,
+				message: `cp: destination is not a directory: ${path}`,
+			});
 		}
-	};
+		yield* Effect.tryPromise({
+			try: () => fs.mkdir(path, true),
+			catch: (cause) =>
+				new ShellRuntimeError({
+					cause,
+					exitCode: 1,
+					message:
+						cause instanceof Error ? cause.message : String(cause),
+				}),
+		});
+	});
 
 	const stack: Array<{ sourcePath: string; targetPath: string }> = [
 		{
@@ -121,27 +185,38 @@ async function copyDirectoryRecursive(
 	if (!rootTargetPath) {
 		return;
 	}
-	await ensureDirectory(rootTargetPath);
+	yield* ensureDirectory(rootTargetPath);
 
 	while (stack.length > 0) {
 		const current = stack.pop();
 		if (!current) {
 			continue;
 		}
-		const childPaths = await readDirectory(current.sourcePath);
+		const childPaths = yield* readDirectory(current.sourcePath);
 		for (const childPath of childPaths) {
 			const childName = basename(childPath);
 			const targetPath = joinPath(current.targetPath, childName);
-			const sourceStat = await fs.stat(childPath);
+			const sourceStat = yield* Effect.tryPromise({
+				try: () => fs.stat(childPath),
+				catch: (cause) =>
+					new ShellRuntimeError({
+						cause,
+						exitCode: 1,
+						message:
+							cause instanceof Error
+								? cause.message
+								: String(cause),
+					}),
+			});
 			if (sourceStat.isDirectory) {
-				await ensureDirectory(targetPath);
+				yield* ensureDirectory(targetPath);
 				stack.push({
 					sourcePath: childPath,
 					targetPath,
 				});
 				continue;
 			}
-			await copyFileWithPolicy(
+			yield* copyFileWithPolicy(
 				fs,
 				childPath,
 				targetPath,
@@ -150,29 +225,45 @@ async function copyDirectoryRecursive(
 			);
 		}
 	}
-}
+});
 
-export function cp(fs: FS): Effect<CpArgs> {
-	return async ({
+export function cp(fs: FS): CommandEffect<CpArgs> {
+	return Effect.fn('cp')(function* ({
 		srcs,
 		dest,
 		force = false,
 		interactive = false,
 		recursive,
-	}) => {
+	}) {
 		if (srcs.length === 0) {
-			throw new Error('cp requires at least one source');
+			return yield* new ShellRuntimeError({
+				exitCode: 1,
+				message: 'cp requires at least one source',
+			});
 		}
 
-		const destinationIsDirectory = await isDirectory(fs, dest);
+		const destinationIsDirectory = yield* isDirectory(fs, dest);
 		if (srcs.length > 1 && !destinationIsDirectory) {
-			throw new Error(
-				'cp destination must be a directory for multiple sources'
-			);
+			return yield* new ShellRuntimeError({
+				exitCode: 1,
+				message:
+					'cp destination must be a directory for multiple sources',
+			});
 		}
 
 		for (const src of srcs) {
-			const srcStat = await fs.stat(src);
+			const srcStat = yield* Effect.tryPromise({
+				try: () => fs.stat(src),
+				catch: (cause) =>
+					new ShellRuntimeError({
+						cause,
+						exitCode: 1,
+						message:
+							cause instanceof Error
+								? cause.message
+								: String(cause),
+					}),
+			});
 			const targetPath =
 				destinationIsDirectory || srcs.length > 1
 					? joinPath(dest, basename(src))
@@ -180,9 +271,12 @@ export function cp(fs: FS): Effect<CpArgs> {
 
 			if (srcStat.isDirectory) {
 				if (!recursive) {
-					throw new Error(`cp: omitting directory "${src}" (use -r)`);
+					return yield* new ShellRuntimeError({
+						exitCode: 1,
+						message: `cp: omitting directory "${src}" (use -r)`,
+					});
 				}
-				await copyDirectoryRecursive(
+				yield* copyDirectoryRecursive(
 					fs,
 					src,
 					targetPath,
@@ -192,7 +286,7 @@ export function cp(fs: FS): Effect<CpArgs> {
 				continue;
 			}
 
-			await copyFileWithPolicy(fs, src, targetPath, force, interactive);
+			yield* copyFileWithPolicy(fs, src, targetPath, force, interactive);
 		}
-	};
+	});
 }

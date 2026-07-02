@@ -1,16 +1,23 @@
 import {
-	compile,
+	compileEffect,
 	createExpansionDiagnostic,
 	type ExpandedWord,
 	type ExpandedWordPart,
 	expandedWordHasGlob,
 	expandedWordParts,
-	parse,
+	isCompileError,
+	isParseSyntaxError,
+	parseEffect,
 } from '@shfs/compiler';
 
+import { Effect } from 'effect';
 import picomatch from 'picomatch';
 import type { BuiltinContext } from '../builtin/types';
-import { createDiagnosticError } from '../diagnostics';
+import {
+	createDiagnosticError,
+	type ShellErrorCause,
+	ShellRuntimeError,
+} from '../diagnostics';
 import type { FS } from '../fs/fs';
 import { formatRecord, type Record as ShellRecord } from '../record';
 
@@ -44,17 +51,39 @@ async function collectOutputRecords(
 	return outputs;
 }
 
-async function evaluateCommandSubstitution(
+function toShellErrorCause(cause: unknown): ShellErrorCause {
+	if (isParseSyntaxError(cause)) {
+		return createDiagnosticError(cause.diagnostic);
+	}
+	if (isCompileError(cause)) {
+		return createDiagnosticError(cause.diagnostic);
+	}
+	return new ShellRuntimeError({
+		cause,
+		exitCode: 1,
+		message: cause instanceof Error ? cause.message : String(cause),
+	});
+}
+
+function evaluateCommandSubstitutionEffect(
 	command: string,
 	fs: FS,
 	context: BuiltinContext
-): Promise<string> {
-	const parsed = parse(command);
-	const nestedIR = compile(parsed);
-	const executeModule = await import('./execute');
-	const result = executeModule.execute(nestedIR, fs, context);
-	const outputs = await collectOutputRecords(result);
-	return outputs.join('\n');
+): Effect.Effect<string, ShellErrorCause> {
+	return Effect.gen(function* () {
+		const parsed = yield* parseEffect(command).pipe(
+			Effect.mapError(toShellErrorCause)
+		);
+		const nestedIR = yield* compileEffect(parsed).pipe(
+			Effect.mapError(toShellErrorCause)
+		);
+		const executeModule = yield* Effect.promise(() => import('./execute'));
+		const result = executeModule.execute(nestedIR, fs, context);
+		const outputs = yield* Effect.promise(() =>
+			collectOutputRecords(result)
+		);
+		return outputs.join('\n');
+	});
 }
 
 function resolveVariable(
@@ -121,10 +150,6 @@ export function resolvePathsFromCwd(cwd: string, paths: string[]): string[] {
 	return paths.map((path) => resolvePathFromCwd(cwd, path));
 }
 
-async function listFilesystemEntries(fs: FS): Promise<FsEntry[]> {
-	return await walkFilesystemEntries(fs);
-}
-
 async function readDirectoryPaths(
 	fs: FS,
 	directoryPath: string
@@ -141,36 +166,57 @@ export async function walkFilesystemEntries(
 	fs: FS,
 	rootDir = ROOT_DIRECTORY
 ): Promise<FsEntry[]> {
-	const normalizedRoot = normalizeAbsolutePath(rootDir);
-	const rootStat = await fs.stat(normalizedRoot);
-	if (!rootStat.isDirectory) {
-		throw new Error(`Not a directory: ${normalizedRoot}`);
-	}
+	return Effect.runPromise(walkFilesystemEntriesEffect(fs, rootDir));
+}
 
-	const entries: FsEntry[] = [];
-	const pendingDirectories: string[] = [normalizedRoot];
-
-	while (pendingDirectories.length > 0) {
-		const currentDirectory = pendingDirectories.pop();
-		if (!currentDirectory) {
-			continue;
+function walkFilesystemEntriesEffect(
+	fs: FS,
+	rootDir = ROOT_DIRECTORY
+): Effect.Effect<FsEntry[], ShellErrorCause> {
+	return Effect.gen(function* () {
+		const normalizedRoot = normalizeAbsolutePath(rootDir);
+		const rootStat = yield* Effect.tryPromise({
+			try: () => fs.stat(normalizedRoot),
+			catch: toShellErrorCause,
+		});
+		if (!rootStat.isDirectory) {
+			return yield* new ShellRuntimeError({
+				exitCode: 1,
+				message: `Not a directory: ${normalizedRoot}`,
+			});
 		}
 
-		const children = await readDirectoryPaths(fs, currentDirectory);
-		for (const childPath of children) {
-			const stat = await fs.stat(childPath);
-			entries.push({
-				path: childPath,
-				isDirectory: stat.isDirectory,
+		const entries: FsEntry[] = [];
+		const pendingDirectories: string[] = [normalizedRoot];
+
+		while (pendingDirectories.length > 0) {
+			const currentDirectory = pendingDirectories.pop();
+			if (!currentDirectory) {
+				continue;
+			}
+
+			const children = yield* Effect.tryPromise({
+				try: () => readDirectoryPaths(fs, currentDirectory),
+				catch: toShellErrorCause,
 			});
-			if (stat.isDirectory) {
-				pendingDirectories.push(childPath);
+			for (const childPath of children) {
+				const stat = yield* Effect.tryPromise({
+					try: () => fs.stat(childPath),
+					catch: toShellErrorCause,
+				});
+				entries.push({
+					path: childPath,
+					isDirectory: stat.isDirectory,
+				});
+				if (stat.isDirectory) {
+					pendingDirectories.push(childPath);
+				}
 			}
 		}
-	}
 
-	entries.sort((left, right) => left.path.localeCompare(right.path));
-	return entries;
+		entries.sort((left, right) => left.path.localeCompare(right.path));
+		return entries;
+	});
 }
 
 function toRelativePathFromCwd(path: string, cwd: string): string | null {
@@ -213,72 +259,76 @@ function toGlobCandidate(
 	return basePath;
 }
 
-async function expandGlobPattern(
+function expandGlobPatternEffect(
 	pattern: string,
 	fs: FS,
 	context: BuiltinContext
-): Promise<string[]> {
-	const directoryOnly = pattern.endsWith(ROOT_DIRECTORY);
-	const isAbsolutePattern = pattern.startsWith(ROOT_DIRECTORY);
-	const matcher = picomatch(pattern, { bash: true, dot: false });
-	const entries = await listFilesystemEntries(fs);
-	const matches: string[] = [];
+): Effect.Effect<string[], ShellErrorCause> {
+	return Effect.gen(function* () {
+		const directoryOnly = pattern.endsWith(ROOT_DIRECTORY);
+		const isAbsolutePattern = pattern.startsWith(ROOT_DIRECTORY);
+		const matcher = picomatch(pattern, { bash: true, dot: false });
+		const entries = yield* walkFilesystemEntriesEffect(fs);
+		const matches: string[] = [];
 
-	for (const entry of entries) {
-		const candidate = toGlobCandidate(
-			entry,
-			context.cwd,
-			isAbsolutePattern,
-			directoryOnly
-		);
-		if (!candidate) {
-			continue;
+		for (const entry of entries) {
+			const candidate = toGlobCandidate(
+				entry,
+				context.cwd,
+				isAbsolutePattern,
+				directoryOnly
+			);
+			if (!candidate) {
+				continue;
+			}
+			if (matcher(candidate)) {
+				matches.push(candidate);
+			}
 		}
-		if (matcher(candidate)) {
-			matches.push(candidate);
-		}
-	}
 
-	matches.sort((left, right) => left.localeCompare(right));
-	return matches;
+		matches.sort((left, right) => left.localeCompare(right));
+		return matches;
+	});
 }
 
-function expectSingleExpandedPath(
+function expectSingleExpandedPathEffect(
 	command: string,
 	expectation: string,
 	values: string[],
 	allowEmpty = false
-): string {
-	if (values.length !== 1) {
-		throw createDiagnosticError(
-			createExpansionDiagnostic(
-				command,
-				'invalid-path-count',
-				`${expectation}, got ${values.length}`
-			)
-		);
-	}
+): Effect.Effect<string, ShellErrorCause> {
+	return Effect.gen(function* () {
+		if (values.length !== 1) {
+			return yield* createDiagnosticError(
+				createExpansionDiagnostic(
+					command,
+					'invalid-path-count',
+					`${expectation}, got ${values.length}`
+				)
+			);
+		}
 
-	const resolvedValue = values.at(0);
-	if (resolvedValue === undefined) {
-		throw createDiagnosticError(
-			createExpansionDiagnostic(
-				command,
-				'missing-path',
-				'path missing after expansion'
-			)
-		);
-	}
-	if (!allowEmpty && resolvedValue === '') {
-		throw createDiagnosticError(
-			createExpansionDiagnostic(
-				command,
-				'invalid-path-count',
-				`${expectation}, got empty path`
-			)
-		);
-	}
-	return resolvedValue;
+		const resolvedValue = values.at(0);
+		if (resolvedValue === undefined) {
+			return yield* createDiagnosticError(
+				createExpansionDiagnostic(
+					command,
+					'missing-path',
+					'path missing after expansion'
+				)
+			);
+		}
+		if (!allowEmpty && resolvedValue === '') {
+			return yield* createDiagnosticError(
+				createExpansionDiagnostic(
+					command,
+					'invalid-path-count',
+					`${expectation}, got empty path`
+				)
+			);
+		}
+		return resolvedValue;
+	});
 }
 
 export async function evaluateExpandedPathWords(
@@ -287,9 +337,22 @@ export async function evaluateExpandedPathWords(
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string[]> {
+	return Effect.runPromise(
+		evaluateExpandedPathWordsEffect(command, words, fs, context)
+	);
+}
+
+export const evaluateExpandedPathWordsEffect: (
+	command: string,
+	words: ExpandedWord[],
+	fs: FS,
+	context: BuiltinContext
+) => Effect.Effect<string[], ShellErrorCause> = Effect.fn(
+	'Path.evaluateExpandedPathWords'
+)(function* (command, words, fs, context) {
 	const resolvedWords: string[] = [];
 	for (const word of words) {
-		const values = await evaluateExpandedPathWord(
+		const values = yield* evaluateExpandedPathWordEffect(
 			command,
 			word,
 			fs,
@@ -298,7 +361,7 @@ export async function evaluateExpandedPathWords(
 		resolvedWords.push(...values);
 	}
 	return resolvedWords;
-}
+});
 
 export async function evaluateExpandedPathWord(
 	command: string,
@@ -306,19 +369,34 @@ export async function evaluateExpandedPathWord(
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string[]> {
+	return Effect.runPromise(
+		evaluateExpandedPathWordEffect(command, word, fs, context)
+	);
+}
+
+export const evaluateExpandedPathWordEffect: (
+	command: string,
+	word: ExpandedWord,
+	fs: FS,
+	context: BuiltinContext
+) => Effect.Effect<string[], ShellErrorCause> = Effect.fn(
+	'Path.evaluateExpandedPathWord'
+)(function* (command, word, fs, context) {
 	if (!expandedWordHasGlob(word)) {
-		return [await evaluateExpandedWord(word, fs, context)];
+		return [yield* evaluateExpandedWordEffect(word, fs, context)];
 	}
 
 	const patternSegments: string[] = [];
 	for (const part of expandedWordParts(word)) {
-		patternSegments.push(await evaluateExpandedWordPart(part, fs, context));
+		patternSegments.push(
+			yield* evaluateExpandedWordPartEffect(part, fs, context)
+		);
 	}
 
 	const pattern = patternSegments.join('');
-	const matches = await expandGlobPattern(pattern, fs, context);
+	const matches = yield* expandGlobPatternEffect(pattern, fs, context);
 	if (matches.length === 0) {
-		throw createDiagnosticError(
+		return yield* createDiagnosticError(
 			createExpansionDiagnostic(
 				command,
 				'no-match',
@@ -327,7 +405,7 @@ export async function evaluateExpandedPathWord(
 		);
 	}
 	return matches;
-}
+});
 
 export async function evaluateExpandedSinglePath(
 	command: string,
@@ -337,57 +415,108 @@ export async function evaluateExpandedSinglePath(
 	context: BuiltinContext,
 	options?: { allowEmpty?: boolean }
 ): Promise<string> {
-	return expectSingleExpandedPath(
-		command,
-		expectation,
-		await evaluateExpandedPathWord(command, word, fs, context),
-		options?.allowEmpty ?? false
+	return Effect.runPromise(
+		evaluateExpandedSinglePathEffect(
+			command,
+			expectation,
+			word,
+			fs,
+			context,
+			options
+		)
 	);
 }
+
+export const evaluateExpandedSinglePathEffect: (
+	command: string,
+	expectation: string,
+	word: ExpandedWord,
+	fs: FS,
+	context: BuiltinContext,
+	options?: { allowEmpty?: boolean }
+) => Effect.Effect<string, ShellErrorCause> = Effect.fn(
+	'Path.evaluateExpandedSinglePath'
+)(function* (command, expectation, word, fs, context, options) {
+	return yield* expectSingleExpandedPathEffect(
+		command,
+		expectation,
+		yield* evaluateExpandedPathWordEffect(command, word, fs, context),
+		options?.allowEmpty ?? false
+	);
+});
 
 export async function evaluateExpandedWords(
 	words: ExpandedWord[],
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string[]> {
+	return Effect.runPromise(evaluateExpandedWordsEffect(words, fs, context));
+}
+
+export const evaluateExpandedWordsEffect: (
+	words: ExpandedWord[],
+	fs: FS,
+	context: BuiltinContext
+) => Effect.Effect<string[], ShellErrorCause> = Effect.fn(
+	'Path.evaluateExpandedWords'
+)(function* (words, fs, context) {
 	const resolvedWords: string[] = [];
 	for (const word of words) {
-		resolvedWords.push(await evaluateExpandedWord(word, fs, context));
+		resolvedWords.push(
+			yield* evaluateExpandedWordEffect(word, fs, context)
+		);
 	}
 	return resolvedWords;
-}
+});
 
 export async function evaluateExpandedWord(
 	word: ExpandedWord,
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string> {
-	const segments: string[] = [];
-	for (const part of expandedWordParts(word)) {
-		segments.push(await evaluateExpandedWordPart(part, fs, context));
-	}
-	return segments.join('');
+	return Effect.runPromise(evaluateExpandedWordEffect(word, fs, context));
 }
 
-async function evaluateExpandedWordPart(
+export const evaluateExpandedWordEffect: (
+	word: ExpandedWord,
+	fs: FS,
+	context: BuiltinContext
+) => Effect.Effect<string, ShellErrorCause> = Effect.fn(
+	'Path.evaluateExpandedWord'
+)(function* (word, fs, context) {
+	const segments: string[] = [];
+	for (const part of expandedWordParts(word)) {
+		segments.push(yield* evaluateExpandedWordPartEffect(part, fs, context));
+	}
+	return segments.join('');
+});
+
+function evaluateExpandedWordPartEffect(
 	part: ExpandedWordPart,
 	fs: FS,
 	context: BuiltinContext
-): Promise<string> {
-	switch (part.kind) {
-		case 'literal':
-			return expandVariables(part.value, context);
-		case 'glob':
-			return expandVariables(part.pattern, context);
-		case 'commandSub': {
-			const commandText = expandVariables(part.command, context);
-			return await evaluateCommandSubstitution(commandText, fs, context);
+): Effect.Effect<string, ShellErrorCause> {
+	return Effect.gen(function* () {
+		switch (part.kind) {
+			case 'literal':
+				return expandVariables(part.value, context);
+			case 'glob':
+				return expandVariables(part.pattern, context);
+			case 'commandSub': {
+				const commandText = expandVariables(part.command, context);
+				return yield* evaluateCommandSubstitutionEffect(
+					commandText,
+					fs,
+					context
+				);
+			}
+			default: {
+				const _exhaustive: never = part;
+				return yield* new ShellRuntimeError({
+					exitCode: 1,
+					message: `Unknown word kind: ${JSON.stringify(_exhaustive)}`,
+				});
+			}
 		}
-		default: {
-			const _exhaustive: never = part;
-			throw new Error(
-				`Unknown word kind: ${JSON.stringify(_exhaustive)}`
-			);
-		}
-	}
+	});
 }

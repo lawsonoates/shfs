@@ -1,6 +1,7 @@
 {
 	"author": "Lawson Oates (https://github.com/lawsonoates)",
 	"dependencies": {
+		"effect": "4.0.0-beta.91",
 		"picomatch": "^4.0.3"
 	},
 	"description": "A library of simulated fish commands",

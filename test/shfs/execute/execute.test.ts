@@ -303,16 +303,24 @@ test('redirect target expansion failures stop sink commands before side effects'
 	const fs = new MemoryFS();
 	await fs.mkdir('/workspace/dir-a', true);
 	await fs.mkdir('/workspace/dir-b', true);
-
-	const result = execute(compile(parse('touch created.txt > dir-*')), fs, {
+	const context: ExecuteContext = {
 		cwd: '/workspace',
-	});
+		stderr: new BufferedOutputStream(),
+	};
+
+	const result = execute(
+		compile(parse('touch created.txt > dir-*')),
+		fs,
+		context
+	);
 	expect(result.kind).toBe('sink');
 	if (result.kind !== 'sink') {
 		throw new Error('Expected sink result');
 	}
 
-	await expect(result.value).rejects.toThrow(
+	await result.value;
+	expect(context.status).toBe(1);
+	expect(context.stderr.snapshot().join('\n')).toContain(
 		'touch: redirection target must expand to exactly 1 path, got 2'
 	);
 	expect(await fs.exists('/workspace/created.txt')).toBe(false);
@@ -321,16 +329,24 @@ test('redirect target expansion failures stop sink commands before side effects'
 test('empty-expanded redirect targets fail before resolving cwd', async () => {
 	const fs = new MemoryFS();
 	await fs.mkdir('/workspace', true);
-
-	const result = execute(compile(parse('echo hello > "$UNSET"')), fs, {
+	const context: ExecuteContext = {
 		cwd: '/workspace',
-	});
+		stderr: new BufferedOutputStream(),
+	};
+
+	const result = execute(
+		compile(parse('echo hello > "$UNSET"')),
+		fs,
+		context
+	);
 	expect(result.kind).toBe('sink');
 	if (result.kind !== 'sink') {
 		throw new Error('Expected sink result');
 	}
 
-	await expect(result.value).rejects.toThrow(
+	await result.value;
+	expect(context.status).toBe(1);
+	expect(context.stderr.snapshot().join('\n')).toContain(
 		'echo: redirection target must expand to exactly 1 path, got empty path'
 	);
 	expect((await fs.stat('/workspace')).isDirectory).toBe(true);
@@ -346,34 +362,42 @@ test('empty-expanded single-path destinations fail deterministically', async () 
 	const fs = new MemoryFS();
 	fs.setFile('/workspace/source.txt', 'from source');
 	fs.setFile('/workspace/move-me.txt', 'move me');
+	const copyContext: ExecuteContext = {
+		cwd: '/workspace',
+		stderr: new BufferedOutputStream(),
+	};
 
 	const copyResult = execute(
 		compile(parse('cp /workspace/source.txt "$UNSET"')),
 		fs,
-		{
-			cwd: '/workspace',
-		}
+		copyContext
 	);
 	expect(copyResult.kind).toBe('sink');
 	if (copyResult.kind !== 'sink') {
 		throw new Error('Expected sink result');
 	}
-	await expect(copyResult.value).rejects.toThrow(
+	await copyResult.value;
+	expect(copyContext.status).toBe(1);
+	expect(copyContext.stderr.snapshot().join('\n')).toContain(
 		'cp: destination must expand to exactly 1 path, got empty path'
 	);
 
+	const moveContext: ExecuteContext = {
+		cwd: '/workspace',
+		stderr: new BufferedOutputStream(),
+	};
 	const moveResult = execute(
 		compile(parse('mv /workspace/move-me.txt "$UNSET"')),
 		fs,
-		{
-			cwd: '/workspace',
-		}
+		moveContext
 	);
 	expect(moveResult.kind).toBe('sink');
 	if (moveResult.kind !== 'sink') {
 		throw new Error('Expected sink result');
 	}
-	await expect(moveResult.value).rejects.toThrow(
+	await moveResult.value;
+	expect(moveContext.status).toBe(1);
+	expect(moveContext.stderr.snapshot().join('\n')).toContain(
 		'mv: destination must expand to exactly 1 path, got empty path'
 	);
 
@@ -728,6 +752,10 @@ test('wires cp force flag through execute', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('source.txt', 'from source');
 	fs.setFile('dest.txt', 'existing');
+	const withoutForceContext: ExecuteContext = {
+		cwd: '/',
+		stderr: new BufferedOutputStream(),
+	};
 
 	const withoutForce: PipelineIR = {
 		firstCommand: {
@@ -750,10 +778,12 @@ test('wires cp force flag through execute', async () => {
 		],
 	};
 
-	const firstResult = execute(withoutForce, fs);
+	const firstResult = execute(withoutForce, fs, withoutForceContext);
 	expect(firstResult.kind).toBe('sink');
 	if (firstResult.kind === 'sink') {
-		await expect(firstResult.value).rejects.toThrow(
+		await firstResult.value;
+		expect(withoutForceContext.status).toBe(1);
+		expect(withoutForceContext.stderr.snapshot().join('\n')).toContain(
 			'cp: destination exists (use -f to overwrite): /dest.txt'
 		);
 	}
@@ -1118,9 +1148,12 @@ test('cd resolves relative and parent paths against cwd', async () => {
 	expect(context.cwd).toBe('/workspace');
 });
 
-test('cd throws when target does not exist', async () => {
+test('cd reports an error when target does not exist', async () => {
 	const fs = new MemoryFS();
-	const context = { cwd: '/' };
+	const context: ExecuteContext = {
+		cwd: '/',
+		stderr: new BufferedOutputStream(),
+	};
 
 	const ir: PipelineIR = {
 		firstCommand: {
@@ -1140,16 +1173,21 @@ test('cd throws when target does not exist', async () => {
 	const result = execute(ir, fs, context);
 	expect(result.kind).toBe('sink');
 	if (result.kind === 'sink') {
-		await expect(result.value).rejects.toThrow(
+		await result.value;
+		expect(context.status).toBe(1);
+		expect(context.stderr.snapshot().join('\n')).toContain(
 			'cd: directory does not exist: /missing'
 		);
 	}
 });
 
-test('cd throws when target is a file', async () => {
+test('cd reports an error when target is a file', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/file.txt', 'hello');
-	const context = { cwd: '/' };
+	const context: ExecuteContext = {
+		cwd: '/',
+		stderr: new BufferedOutputStream(),
+	};
 
 	const ir: PipelineIR = {
 		firstCommand: {
@@ -1169,7 +1207,9 @@ test('cd throws when target is a file', async () => {
 	const result = execute(ir, fs, context);
 	expect(result.kind).toBe('sink');
 	if (result.kind === 'sink') {
-		await expect(result.value).rejects.toThrow(
+		await result.value;
+		expect(context.status).toBe(1);
+		expect(context.stderr.snapshot().join('\n')).toContain(
 			'cd: not a directory: /file.txt'
 		);
 	}

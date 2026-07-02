@@ -1,3 +1,4 @@
+import { type Effect, Schema } from 'effect';
 import type { Flag } from '../flag';
 
 export type FlagDef = Flag & {
@@ -46,6 +47,23 @@ export interface ParseDiagnostic {
 	token: string;
 	tokenIndex: number;
 }
+
+export class ArgParseError extends Schema.TaggedErrorClass<ArgParseError>()(
+	'ArgParseError',
+	{
+		code: Schema.Literals([
+			'ambiguous-short-value',
+			'duplicate-flag',
+			'invalid-flag',
+			'invalid-option',
+			'invalid-state',
+			'missing-value',
+			'unknown-flag',
+		]),
+		message: Schema.String,
+		token: Schema.optional(Schema.String),
+	}
+) {}
 
 export interface ParseOptions {
 	errorPolicy?: ParseErrorPolicy;
@@ -120,4 +138,4 @@ export type TokenParser = (
 	consumedValueSources: ConsumedValueSources,
 	flagOccurrenceOrder: FlagOccurrenceOrder,
 	orderState: ParseOrderState
-) => number;
+) => Effect.Effect<number, ArgParseError>;

@@ -1,5 +1,8 @@
 import { expect, test } from 'bun:test';
-import { compile } from '#compiler/compile/compile';
+import { Effect } from 'effect';
+
+import { compile, compileEffect } from '#compiler/compile/compile';
+import { CompileError } from '#compiler/diagnostic';
 import { commandSub, compound, glob, literal } from '#compiler/ir';
 import { parse } from '#compiler/parser/parser';
 
@@ -146,4 +149,10 @@ test('compile preserves and/or chain metadata', () => {
 		'and',
 		'or',
 	]);
+});
+
+test('compileEffect yields compile failures on the Effect error channel', async () => {
+	await expect(
+		Effect.runPromise(compileEffect(parse('definitely-not-a-command')))
+	).rejects.toBeInstanceOf(CompileError);
 });

@@ -1,4 +1,5 @@
 import type { StepIR } from '@shfs/compiler';
+import { Effect } from 'effect';
 import { cd } from '../builtin/cd/cd';
 import { echo } from '../builtin/echo/echo';
 import { read } from '../builtin/read/read';
@@ -6,6 +7,13 @@ import { set } from '../builtin/set/set';
 import { string } from '../builtin/string/string';
 import { test } from '../builtin/test/test';
 import type { BuiltinContext, BuiltinRuntime } from '../builtin/types';
+import {
+	isShellDiagnosticError,
+	isShellRuntimeError,
+	type ShellErrorCause,
+	ShellRuntimeError,
+	writeDiagnosticsToStderr,
+} from '../diagnostics';
 import type { FS } from '../fs/fs';
 import { cat } from '../operator/cat/cat';
 import { cp } from '../operator/cp/cp';
@@ -27,16 +35,16 @@ import type { Record as ShellRecord } from '../record';
 import type { Stream } from '../stream';
 import { BufferedShellOutput, createShellInput } from './io';
 import {
-	evaluateExpandedPathWords,
-	evaluateExpandedSinglePath,
-	evaluateExpandedWords,
+	evaluateExpandedPathWordsEffect,
+	evaluateExpandedSinglePathEffect,
+	evaluateExpandedWordsEffect,
 	resolvePathsFromCwd,
 } from './path';
 import { files } from './producers';
 import { toFormattedLineStream } from './records';
 import {
-	resolveInputRedirect,
-	resolveRedirectPath,
+	resolveInputRedirectEffect,
+	resolveRedirectPathEffect,
 	withInputRedirect,
 } from './redirection';
 
@@ -123,7 +131,7 @@ type EffectCommandHandler<TCommand extends EffectCommand = EffectCommand> =
 		step: EffectStepForCommand<TCommand>;
 		fs: FS;
 		context: ExecuteStepContext;
-	}) => Promise<void>;
+	}) => Effect.Effect<void, ShellErrorCause>;
 
 type CommandRegistryEntry =
 	| {
@@ -133,6 +141,13 @@ type CommandRegistryEntry =
 	| {
 			kind: 'effect';
 			handler: EffectCommandHandler;
+	  };
+
+type CommandEffectResult<T> =
+	| { ok: false }
+	| {
+			ok: true;
+			value: T;
 	  };
 
 interface StreamCommandEntry<TCommand extends StreamCommand> {
@@ -149,28 +164,102 @@ function isStreamCommand(command: StepIR['cmd']): command is StreamCommand {
 	return STREAM_COMMAND_SET.has(command);
 }
 
-function verifyCommandRegistries(): void {
-	if (commandRegistriesVerified) {
+function missingCommandHandlerError(
+	command: StepIR['cmd'],
+	kind: CommandRegistryEntry['kind']
+): ShellRuntimeError {
+	return new ShellRuntimeError({
+		exitCode: 1,
+		message: `Missing ${kind} command handler: ${command}`,
+	});
+}
+
+function unknownCommandError(command: StepIR['cmd']): ShellRuntimeError {
+	return new ShellRuntimeError({
+		exitCode: 1,
+		message: `Unknown command: ${command}`,
+	});
+}
+
+function commandKindError(
+	command: StepIR['cmd'],
+	kind: CommandRegistryEntry['kind']
+): ShellRuntimeError {
+	return new ShellRuntimeError({
+		exitCode: 1,
+		message: `Command "${command}" is not a ${kind} command`,
+	});
+}
+
+function reportCommandFailure(
+	context: ExecuteStepContext,
+	error: unknown
+): void {
+	if (isShellDiagnosticError(error)) {
+		context.status = error.exitCode;
+		writeDiagnosticsToStderr(context, error.diagnostics);
 		return;
+	}
+	if (isShellRuntimeError(error)) {
+		context.status = error.exitCode;
+		if (error.message !== '') {
+			context.stderr.append(error.message);
+		}
+		return;
+	}
+	context.status = 1;
+	context.stderr.append(
+		error instanceof Error ? error.message : String(error)
+	);
+}
+
+async function runOrReport<T>(
+	effect: Effect.Effect<T, unknown>,
+	context: ExecuteStepContext
+): Promise<CommandEffectResult<T>> {
+	return Effect.runPromise(
+		effect.pipe(
+			Effect.match({
+				onFailure: (error) => {
+					reportCommandFailure(context, error);
+					return { ok: false } as const;
+				},
+				onSuccess: (value) => ({ ok: true, value }) as const,
+			})
+		)
+	);
+}
+
+function verifyCommandRegistries(): ShellRuntimeError | null {
+	if (commandRegistriesVerified) {
+		return null;
 	}
 
 	for (const command of EFFECT_COMMANDS) {
-		try {
-			CommandRegistry.getEffect(command);
-		} catch {
-			throw new Error(`Missing effect command handler: ${command}`);
+		if (commands.get(command)?.kind !== 'effect') {
+			return missingCommandHandlerError(command, 'effect');
 		}
 	}
 
 	for (const command of STREAM_COMMANDS) {
-		try {
-			CommandRegistry.getStream(command);
-		} catch {
-			throw new Error(`Missing stream command handler: ${command}`);
+		if (commands.get(command)?.kind !== 'stream') {
+			return missingCommandHandlerError(command, 'stream');
 		}
 	}
 
 	commandRegistriesVerified = true;
+	return null;
+}
+
+function failedStreamCommand(
+	context: ExecuteStepContext,
+	error: ShellRuntimeError
+): Stream<ShellRecord> {
+	context.status = error.exitCode;
+	context.stderr.append(error.message);
+	return (async function* (): Stream<ShellRecord> {
+		// no records
+	})();
 }
 
 function executeStreamStep({
@@ -180,11 +269,20 @@ function executeStreamStep({
 	context,
 	resolvedOutputRedirectPath,
 }: ExecuteStreamStepParams): Stream<ShellRecord> {
-	verifyCommandRegistries();
+	const verificationError = verifyCommandRegistries();
+	if (verificationError) {
+		return failedStreamCommand(context, verificationError);
+	}
 	if (!isStreamCommand(step.cmd)) {
-		throw new Error(`Command "${step.cmd}" is not a stream command`);
+		return failedStreamCommand(
+			context,
+			commandKindError(step.cmd, 'stream')
+		);
 	}
 	const handler = CommandRegistry.getStream(step.cmd);
+	if (isShellRuntimeError(handler)) {
+		return failedStreamCommand(context, handler);
+	}
 	return handler({
 		step: step as StreamStepForCommand<typeof step.cmd>,
 		fs,
@@ -194,17 +292,22 @@ function executeStreamStep({
 	});
 }
 
-async function executeEffectStep({
+function executeEffectStep({
 	step,
 	fs,
 	context,
-}: ExecuteEffectStepParams): Promise<void> {
-	verifyCommandRegistries();
-	const handler = CommandRegistry.getEffect(step.cmd);
-	await handler({
-		step,
-		fs,
-		context,
+}: ExecuteEffectStepParams): Effect.Effect<void, ShellErrorCause> {
+	return Effect.gen(function* () {
+		const verificationError = verifyCommandRegistries();
+		if (verificationError) {
+			return yield* verificationError;
+		}
+		const handler = yield* CommandRegistry.getEffect(step.cmd);
+		return yield* handler({
+			step,
+			fs,
+			context,
+		});
 	});
 }
 
@@ -253,67 +356,72 @@ function resolveLsPath(path: string, cwd: string): string {
 	return normalizeLsPath(path, cwd);
 }
 
-export namespace CommandRegistry {
-	const commands = new Map<StepIR['cmd'], CommandRegistryEntry>();
+const commands = new Map<StepIR['cmd'], CommandRegistryEntry>();
 
-	export function register<TCommand extends StreamCommand>(
-		command: TCommand,
-		entry: StreamCommandEntry<TCommand>
-	): void;
-	export function register<TCommand extends EffectCommand>(
-		command: TCommand,
-		entry: EffectCommandEntry<TCommand>
-	): void;
-	export function register(
-		command: StepIR['cmd'],
-		entry: CommandRegistryEntry
-	): void {
-		commands.set(command, entry);
-	}
-
-	export function getStream<TCommand extends StreamCommand>(
-		command: TCommand
-	): StreamCommandHandler<TCommand> {
-		const entry = commands.get(command);
-		if (!entry) {
-			throw new Error(`Unknown command: ${command}`);
-		}
-		if (entry.kind !== 'stream') {
-			throw new Error(`Command "${command}" is not a stream command`);
-		}
-		return entry.handler as unknown as StreamCommandHandler<TCommand>;
-	}
-
-	export function getEffect<TCommand extends EffectCommand>(
-		command: TCommand
-	): EffectCommandHandler<TCommand> {
-		const entry = commands.get(command);
-		if (!entry) {
-			throw new Error(`Unknown command: ${command}`);
-		}
-		if (entry.kind !== 'effect') {
-			throw new Error(`Command "${command}" is not an effect command`);
-		}
-		return entry.handler as unknown as EffectCommandHandler<TCommand>;
-	}
-
-	export function isEffectStep(step: StepIR): step is EffectStep {
-		return EFFECT_COMMAND_SET.has(step.cmd);
-	}
-
-	export function executeStep(
-		params: ExecuteStreamStepParams
-	): Stream<ShellRecord>;
-	export function executeStep(params: ExecuteEffectStepParams): Promise<void>;
-	export function executeStep(
-		params: ExecuteStreamStepParams | ExecuteEffectStepParams
-	): Stream<ShellRecord> | Promise<void> {
-		if (isEffectStep(params.step)) {
-			return executeEffectStep(params as ExecuteEffectStepParams);
-		}
-		return executeStreamStep(params as ExecuteStreamStepParams);
-	}
+function register<TCommand extends StreamCommand>(
+	command: TCommand,
+	entry: StreamCommandEntry<TCommand>
+): void;
+function register<TCommand extends EffectCommand>(
+	command: TCommand,
+	entry: EffectCommandEntry<TCommand>
+): void;
+function register(command: StepIR['cmd'], entry: CommandRegistryEntry): void {
+	commands.set(command, entry);
 }
+
+function getStream<TCommand extends StreamCommand>(
+	command: TCommand
+): ShellRuntimeError | StreamCommandHandler<TCommand> {
+	const entry = commands.get(command);
+	if (!entry) {
+		return unknownCommandError(command);
+	}
+	if (entry.kind !== 'stream') {
+		return commandKindError(command, 'stream');
+	}
+	return entry.handler as unknown as StreamCommandHandler<TCommand>;
+}
+
+function getEffect<TCommand extends EffectCommand>(
+	command: TCommand
+): Effect.Effect<EffectCommandHandler<TCommand>, ShellErrorCause> {
+	const entry = commands.get(command);
+	if (!entry) {
+		return Effect.fail(unknownCommandError(command));
+	}
+	if (entry.kind !== 'effect') {
+		return Effect.fail(commandKindError(command, 'effect'));
+	}
+	return Effect.succeed(
+		entry.handler as unknown as EffectCommandHandler<TCommand>
+	);
+}
+
+function isEffectStep(step: StepIR): step is EffectStep {
+	return EFFECT_COMMAND_SET.has(step.cmd);
+}
+
+function executeStep(params: ExecuteStreamStepParams): Stream<ShellRecord>;
+function executeStep(
+	params: ExecuteEffectStepParams
+): Effect.Effect<void, ShellErrorCause>;
+function executeStep(
+	params: ExecuteStreamStepParams | ExecuteEffectStepParams
+): Stream<ShellRecord> | Effect.Effect<void, ShellErrorCause> {
+	if (isEffectStep(params.step)) {
+		return executeEffectStep(params as ExecuteEffectStepParams);
+	}
+	return executeStreamStep(params as ExecuteStreamStepParams);
+}
+
+export const CommandRegistry = {
+	executeStep,
+	getEffect,
+	getStream,
+	isEffectStep,
+	register,
+};
 
 CommandRegistry.register('cat', {
 	kind: 'stream',
@@ -328,24 +436,34 @@ CommandRegistry.register('cat', {
 				showTabs: step.args.showTabs,
 				squeezeBlank: step.args.squeezeBlank,
 			};
-			const inputPath = await resolveRedirectPath(
-				step.cmd,
-				step.redirections,
-				'input',
-				fs,
+			const inputPathResult = await runOrReport(
+				resolveRedirectPathEffect(
+					step.cmd,
+					step.redirections,
+					'input',
+					fs,
+					context
+				),
 				context
 			);
-			const filePaths = withInputRedirect(
-				resolvePathsFromCwd(
-					context.cwd,
-					await evaluateExpandedPathWords(
-						'cat',
-						step.args.files,
-						fs,
-						context
-					)
+			if (!inputPathResult.ok) {
+				return;
+			}
+			const expandedFiles = await runOrReport(
+				evaluateExpandedPathWordsEffect(
+					'cat',
+					step.args.files,
+					fs,
+					context
 				),
-				inputPath
+				context
+			);
+			if (!expandedFiles.ok) {
+				return;
+			}
+			const filePaths = withInputRedirect(
+				resolvePathsFromCwd(context.cwd, expandedFiles.value),
+				inputPathResult.value
 			);
 			if (filePaths.length > 0) {
 				yield* cat(fs, options)(files(...filePaths));
@@ -400,18 +518,24 @@ CommandRegistry.register('xargs', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
 		return (async function* (): Stream<ShellRecord> {
-			const inputPath = await resolveRedirectPath(
-				step.cmd,
-				step.redirections,
-				'input',
-				fs,
+			const inputPath = await runOrReport(
+				resolveRedirectPathEffect(
+					step.cmd,
+					step.redirections,
+					'input',
+					fs,
+					context
+				),
 				context
 			);
+			if (!inputPath.ok) {
+				return;
+			}
 			const result = await runXargsCommand({
 				context,
 				fs,
 				input,
-				inputPath,
+				inputPath: inputPath.value,
 				parsed: step.args,
 				stdin: createShellInput(input),
 			});
@@ -431,18 +555,24 @@ CommandRegistry.register('wc', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
 		return (async function* (): Stream<ShellRecord> {
-			const inputPath = await resolveRedirectPath(
-				step.cmd,
-				step.redirections,
-				'input',
-				fs,
+			const inputPath = await runOrReport(
+				resolveRedirectPathEffect(
+					step.cmd,
+					step.redirections,
+					'input',
+					fs,
+					context
+				),
 				context
 			);
+			if (!inputPath.ok) {
+				return;
+			}
 			const result = await runWcCommand({
 				context,
 				fs,
 				input,
-				inputPath,
+				inputPath: inputPath.value,
 				parsed: step.args,
 				stdin: createShellInput(input),
 			});
@@ -462,18 +592,24 @@ CommandRegistry.register('sort', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
 		return (async function* (): Stream<ShellRecord> {
-			const inputPath = await resolveRedirectPath(
-				step.cmd,
-				step.redirections,
-				'input',
-				fs,
+			const inputPath = await runOrReport(
+				resolveRedirectPathEffect(
+					step.cmd,
+					step.redirections,
+					'input',
+					fs,
+					context
+				),
 				context
 			);
+			if (!inputPath.ok) {
+				return;
+			}
 			const result = await runSortCommand({
 				context,
 				fs,
 				input,
-				inputPath,
+				inputPath: inputPath.value,
 				parsed: step.args,
 				stdin: createShellInput(input),
 			});
@@ -490,32 +626,48 @@ CommandRegistry.register('tree', {
 	kind: 'stream',
 	handler: ({ step, fs, context }) => {
 		return (async function* (): Stream<ShellRecord> {
-			const paths = resolvePathsFromCwd(
-				context.cwd,
-				await evaluateExpandedPathWords(
+			const expandedPaths = await runOrReport(
+				evaluateExpandedPathWordsEffect(
 					'tree',
 					step.args.paths,
 					fs,
 					context
-				)
-			);
-			const includePatterns = await evaluateExpandedWords(
-				step.args.includePatterns,
-				fs,
+				),
 				context
 			);
-			const excludePatterns = await evaluateExpandedWords(
-				step.args.excludePatterns,
-				fs,
+			if (!expandedPaths.ok) {
+				return;
+			}
+			const paths = resolvePathsFromCwd(context.cwd, expandedPaths.value);
+			const includePatterns = await runOrReport(
+				evaluateExpandedWordsEffect(
+					step.args.includePatterns,
+					fs,
+					context
+				),
 				context
 			);
+			if (!includePatterns.ok) {
+				return;
+			}
+			const excludePatterns = await runOrReport(
+				evaluateExpandedWordsEffect(
+					step.args.excludePatterns,
+					fs,
+					context
+				),
+				context
+			);
+			if (!excludePatterns.ok) {
+				return;
+			}
 			const result = await runTreeCommand(
 				fs,
 				context.cwd,
 				createTreeResolvedArgs({
 					...step.args,
-					excludePatterns,
-					includePatterns,
+					excludePatterns: excludePatterns.value,
+					includePatterns: includePatterns.value,
 					paths,
 				})
 			);
@@ -532,24 +684,34 @@ CommandRegistry.register('head', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
 		return (async function* (): Stream<ShellRecord> {
-			const inputPath = await resolveRedirectPath(
-				step.cmd,
-				step.redirections,
-				'input',
-				fs,
+			const inputPath = await runOrReport(
+				resolveRedirectPathEffect(
+					step.cmd,
+					step.redirections,
+					'input',
+					fs,
+					context
+				),
 				context
 			);
-			const filePaths = withInputRedirect(
-				resolvePathsFromCwd(
-					context.cwd,
-					await evaluateExpandedPathWords(
-						'head',
-						step.args.files,
-						fs,
-						context
-					)
+			if (!inputPath.ok) {
+				return;
+			}
+			const expandedFiles = await runOrReport(
+				evaluateExpandedPathWordsEffect(
+					'head',
+					step.args.files,
+					fs,
+					context
 				),
-				inputPath
+				context
+			);
+			if (!expandedFiles.ok) {
+				return;
+			}
+			const filePaths = withInputRedirect(
+				resolvePathsFromCwd(context.cwd, expandedFiles.value),
+				inputPath.value
 			);
 			if (filePaths.length > 0) {
 				yield* headWithN(fs, step.args.n)(files(...filePaths));
@@ -568,13 +730,19 @@ CommandRegistry.register('ls', {
 	kind: 'stream',
 	handler: ({ step, fs, context }) => {
 		return (async function* (): Stream<ShellRecord> {
-			const paths = await evaluateExpandedPathWords(
-				'ls',
-				step.args.paths,
-				fs,
+			const paths = await runOrReport(
+				evaluateExpandedPathWordsEffect(
+					'ls',
+					step.args.paths,
+					fs,
+					context
+				),
 				context
 			);
-			for (const inputPath of paths) {
+			if (!paths.ok) {
+				return;
+			}
+			for (const inputPath of paths.value) {
 				const resolvedPath = resolveLsPath(inputPath, context.cwd);
 				for await (const fileRecord of ls(fs, resolvedPath, {
 					showAll: step.args.showAll,
@@ -599,24 +767,34 @@ CommandRegistry.register('tail', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
 		return (async function* (): Stream<ShellRecord> {
-			const inputPath = await resolveRedirectPath(
-				step.cmd,
-				step.redirections,
-				'input',
-				fs,
+			const inputPath = await runOrReport(
+				resolveRedirectPathEffect(
+					step.cmd,
+					step.redirections,
+					'input',
+					fs,
+					context
+				),
 				context
 			);
-			const filePaths = withInputRedirect(
-				resolvePathsFromCwd(
-					context.cwd,
-					await evaluateExpandedPathWords(
-						'tail',
-						step.args.files,
-						fs,
-						context
-					)
+			if (!inputPath.ok) {
+				return;
+			}
+			const expandedFiles = await runOrReport(
+				evaluateExpandedPathWordsEffect(
+					'tail',
+					step.args.files,
+					fs,
+					context
 				),
-				inputPath
+				context
+			);
+			if (!expandedFiles.ok) {
+				return;
+			}
+			const filePaths = withInputRedirect(
+				resolvePathsFromCwd(context.cwd, expandedFiles.value),
+				inputPath.value
 			);
 			if (filePaths.length > 0) {
 				for (const filePath of filePaths) {
@@ -668,19 +846,25 @@ CommandRegistry.register('read', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
 		return (async function* (): Stream<ShellRecord> {
-			const resolvedInput = await resolveInputRedirect(
-				step.cmd,
-				step.redirections,
-				fs,
+			const resolvedInput = await runOrReport(
+				resolveInputRedirectEffect(
+					step.cmd,
+					step.redirections,
+					fs,
+					context
+				),
 				context
 			);
-			if (resolvedInput.closed) {
+			if (!resolvedInput.ok) {
+				return;
+			}
+			if (resolvedInput.value.closed) {
 				context.stderr.append('read: stdin is closed');
 				context.status = 1;
 				return;
 			}
-			const redirectedInput = resolvedInput.path
-				? lineRecordsFromPath(fs, resolvedInput.path)
+			const redirectedInput = resolvedInput.value.path
+				? lineRecordsFromPath(fs, resolvedInput.value.path)
 				: input;
 			yield* read(
 				createBuiltinRuntime(fs, context, redirectedInput),
@@ -699,32 +883,39 @@ CommandRegistry.register('string', {
 
 CommandRegistry.register('cd', {
 	kind: 'effect',
-	handler: async ({ step, fs, context }) => {
-		await cd(createBuiltinRuntime(fs, context, null), step.args);
-	},
+	handler: Effect.fn('CommandRegistry.cd')(function* ({ step, fs, context }) {
+		yield* cd(createBuiltinRuntime(fs, context, null), step.args);
+	}),
 });
 
 CommandRegistry.register('cp', {
 	kind: 'effect',
-	handler: async ({ step, fs, context }) => {
-		const srcPaths = resolvePathsFromCwd(
-			context.cwd,
-			await evaluateExpandedPathWords('cp', step.args.srcs, fs, context)
+	handler: Effect.fn('CommandRegistry.cp')(function* ({ step, fs, context }) {
+		const srcValues = yield* evaluateExpandedPathWordsEffect(
+			'cp',
+			step.args.srcs,
+			fs,
+			context
+		);
+		const srcPaths = resolvePathsFromCwd(context.cwd, srcValues);
+		const destinationValue = yield* evaluateExpandedSinglePathEffect(
+			'cp',
+			'destination must expand to exactly 1 path',
+			step.args.dest,
+			fs,
+			context
 		);
 		const destinationPaths = resolvePathsFromCwd(context.cwd, [
-			await evaluateExpandedSinglePath(
-				'cp',
-				'destination must expand to exactly 1 path',
-				step.args.dest,
-				fs,
-				context
-			),
+			destinationValue,
 		]);
 		const destinationPath = destinationPaths.at(0);
 		if (destinationPath === undefined) {
-			throw new Error('cp: destination missing after expansion');
+			return yield* new ShellRuntimeError({
+				exitCode: 1,
+				message: 'cp: destination missing after expansion',
+			});
 		}
-		await cp(fs)({
+		yield* cp(fs)({
 			srcs: srcPaths,
 			dest: destinationPath,
 			force: step.args.force,
@@ -732,67 +923,79 @@ CommandRegistry.register('cp', {
 			recursive: step.args.recursive,
 		});
 		context.status = 0;
-	},
+	}),
 });
 
 CommandRegistry.register('mkdir', {
 	kind: 'effect',
-	handler: async ({ step, fs, context }) => {
-		const paths = resolvePathsFromCwd(
-			context.cwd,
-			await evaluateExpandedPathWords(
-				'mkdir',
-				step.args.paths,
-				fs,
-				context
-			)
+	handler: Effect.fn('CommandRegistry.mkdir')(function* ({
+		step,
+		fs,
+		context,
+	}) {
+		const pathValues = yield* evaluateExpandedPathWordsEffect(
+			'mkdir',
+			step.args.paths,
+			fs,
+			context
 		);
+		const paths = resolvePathsFromCwd(context.cwd, pathValues);
 		for (const path of paths) {
-			await mkdir(fs)({ path, recursive: step.args.recursive });
+			yield* mkdir(fs)({ path, recursive: step.args.recursive });
 		}
 		context.status = 0;
-	},
+	}),
 });
 
 CommandRegistry.register('mv', {
 	kind: 'effect',
-	handler: async ({ step, fs, context }) => {
-		const srcPaths = resolvePathsFromCwd(
-			context.cwd,
-			await evaluateExpandedPathWords('mv', step.args.srcs, fs, context)
+	handler: Effect.fn('CommandRegistry.mv')(function* ({ step, fs, context }) {
+		const srcValues = yield* evaluateExpandedPathWordsEffect(
+			'mv',
+			step.args.srcs,
+			fs,
+			context
+		);
+		const srcPaths = resolvePathsFromCwd(context.cwd, srcValues);
+		const destinationValue = yield* evaluateExpandedSinglePathEffect(
+			'mv',
+			'destination must expand to exactly 1 path',
+			step.args.dest,
+			fs,
+			context
 		);
 		const destinationPaths = resolvePathsFromCwd(context.cwd, [
-			await evaluateExpandedSinglePath(
-				'mv',
-				'destination must expand to exactly 1 path',
-				step.args.dest,
-				fs,
-				context
-			),
+			destinationValue,
 		]);
 		const destinationPath = destinationPaths.at(0);
 		if (destinationPath === undefined) {
-			throw new Error('mv: destination missing after expansion');
+			return yield* new ShellRuntimeError({
+				exitCode: 1,
+				message: 'mv: destination missing after expansion',
+			});
 		}
-		await mv(fs)({
+		yield* mv(fs)({
 			srcs: srcPaths,
 			dest: destinationPath,
 			force: step.args.force,
 			interactive: step.args.interactive,
 		});
 		context.status = 0;
-	},
+	}),
 });
 
 CommandRegistry.register('rm', {
 	kind: 'effect',
-	handler: async ({ step, fs, context }) => {
-		const paths = resolvePathsFromCwd(
-			context.cwd,
-			await evaluateExpandedPathWords('rm', step.args.paths, fs, context)
+	handler: Effect.fn('CommandRegistry.rm')(function* ({ step, fs, context }) {
+		const pathValues = yield* evaluateExpandedPathWordsEffect(
+			'rm',
+			step.args.paths,
+			fs,
+			context
 		);
+		const paths = resolvePathsFromCwd(context.cwd, pathValues);
 		for (const path of paths) {
-			await rm(fs)({
+			yield* rm(fs)({
 				path,
 				force: step.args.force,
 				interactive: step.args.interactive,
@@ -800,26 +1003,28 @@ CommandRegistry.register('rm', {
 			});
 		}
 		context.status = 0;
-	},
+	}),
 });
 
 CommandRegistry.register('touch', {
 	kind: 'effect',
-	handler: async ({ step, fs, context }) => {
-		const filePaths = resolvePathsFromCwd(
-			context.cwd,
-			await evaluateExpandedPathWords(
-				'touch',
-				step.args.files,
-				fs,
-				context
-			)
+	handler: Effect.fn('CommandRegistry.touch')(function* ({
+		step,
+		fs,
+		context,
+	}) {
+		const fileValues = yield* evaluateExpandedPathWordsEffect(
+			'touch',
+			step.args.files,
+			fs,
+			context
 		);
-		await touch(fs)({
+		const filePaths = resolvePathsFromCwd(context.cwd, fileValues);
+		yield* touch(fs)({
 			files: filePaths,
 			accessTimeOnly: step.args.accessTimeOnly,
 			modificationTimeOnly: step.args.modificationTimeOnly,
 		});
 		context.status = 0;
-	},
+	}),
 });

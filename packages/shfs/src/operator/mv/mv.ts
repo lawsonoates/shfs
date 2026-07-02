@@ -1,5 +1,7 @@
+import { Effect } from 'effect';
+import { ShellRuntimeError } from '../../diagnostics';
 import type { FS } from '../../fs/fs';
-import type { Effect } from '../types';
+import type { CommandEffect } from '../types';
 
 const TRAILING_SLASH_REGEX = /\/+$/;
 const MULTIPLE_SLASH_REGEX = /\/+/g;
@@ -31,54 +33,95 @@ function joinPath(base: string, suffix: string): string {
 	);
 }
 
-async function isDirectory(fs: FS, path: string): Promise<boolean> {
-	try {
-		const stat = await fs.stat(path);
-		return stat.isDirectory;
-	} catch {
-		return false;
-	}
-}
+const isDirectory = Effect.fnUntraced(function* (fs: FS, path: string) {
+	return yield* Effect.tryPromise({
+		try: () => fs.stat(path),
+		catch: () =>
+			new ShellRuntimeError({
+				exitCode: 1,
+				message: '',
+			}),
+	}).pipe(
+		Effect.match({
+			onFailure: () => false,
+			onSuccess: (stat) => stat.isDirectory,
+		})
+	);
+});
 
-async function assertCanMoveToDestination(
+const assertCanMoveToDestination = Effect.fnUntraced(function* (
 	fs: FS,
 	dest: string,
 	force: boolean,
 	interactive: boolean
-): Promise<void> {
-	const exists = await fs.exists(dest);
+) {
+	const exists = yield* Effect.tryPromise({
+		try: () => fs.exists(dest),
+		catch: (cause) =>
+			new ShellRuntimeError({
+				cause,
+				exitCode: 1,
+				message: cause instanceof Error ? cause.message : String(cause),
+			}),
+	});
 	if (!exists) {
 		return;
 	}
 	if (interactive) {
-		throw new Error(`mv: destination exists (interactive): ${dest}`);
+		return yield* new ShellRuntimeError({
+			exitCode: 1,
+			message: `mv: destination exists (interactive): ${dest}`,
+		});
 	}
 	if (!force) {
-		throw new Error(
-			`mv: destination exists (use -f to overwrite): ${dest}`
-		);
+		return yield* new ShellRuntimeError({
+			exitCode: 1,
+			message: `mv: destination exists (use -f to overwrite): ${dest}`,
+		});
 	}
-}
+});
 
-export function mv(fs: FS): Effect<MvArgs> {
-	return async ({ srcs, dest, force = false, interactive = false }) => {
+export function mv(fs: FS): CommandEffect<MvArgs> {
+	return Effect.fn('mv')(function* ({
+		srcs,
+		dest,
+		force = false,
+		interactive = false,
+	}) {
 		if (srcs.length === 0) {
-			throw new Error('mv requires at least one source');
+			return yield* new ShellRuntimeError({
+				exitCode: 1,
+				message: 'mv requires at least one source',
+			});
 		}
 
-		const destinationIsDirectory = await isDirectory(fs, dest);
+		const destinationIsDirectory = yield* isDirectory(fs, dest);
 		if (srcs.length > 1 && !destinationIsDirectory) {
-			throw new Error(
-				'mv destination must be a directory for multiple sources'
-			);
+			return yield* new ShellRuntimeError({
+				exitCode: 1,
+				message:
+					'mv destination must be a directory for multiple sources',
+			});
 		}
 
 		for (const src of srcs) {
-			const sourceStat = await fs.stat(src);
+			const sourceStat = yield* Effect.tryPromise({
+				try: () => fs.stat(src),
+				catch: (cause) =>
+					new ShellRuntimeError({
+						cause,
+						exitCode: 1,
+						message:
+							cause instanceof Error
+								? cause.message
+								: String(cause),
+					}),
+			});
 			if (sourceStat.isDirectory) {
-				throw new Error(
-					`mv: directory moves are not supported: ${src}`
-				);
+				return yield* new ShellRuntimeError({
+					exitCode: 1,
+					message: `mv: directory moves are not supported: ${src}`,
+				});
 			}
 
 			const targetPath =
@@ -86,13 +129,24 @@ export function mv(fs: FS): Effect<MvArgs> {
 					? joinPath(dest, extractFileName(src))
 					: dest;
 
-			await assertCanMoveToDestination(
+			yield* assertCanMoveToDestination(
 				fs,
 				targetPath,
 				force,
 				interactive
 			);
-			await fs.rename(src, targetPath);
+			yield* Effect.tryPromise({
+				try: () => fs.rename(src, targetPath),
+				catch: (cause) =>
+					new ShellRuntimeError({
+						cause,
+						exitCode: 1,
+						message:
+							cause instanceof Error
+								? cause.message
+								: String(cause),
+					}),
+			});
 		}
-	};
+	});
 }

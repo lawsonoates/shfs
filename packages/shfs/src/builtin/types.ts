@@ -1,3 +1,5 @@
+import type { Effect } from 'effect';
+import type { ShellErrorCause } from '../diagnostics';
 import type { ShellInput, ShellIo } from '../execute/io';
 import type { FS } from '../fs/fs';
 import type { Record as ShellRecord } from '../record';
@@ -28,4 +30,4 @@ export type Builtin<A = void> = (
 export type EffectBuiltin<A = void> = (
 	runtime: BuiltinRuntime,
 	args: A
-) => Promise<void>;
+) => Effect.Effect<void, ShellErrorCause>;

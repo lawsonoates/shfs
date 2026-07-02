@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { useMemo, useState } from 'react';
 import { Shell } from 'shfs';
 import { MemoryFS } from 'shfs/fs';
@@ -57,20 +58,41 @@ export const Terminal = () => {
 		setCommand('');
 
 		setIsRunning(true);
-		try {
-			const result = await shell.$`${trimmedCommand}`.nothrow();
-			const stdoutLines = splitText(result.stdout.toString('utf8'));
-			const stderrLines = splitText(result.stderr.toString('utf8'));
-			const combinedLines = [...stdoutLines, ...stderrLines];
-			if (combinedLines.length > 0) {
-				setHistoryLines((previous) => [...previous, ...combinedLines]);
-			}
-		} finally {
-			const pwdResult = await shell.$`pwd`;
-			const currentPath = pwdResult.stdout.toString('utf8');
-			setPath(currentPath || '~');
-			setIsRunning(false);
-		}
+		await Effect.runPromise(
+			Effect.tryPromise({
+				try: async () => {
+					const result = await shell.$`${trimmedCommand}`.nothrow();
+					const stdoutLines = splitText(
+						result.stdout.toString('utf8')
+					);
+					const stderrLines = splitText(
+						result.stderr.toString('utf8')
+					);
+					const combinedLines = [...stdoutLines, ...stderrLines];
+					if (combinedLines.length > 0) {
+						setHistoryLines((previous) => [
+							...previous,
+							...combinedLines,
+						]);
+					}
+				},
+				catch: (error) => error,
+			}).pipe(
+				Effect.catch(() => Effect.succeed(undefined)),
+				Effect.ensuring(
+					Effect.tryPromise({
+						try: async () => {
+							const pwdResult = await shell.$`pwd`.nothrow();
+							const currentPath =
+								pwdResult.stdout.toString('utf8');
+							setPath(currentPath || '~');
+							setIsRunning(false);
+						},
+						catch: (error) => error,
+					}).pipe(Effect.catch(() => Effect.succeed(undefined)))
+				)
+			)
+		);
 	};
 
 	const output = historyLines.join('\n');
