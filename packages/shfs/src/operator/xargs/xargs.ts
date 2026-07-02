@@ -9,6 +9,7 @@ import { Effect } from 'effect';
 import type { BuiltinContext } from '../../builtin/types';
 import { createShellInput, type ShellInput } from '../../execute/io';
 import { evaluateExpandedWordsEffect } from '../../execute/path';
+import { collectRecordStream } from '../../execute/record-stream';
 import type { FS } from '../../fs/fs';
 import { formatRecord, type Record as ShellRecord } from '../../record';
 import { BufferedOutputStream } from '../../stderr';
@@ -383,16 +384,8 @@ async function runCommand(
 async function collectStdout(
 	result: ReturnType<typeof import('../../execute/execute').execute>
 ): Promise<string[]> {
-	if (result.kind === 'sink') {
-		await result.value;
-		return [];
-	}
-
-	const stdout: string[] = [];
-	for await (const record of result.value) {
-		stdout.push(formatRecord(record));
-	}
-	return stdout;
+	const records = await Effect.runPromise(collectRecordStream(result));
+	return records.map((record) => formatRecord(record));
 }
 
 function quoteShellWord(value: string): string {

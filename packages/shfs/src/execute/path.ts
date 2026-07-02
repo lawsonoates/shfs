@@ -17,8 +17,8 @@ import {
 	ShellRuntimeError,
 } from '../diagnostics';
 import type { FS } from '../fs/fs';
-import { formatRecord, type Record as ShellRecord } from '../record';
-import { toShellFailure } from './record-stream';
+import { formatRecord } from '../record';
+import { collectRecordStream, toShellFailure } from './record-stream';
 
 function toShellErrorCause(cause: unknown): ShellErrorCause {
 	return toShellFailure(cause) as ShellErrorCause;
@@ -29,30 +29,11 @@ interface FsEntry {
 	isDirectory: boolean;
 }
 
-type NestedExecuteResult =
-	| { kind: 'stream'; value: AsyncIterable<ShellRecord> }
-	| { kind: 'sink'; value: Promise<void> };
-
 const MULTIPLE_SLASH_REGEX = /\/+/g;
 const ROOT_DIRECTORY = '/';
 const TRAILING_SLASH_REGEX = /\/+$/;
 const VARIABLE_REFERENCE_REGEX = /\$([A-Za-z_][A-Za-z0-9_]*)/g;
 const NO_GLOB_MATCH_MESSAGE = 'no matches found';
-
-async function collectOutputRecords(
-	result: NestedExecuteResult
-): Promise<string[]> {
-	if (result.kind === 'sink') {
-		await result.value;
-		return [];
-	}
-
-	const outputs: string[] = [];
-	for await (const record of result.value) {
-		outputs.push(formatRecord(record));
-	}
-	return outputs;
-}
 
 function evaluateCommandSubstitutionEffect(
 	command: string,
@@ -67,11 +48,10 @@ function evaluateCommandSubstitutionEffect(
 			Effect.mapError(toShellErrorCause)
 		);
 		const executeModule = yield* Effect.promise(() => import('./execute'));
-		const result = executeModule.execute(nestedIR, fs, context);
-		const outputs = yield* Effect.promise(() =>
-			collectOutputRecords(result)
-		);
-		return outputs.join('\n');
+		const records = yield* collectRecordStream(
+			executeModule.execute(nestedIR, fs, context)
+		).pipe(Effect.mapError(toShellErrorCause));
+		return records.map((record) => formatRecord(record)).join('\n');
 	});
 }
 

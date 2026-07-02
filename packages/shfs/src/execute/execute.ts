@@ -21,13 +21,15 @@ import {
 	normalizeCwd,
 	resolvePathFromCwd,
 } from './path';
-import { collectRecordStream } from './record-stream';
+import {
+	collectRecordStream,
+	fromRecordGenerator,
+	type RecordStream,
+} from './record-stream';
 import {
 	ensureNoclobberWritable,
 	getRedirectionMode,
-	hasRedirect,
 	isNullDevicePath,
-	type ExecuteResult as RedirectExecuteResult,
 	writeTextToFile,
 } from './redirection';
 import {
@@ -35,8 +37,6 @@ import {
 	CommandRegistry,
 	type ExecuteStepContext,
 } from './registry';
-
-export type { ExecuteResult } from './redirection';
 
 export interface ExecuteContext {
 	cwd: string;
@@ -78,10 +78,6 @@ interface ExecutedStepResult extends RoutedOutput {
 const ROOT_DIRECTORY = '/';
 const FD_TARGET_REGEX = /^&[0-9]+$/;
 
-async function* emptyStream<T>(): Stream<T> {
-	// no records
-}
-
 function isScriptIR(ir: PipelineIR | ScriptIR): ir is ScriptIR {
 	return 'statements' in ir;
 }
@@ -114,97 +110,18 @@ export function execute(
 	ir: PipelineIR | ScriptIR,
 	fs: FS,
 	context: ExecuteContext = { cwd: ROOT_DIRECTORY }
-): RedirectExecuteResult {
+): RecordStream {
 	const normalizedContext = normalizeContext(context);
 	const scriptIR = isScriptIR(ir) ? ir : toScriptIR(ir);
 	return executeScript(scriptIR, fs, normalizedContext);
-}
-
-function isPipelineSink(pipeline: PipelineIR): boolean {
-	if (hasMidPipelineStdoutBypass(pipeline.steps)) {
-		return false;
-	}
-	const finalStep = pipeline.steps.at(-1);
-	if (!finalStep) {
-		return false;
-	}
-	return (
-		CommandRegistry.isActionStep(finalStep) ||
-		hasRedirect(finalStep.redirections, 'output')
-	);
-}
-
-function hasMidPipelineStdoutBypass(steps: StepIR[]): boolean {
-	for (const [index, step] of steps.entries()) {
-		if (index === steps.length - 1) {
-			continue;
-		}
-		const redirections = step.redirections ?? [];
-		const hasNonStdoutPipe = redirections.some((redirection) => {
-			return (
-				redirection.kind === 'output' &&
-				getSourceFd(redirection) !== 1 &&
-				getRedirectionMode(redirection) === 'pipe'
-			);
-		});
-		if (!hasNonStdoutPipe) {
-			continue;
-		}
-		const hasStdoutPipe = redirections.some((redirection) => {
-			return (
-				redirection.kind === 'output' &&
-				getSourceFd(redirection) === 1 &&
-				getRedirectionMode(redirection) === 'pipe'
-			);
-		});
-		if (!hasStdoutPipe) {
-			return true;
-		}
-	}
-	return false;
 }
 
 function executeScript(
 	script: ScriptIR,
 	fs: FS,
 	context: NormalizedExecuteContext
-): RedirectExecuteResult {
-	if (script.statements.length === 0) {
-		return {
-			kind: 'stream',
-			value: emptyStream<ShellRecord>(),
-		};
-	}
-
-	if (
-		script.statements.every((statement) =>
-			isPipelineSink(statement.pipeline)
-		)
-	) {
-		return {
-			kind: 'sink',
-			value: runScriptToCompletion(script, fs, context),
-		};
-	}
-
-	return {
-		kind: 'stream',
-		value: runScriptToStream(script, fs, context),
-	};
-}
-
-async function runScriptToCompletion(
-	script: ScriptIR,
-	fs: FS,
-	context: NormalizedExecuteContext
-): Promise<void> {
-	for (const statement of script.statements) {
-		if (!shouldExecuteStatement(statement.chainMode, context.status)) {
-			continue;
-		}
-
-		await drainStream(runPipeline(statement.pipeline, fs, context));
-	}
+): RecordStream {
+	return fromRecordGenerator(runScriptToStream(script, fs, context));
 }
 
 async function* runScriptToStream(
@@ -221,12 +138,6 @@ async function* runScriptToStream(
 			runPipeline(statement.pipeline, fs, context)
 		);
 		yield* recordsToStream(records);
-	}
-}
-
-async function drainStream(stream: Stream<ShellRecord>): Promise<void> {
-	for await (const _record of stream) {
-		// drain stream output to complete side effects.
 	}
 }
 

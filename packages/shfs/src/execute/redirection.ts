@@ -3,18 +3,12 @@ import { Effect } from 'effect';
 import type { BuiltinContext } from '../builtin/types';
 import { type ShellErrorCause, ShellRuntimeError } from '../diagnostics';
 import type { FS } from '../fs/fs';
-import type { Record as ShellRecord } from '../record';
-import type { Stream } from '../stream';
 import { evaluateExpandedSinglePathEffect, resolvePathFromCwd } from './path';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const FD_TARGET_REGEX = /^&[0-9]+$/;
 const NULL_DEVICE_PATH = '/dev/null';
-
-export type ExecuteResult =
-	| { kind: 'stream'; value: Stream<ShellRecord> }
-	| { kind: 'sink'; value: Promise<void> };
 
 export type RedirectionMode = 'file' | 'fd' | 'close' | 'pipe';
 

@@ -1,9 +1,9 @@
 import { compileEffect, parseEffect, type ScriptIR } from '@shfs/compiler';
 import { Effect } from 'effect';
 
-import { collect } from '../consumer/consumer';
 import { isShellFailure, reportShellFailure } from '../diagnostics';
-import { type ExecuteResult, execute } from '../execute/execute';
+import { execute } from '../execute/execute';
+import { collectRecordStream } from '../execute/record-stream';
 import type { FS } from '../fs/fs';
 import {
 	type OutputChannels,
@@ -77,14 +77,6 @@ function normalizeCwd(cwd: string): string {
 	const normalized = normalizeAbsolutePath(cwd);
 	const trimmed = normalized.replace(TRAILING_SLASH_REGEX, '');
 	return trimmed === '' ? ROOT_DIRECTORY : trimmed;
-}
-
-async function collectStdoutRecords(result: ExecuteResult): Promise<Record[]> {
-	if (result.kind === 'sink') {
-		await result.value;
-		return [];
-	}
-	return collect<Record>()(result.value);
 }
 
 function buildStdoutText(records: readonly Record[]): string {
@@ -264,11 +256,9 @@ export class Shell {
 				};
 				const runCommand = Effect.gen(function* () {
 					const script: ScriptIR = yield* ir;
-					const stdout: Record[] = yield* Effect.tryPromise({
-						try: () =>
-							collectStdoutRecords(execute(script, fs, context)),
-						catch: (cause) => cause,
-					});
+					const stdout: Record[] = yield* collectRecordStream(
+						execute(script, fs, context)
+					);
 					return {
 						stdout,
 						stderr: context.stderr.snapshot(),

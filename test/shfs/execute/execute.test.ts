@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { Effect } from 'effect';
 import {
 	compile,
 	glob,
@@ -7,16 +8,11 @@ import {
 	parse,
 	type ScriptIR,
 } from '#compiler';
-
-import { collect } from '#shfs/consumer/consumer';
 import { type ExecuteContext, execute } from '#shfs/execute/execute';
+import { collectRecordStream } from '#shfs/execute/record-stream';
 import type { FS } from '#shfs/fs/fs';
 import { MemoryFS } from '#shfs/fs/memory';
-import type {
-	FileRecord,
-	LineRecord,
-	Record as ShellRecord,
-} from '#shfs/record';
+import type { FileRecord, LineRecord } from '#shfs/record';
 import { BufferedOutputStream } from '#shfs/stderr';
 
 const textDecoder = new TextDecoder();
@@ -72,10 +68,7 @@ test('writes stream output to redirected file', async () => {
 	};
 
 	const result = execute(ir, fs);
-	expect(result.kind).toBe('sink');
-	if (result.kind === 'sink') {
-		await result.value;
-	}
+	await Effect.runPromise(collectRecordStream(result));
 
 	expect(textDecoder.decode(await fs.readFile('output.txt'))).toBe(
 		'alpha\nbeta\ngamma'
@@ -106,11 +99,7 @@ test('uses input redirection when no file args are provided', async () => {
 	};
 
 	const result = execute(ir, fs);
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -143,10 +132,7 @@ test('supports combined input and output redirection', async () => {
 	};
 
 	const result = execute(ir, fs);
-	expect(result.kind).toBe('sink');
-	if (result.kind === 'sink') {
-		await result.value;
-	}
+	await Effect.runPromise(collectRecordStream(result));
 
 	expect(textDecoder.decode(await fs.readFile('copy.txt'))).toBe(
 		'alpha\nbeta\ngamma'
@@ -175,10 +161,7 @@ test('creates an empty output file when redirecting sink commands', async () => 
 	};
 
 	const result = execute(ir, fs);
-	expect(result.kind).toBe('sink');
-	if (result.kind === 'sink') {
-		await result.value;
-	}
+	await Effect.runPromise(collectRecordStream(result));
 
 	expect(await fs.exists('created.txt')).toBe(true);
 	expect(textDecoder.decode(await fs.readFile('logs.txt'))).toBe('');
@@ -199,12 +182,7 @@ test('/dev/null stdout redirection discards without writing through readonly fs'
 		fs,
 		context
 	);
-	expect(result.kind).toBe('sink');
-	if (result.kind !== 'sink') {
-		throw new Error('Expected sink result');
-	}
-
-	await result.value;
+	await Effect.runPromise(collectRecordStream(result));
 	expect(context.status).toBe(0);
 	expect(stderr.snapshot()).toEqual([]);
 });
@@ -224,12 +202,8 @@ test('/dev/null stderr redirection discards without writing through readonly fs'
 		fs,
 		context
 	);
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
 
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const fileRecords = records.filter(
 		(record): record is FileRecord => record.kind === 'file'
 	);
@@ -252,11 +226,7 @@ test('variable-expanded output redirection resolves relative to cwd', async () =
 		fs,
 		context
 	);
-	expect(result.kind).toBe('sink');
-	if (result.kind !== 'sink') {
-		throw new Error('Expected sink result');
-	}
-	await result.value;
+	await Effect.runPromise(collectRecordStream(result));
 
 	expect(textDecoder.decode(await fs.readFile('/workspace/logs.txt'))).toBe(
 		'hello'
@@ -271,11 +241,7 @@ test('variable-expanded input redirection resolves relative to cwd', async () =>
 		cwd: '/workspace',
 		globalVars: new Map<string, string>([['INPUTFILE', 'input.txt']]),
 	});
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -288,11 +254,7 @@ test('command substitution can produce an output redirection target', async () =
 	const result = execute(compile(parse('echo hello > (echo out.txt)')), fs, {
 		cwd: '/workspace',
 	});
-	expect(result.kind).toBe('sink');
-	if (result.kind !== 'sink') {
-		throw new Error('Expected sink result');
-	}
-	await result.value;
+	await Effect.runPromise(collectRecordStream(result));
 
 	expect(textDecoder.decode(await fs.readFile('/workspace/out.txt'))).toBe(
 		'hello'
@@ -313,12 +275,7 @@ test('redirect target expansion failures stop sink commands before side effects'
 		fs,
 		context
 	);
-	expect(result.kind).toBe('sink');
-	if (result.kind !== 'sink') {
-		throw new Error('Expected sink result');
-	}
-
-	await result.value;
+	await Effect.runPromise(collectRecordStream(result));
 	expect(context.status).toBe(1);
 	expect(context.stderr.snapshot().join('\n')).toContain(
 		'touch: redirection target must expand to exactly 1 path, got 2'
@@ -339,12 +296,7 @@ test('empty-expanded redirect targets fail before resolving cwd', async () => {
 		fs,
 		context
 	);
-	expect(result.kind).toBe('sink');
-	if (result.kind !== 'sink') {
-		throw new Error('Expected sink result');
-	}
-
-	await result.value;
+	await Effect.runPromise(collectRecordStream(result));
 	expect(context.status).toBe(1);
 	expect(context.stderr.snapshot().join('\n')).toContain(
 		'echo: redirection target must expand to exactly 1 path, got empty path'
@@ -372,11 +324,7 @@ test('empty-expanded single-path destinations fail deterministically', async () 
 		fs,
 		copyContext
 	);
-	expect(copyResult.kind).toBe('sink');
-	if (copyResult.kind !== 'sink') {
-		throw new Error('Expected sink result');
-	}
-	await copyResult.value;
+	await Effect.runPromise(collectRecordStream(copyResult));
 	expect(copyContext.status).toBe(1);
 	expect(copyContext.stderr.snapshot().join('\n')).toContain(
 		'cp: destination must expand to exactly 1 path, got empty path'
@@ -391,11 +339,7 @@ test('empty-expanded single-path destinations fail deterministically', async () 
 		fs,
 		moveContext
 	);
-	expect(moveResult.kind).toBe('sink');
-	if (moveResult.kind !== 'sink') {
-		throw new Error('Expected sink result');
-	}
-	await moveResult.value;
+	await Effect.runPromise(collectRecordStream(moveResult));
 	expect(moveContext.status).toBe(1);
 	expect(moveContext.stderr.snapshot().join('\n')).toContain(
 		'mv: destination must expand to exactly 1 path, got empty path'
@@ -428,12 +372,7 @@ test('grep reuses a resolved output redirect target for conflict checks and writ
 			cwd: '/workspace',
 		}
 	);
-	expect(result.kind).toBe('sink');
-	if (result.kind !== 'sink') {
-		throw new Error('Expected sink result');
-	}
-
-	await result.value;
+	await Effect.runPromise(collectRecordStream(result));
 
 	expect(textDecoder.decode(await fs.readFile('/workspace/first.txt'))).toBe(
 		'match'
@@ -481,11 +420,7 @@ test('executes multi-step stream pipelines end-to-end', async () => {
 	};
 
 	const result = execute(ir, fs);
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -541,11 +476,7 @@ test('find pipelines formatted paths into downstream cat consumers', async () =>
 	};
 
 	const result = execute(ir, fs, { cwd: '/workspace' });
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -565,12 +496,8 @@ test('find pipelines formatted paths into grep', async () => {
 	const result = execute(compile(parse('find dir | grep second')), fs, {
 		cwd: '/workspace',
 	});
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
 
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -592,12 +519,8 @@ test('find OR expressions compose in pipelines', async () => {
 			cwd: '/workspace',
 		}
 	);
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
 
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -613,11 +536,7 @@ test('find piped to tail outputs paths, not file contents', async () => {
 	const result = execute(compile(parse('find dir -type f | tail -10')), fs, {
 		cwd: '/workspace',
 	});
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -634,11 +553,7 @@ test('find piped to head outputs paths, not file contents', async () => {
 	const result = execute(compile(parse('find dir -type f | head -1')), fs, {
 		cwd: '/workspace',
 	});
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -658,12 +573,8 @@ test('find pipelines formatted paths into read', async () => {
 			cwd: '/workspace',
 		}
 	);
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
 
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -686,12 +597,8 @@ test('find piped to grep supports BRE alternation over formatted paths', async (
 
 	const command = String.raw`find /slides -maxdepth 1 -type f | grep '/slides/16[0-9]-\|/slides/17[0-9]-\|/slides/180-'`;
 	const result = execute(compile(parse(command)), fs);
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
 
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -712,12 +619,8 @@ test('find piped to wc counts formatted path lines', async () => {
 	const result = execute(compile(parse('find dir -type f | wc -l')), fs, {
 		cwd: '/workspace',
 	});
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
 
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -733,11 +636,7 @@ test('cat/head/tail expand glob file arguments relative to cwd', async () => {
 		const result = execute(compile(parse(command)), fs, {
 			cwd: '/workspace',
 		});
-		expect(result.kind).toBe('stream');
-		if (result.kind !== 'stream') {
-			throw new Error('Expected stream result');
-		}
-		const records = await collect<ShellRecord>()(result.value);
+		const records = await Effect.runPromise(collectRecordStream(result));
 		return records
 			.filter((record): record is LineRecord => record.kind === 'line')
 			.map((record) => record.text);
@@ -779,14 +678,11 @@ test('wires cp force flag through execute', async () => {
 	};
 
 	const firstResult = execute(withoutForce, fs, withoutForceContext);
-	expect(firstResult.kind).toBe('sink');
-	if (firstResult.kind === 'sink') {
-		await firstResult.value;
-		expect(withoutForceContext.status).toBe(1);
-		expect(withoutForceContext.stderr.snapshot().join('\n')).toContain(
-			'cp: destination exists (use -f to overwrite): /dest.txt'
-		);
-	}
+	await Effect.runPromise(collectRecordStream(firstResult));
+	expect(withoutForceContext.status).toBe(1);
+	expect(withoutForceContext.stderr.snapshot().join('\n')).toContain(
+		'cp: destination exists (use -f to overwrite): /dest.txt'
+	);
 
 	const withForce: PipelineIR = {
 		...withoutForce,
@@ -805,10 +701,7 @@ test('wires cp force flag through execute', async () => {
 	};
 
 	const secondResult = execute(withForce, fs);
-	expect(secondResult.kind).toBe('sink');
-	if (secondResult.kind === 'sink') {
-		await secondResult.value;
-	}
+	await Effect.runPromise(collectRecordStream(secondResult));
 
 	expect(textDecoder.decode(await fs.readFile('dest.txt'))).toBe(
 		'from source'
@@ -837,10 +730,7 @@ test('wires mkdir through execute', async () => {
 	};
 
 	const result = execute(ir, fs);
-	expect(result.kind).toBe('sink');
-	if (result.kind === 'sink') {
-		await result.value;
-	}
+	await Effect.runPromise(collectRecordStream(result));
 
 	const stat = await fs.stat('/newdir');
 	expect(stat.isDirectory).toBe(true);
@@ -872,10 +762,7 @@ test('wires mv force flag through execute', async () => {
 	};
 
 	const result = execute(ir, fs);
-	expect(result.kind).toBe('sink');
-	if (result.kind === 'sink') {
-		await result.value;
-	}
+	await Effect.runPromise(collectRecordStream(result));
 
 	expect(textDecoder.decode(await fs.readFile('/dest.txt'))).toBe(
 		'new content'
@@ -907,10 +794,7 @@ test('wires rm force flag through execute', async () => {
 	};
 
 	const result = execute(ir, fs);
-	expect(result.kind).toBe('sink');
-	if (result.kind === 'sink') {
-		await result.value;
-	}
+	await Effect.runPromise(collectRecordStream(result));
 });
 
 test('wires ls long format through execute', async () => {
@@ -937,11 +821,7 @@ test('wires ls long format through execute', async () => {
 	};
 
 	const result = execute(ir, fs);
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -974,11 +854,7 @@ test('ls with dot path does not recurse into nested paths', async () => {
 	};
 
 	const result = execute(ir, fs);
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const filePaths = records
 		.filter((record): record is FileRecord => record.kind === 'file')
 		.map((record) => record.path);
@@ -1013,11 +889,7 @@ test('ls with dot path uses execution context cwd', async () => {
 	};
 
 	const result = execute(ir, fs, { cwd: '/workspace' });
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const filePaths = records
 		.filter((record): record is FileRecord => record.kind === 'file')
 		.map((record) => record.path);
@@ -1045,12 +917,8 @@ test('wires pwd through execute', async () => {
 	};
 
 	const result = execute(ir, fs);
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
 
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
@@ -1077,12 +945,8 @@ test('pwd uses execution context cwd', async () => {
 	};
 
 	const result = execute(ir, fs, { cwd: '/workspace/project' });
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
 
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
@@ -1111,10 +975,7 @@ test('cd updates execution context cwd for absolute paths', async () => {
 	};
 
 	const result = execute(ir, fs, context);
-	expect(result.kind).toBe('sink');
-	if (result.kind === 'sink') {
-		await result.value;
-	}
+	await Effect.runPromise(collectRecordStream(result));
 
 	expect(context.cwd).toBe('/workspace');
 });
@@ -1140,10 +1001,7 @@ test('cd resolves relative and parent paths against cwd', async () => {
 	};
 
 	const result = execute(ir, fs, context);
-	expect(result.kind).toBe('sink');
-	if (result.kind === 'sink') {
-		await result.value;
-	}
+	await Effect.runPromise(collectRecordStream(result));
 
 	expect(context.cwd).toBe('/workspace');
 });
@@ -1171,14 +1029,11 @@ test('cd reports an error when target does not exist', async () => {
 	};
 
 	const result = execute(ir, fs, context);
-	expect(result.kind).toBe('sink');
-	if (result.kind === 'sink') {
-		await result.value;
-		expect(context.status).toBe(1);
-		expect(context.stderr.snapshot().join('\n')).toContain(
-			'cd: directory does not exist: /missing'
-		);
-	}
+	await Effect.runPromise(collectRecordStream(result));
+	expect(context.status).toBe(1);
+	expect(context.stderr.snapshot().join('\n')).toContain(
+		'cd: directory does not exist: /missing'
+	);
 });
 
 test('cd reports an error when target is a file', async () => {
@@ -1205,14 +1060,11 @@ test('cd reports an error when target is a file', async () => {
 	};
 
 	const result = execute(ir, fs, context);
-	expect(result.kind).toBe('sink');
-	if (result.kind === 'sink') {
-		await result.value;
-		expect(context.status).toBe(1);
-		expect(context.stderr.snapshot().join('\n')).toContain(
-			'cd: not a directory: /file.txt'
-		);
-	}
+	await Effect.runPromise(collectRecordStream(result));
+	expect(context.status).toBe(1);
+	expect(context.stderr.snapshot().join('\n')).toContain(
+		'cd: not a directory: /file.txt'
+	);
 });
 
 test('executes script statements in deterministic order', async () => {
@@ -1294,11 +1146,7 @@ test('executes script statements in deterministic order', async () => {
 	};
 
 	const result = execute(script, fs, context);
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
@@ -1352,11 +1200,7 @@ test('script execution reuses shared context across statements', async () => {
 	};
 
 	const result = execute(script, fs, context);
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
@@ -1371,11 +1215,7 @@ test('and/or chain modes gate statements based on prior status', async () => {
 	const ir = compile(parse('test 1 = 2; and echo pass; or echo fail'));
 
 	const result = execute(ir, fs, context);
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
@@ -1395,11 +1235,7 @@ test('expanded command substitution can feed path-taking commands', async () => 
 	const ir = compile(parse('cd (echo $TARGET); pwd'));
 
 	const result = execute(ir, fs, context);
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
@@ -1415,11 +1251,7 @@ test('mixed command substitution words concatenate literal prefixes and suffixes
 		status: 0,
 	});
 
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
@@ -1437,11 +1269,7 @@ test('mixed glob words preserve literal prefixes and suffixes at execution', asy
 		status: 0,
 	});
 
-	expect(result.kind).toBe('stream');
-	if (result.kind !== 'stream') {
-		throw new Error('Expected stream result');
-	}
-	const records = await collect<ShellRecord>()(result.value);
+	const records = await Effect.runPromise(collectRecordStream(result));
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
