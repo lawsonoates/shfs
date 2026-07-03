@@ -1,5 +1,5 @@
 import type { TreeArgsIR } from '@shfs/compiler';
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import picomatch from 'picomatch';
 
 import { normalizeAbsolutePath, resolvePathFromCwd } from '../../execute/path';
@@ -205,17 +205,14 @@ async function buildChildEntries({
 	fs: FS;
 	path: string;
 }): Promise<TreeEntry[]> {
-	const childPaths = await Effect.runPromise(
-		Effect.tryPromise({
-			try: () => readSortedChildren(fs, path),
-			catch: (error) => error,
-		}).pipe(
-			Effect.match({
-				onFailure: () => [],
-				onSuccess: (paths) => paths,
-			})
-		)
-	);
+	const childPathResult = await Result.tryPromise({
+		try: () => readSortedChildren(fs, path),
+		catch: (error) => error,
+	});
+	const childPaths = childPathResult.match({
+		err: () => [],
+		ok: (paths) => paths,
+	});
 	const entries: TreeEntry[] = [];
 	for (const childPath of childPaths) {
 		const childDepth = depth + 1;
@@ -257,16 +254,14 @@ function statOrNull(
 	fs: FS,
 	path: string
 ): Promise<Awaited<ReturnType<FS['stat']>> | null> {
-	return Effect.runPromise(
-		Effect.tryPromise({
-			try: () => fs.stat(path),
-			catch: (error) => error,
-		}).pipe(
-			Effect.match({
-				onFailure: () => null,
-				onSuccess: (stat) => stat,
-			})
-		)
+	return Result.tryPromise({
+		try: () => fs.stat(path),
+		catch: (error) => error,
+	}).then((result) =>
+		result.match({
+			err: () => null,
+			ok: (stat) => stat,
+		})
 	);
 }
 

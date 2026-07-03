@@ -4,26 +4,19 @@
  * Includes position information for error reporting.
  */
 
-import { Schema } from 'effect';
-import {
-	createParserDiagnostic,
-	ShellDiagnosticSchema,
-	SourceSpanSchema,
-} from '../diagnostic';
+import { TaggedError } from 'better-result';
+import { createParserDiagnostic, type ShellDiagnostic } from '../diagnostic';
 import type { SourceSpan } from '../lexer/position';
 
 /**
  * Exception thrown when a syntax error is encountered during parsing.
  */
-export class ParseSyntaxError extends Schema.TaggedErrorClass<ParseSyntaxError>()(
-	'ParseSyntaxError',
-	{
-		context: Schema.optional(Schema.String),
-		diagnostic: ShellDiagnosticSchema,
-		message: Schema.String,
-		span: SourceSpanSchema,
-	}
-) {
+export class ParseSyntaxError extends TaggedError('ParseSyntaxError')<{
+	context?: string;
+	diagnostic: ShellDiagnostic;
+	message: string;
+	span: SourceSpan;
+}>() {
 	constructor(
 		message: string,
 		span: SourceSpan,

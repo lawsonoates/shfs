@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import {
 	isNegativeNumberToken,
 	startsWithLongPrefix,
@@ -118,17 +118,15 @@ export function parseArgsWithIndexEffect(
 	args: readonly string[],
 	index: FlagIndex,
 	options?: ParseOptions
-): Effect.Effect<ParseResult, ArgParseError> {
-	return Effect.suspend(() => {
-		try {
-			return Effect.succeed(parseArgsWithIndex(args, index, options));
-		} catch (error) {
-			if (isArgParseError(error)) {
-				return Effect.fail(error);
-			}
-			throw error;
+): Result<ParseResult, ArgParseError> {
+	try {
+		return Result.ok(parseArgsWithIndex(args, index, options));
+	} catch (error) {
+		if (isArgParseError(error)) {
+			return Result.err(error);
 		}
-	});
+		throw error;
+	}
 }
 
 function processToken(params: {

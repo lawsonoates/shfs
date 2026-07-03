@@ -6,10 +6,11 @@ import {
 	type StatementChainModeIR,
 	type StepIR,
 } from '@shfs/compiler';
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import {
 	runOrReport,
 	type ShellErrorCause,
+	type ShellResult,
 	ShellRuntimeError,
 } from '../diagnostics';
 import type { FS } from '../fs/fs';
@@ -375,9 +376,9 @@ function resolveFileDestinationEffect(
 	redirection: RedirectionIR,
 	fs: FS,
 	context: NormalizedExecuteContext
-): Effect.Effect<OutputDestination, ShellErrorCause> {
-	return Effect.gen(function* () {
-		const targetPath = yield* evaluateExpandedSinglePathEffect(
+): ShellResult<OutputDestination, ShellErrorCause> {
+	return Result.gen(async function* () {
+		const targetPath = yield* await evaluateExpandedSinglePathEffect(
 			command,
 			'redirection target must expand to exactly 1 path',
 			redirection.target,
@@ -386,14 +387,14 @@ function resolveFileDestinationEffect(
 		);
 		const resolvedPath = resolvePathFromCwd(context.cwd, targetPath);
 		if (isNullDevicePath(resolvedPath)) {
-			return { kind: 'nullDevice' };
+			return Result.ok<OutputDestination>({ kind: 'nullDevice' });
 		}
-		return {
+		return Result.ok<OutputDestination>({
 			kind: 'file',
 			append: redirection.append ?? false,
 			noclobber: redirection.noclobber ?? false,
 			path: resolvedPath,
-		};
+		});
 	});
 }
 
@@ -430,19 +431,20 @@ function resolveOutputRedirectionDestinationEffect(params: {
 	redirection: RedirectionIR;
 	routing: StepRoutingPlan;
 	step: StepIR;
-}): Effect.Effect<
+}): ShellResult<
 	{ destination: OutputDestination; sourceFd: 1 | 2 } | null,
 	ShellErrorCause
 > {
-	return Effect.gen(function* () {
+	return Result.gen(async function* () {
 		const { context, fs, redirection, routing, step } = params;
 		if (redirection.kind !== 'output') {
-			return null;
+			return Result.ok(null);
 		}
 		const sourceFd = getSourceFd(redirection);
 		if (sourceFd !== 1 && sourceFd !== 2) {
-			return null;
+			return Result.ok(null);
 		}
+		const outputSourceFd: 1 | 2 = sourceFd;
 
 		const mode = getRedirectionMode(redirection);
 		let destination: OutputDestination;
@@ -460,7 +462,7 @@ function resolveOutputRedirectionDestinationEffect(params: {
 			}
 			destination = cloneDestination(destinationForFd(routing, targetFd));
 		} else if (mode === 'file') {
-			destination = yield* resolveFileDestinationEffect(
+			destination = yield* await resolveFileDestinationEffect(
 				step.cmd,
 				redirection,
 				fs,
@@ -470,10 +472,10 @@ function resolveOutputRedirectionDestinationEffect(params: {
 			destination = sourceFd === 1 ? routing.fd1 : routing.fd2;
 		}
 
-		return {
+		return Result.ok({
 			destination,
-			sourceFd,
-		};
+			sourceFd: outputSourceFd,
+		});
 	});
 }
 
@@ -482,8 +484,8 @@ function resolveRoutingPlanEffect(
 	fs: FS,
 	context: NormalizedExecuteContext,
 	isLastStep: boolean
-): Effect.Effect<StepRoutingPlan, ShellErrorCause> {
-	return Effect.gen(function* () {
+): ShellResult<StepRoutingPlan, ShellErrorCause> {
+	return Result.gen(async function* () {
 		const stepRedirections = step.redirections ?? [];
 		const hasNonStdoutPipeRedirect = stepRedirections.some(
 			(redirection) => {
@@ -511,13 +513,14 @@ function resolveRoutingPlanEffect(
 		};
 
 		for (const redirection of stepRedirections) {
-			const resolved = yield* resolveOutputRedirectionDestinationEffect({
-				context,
-				fs,
-				redirection,
-				routing,
-				step,
-			});
+			const resolved =
+				yield* await resolveOutputRedirectionDestinationEffect({
+					context,
+					fs,
+					redirection,
+					routing,
+					step,
+				});
 			if (!resolved) {
 				continue;
 			}
@@ -528,7 +531,7 @@ function resolveRoutingPlanEffect(
 			routing.fd2 = resolved.destination;
 		}
 
-		return routing;
+		return Result.ok(routing);
 	});
 }
 

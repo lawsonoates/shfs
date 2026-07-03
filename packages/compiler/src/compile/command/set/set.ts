@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	expandedWordToString,
@@ -16,26 +16,29 @@ const flags: Record<string, Flag> = {
 const parseSetArgs = createWordParserEffect(flags, expandedWordToString);
 
 export function compileSet(cmd: SimpleCommandIR): StepIR {
-	return Effect.runSync(compileSetEffect(cmd));
+	const result = compileSetEffect(cmd);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const compileSetEffect: (
 	cmd: SimpleCommandIR
-) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.set')(
-	function* (cmd) {
-		const parsed = yield* parseSetArgs(cmd.args, {
-			unknownFlagPolicy: 'error',
-		}).pipe(
-			Effect.mapError(
-				(cause) =>
-					new CompileError(
-						createCommandDiagnostic(
-							'set',
-							'invalid-option',
-							cause.message
-						)
+) => Result<StepIR, CompileError> = (cmd) =>
+	Result.gen(function* () {
+		const parsed = yield* Result.mapError(
+			parseSetArgs(cmd.args, {
+				unknownFlagPolicy: 'error',
+			}),
+			(cause) =>
+				new CompileError(
+					createCommandDiagnostic(
+						'set',
+						'invalid-option',
+						cause.message
 					)
-			)
+				)
 		);
 		const isGlobal = parsed.flags.global === true;
 		const isLocal = parsed.flags.local === true;
@@ -60,13 +63,12 @@ export const compileSetEffect: (
 			);
 		}
 
-		return {
+		return Result.ok({
 			cmd: 'set',
 			args: {
 				scope: isGlobal ? 'global' : 'local',
 				name,
 				values,
 			},
-		} as const;
-	}
-);
+		} as const satisfies StepIR);
+	});

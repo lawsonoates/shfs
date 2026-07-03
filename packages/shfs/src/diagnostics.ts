@@ -5,22 +5,18 @@ import {
 	isParseSyntaxError,
 	type ParseSyntaxError,
 	type ShellDiagnostic,
-	ShellDiagnosticSchema,
 } from '@shfs/compiler';
-import { Effect, Schema } from 'effect';
+import { Result, TaggedError } from 'better-result';
 
 import { appendStderrLines, type StderrSink } from './stderr';
 
 const FIRST_ARGUMENT_NUMBER = 1;
 
-export class ShellDiagnosticError extends Schema.TaggedErrorClass<ShellDiagnosticError>()(
-	'ShellDiagnosticError',
-	{
-		diagnostics: Schema.Array(ShellDiagnosticSchema),
-		exitCode: Schema.Number,
-		message: Schema.String,
-	}
-) {
+export class ShellDiagnosticError extends TaggedError('ShellDiagnosticError')<{
+	diagnostics: readonly ShellDiagnostic[];
+	exitCode: number;
+	message: string;
+}>() {
 	constructor(
 		diagnostics: readonly ShellDiagnostic[],
 		exitCode = exitCodeForDiagnostics(diagnostics)
@@ -39,14 +35,11 @@ export class ShellDiagnosticError extends Schema.TaggedErrorClass<ShellDiagnosti
 	}
 }
 
-export class ShellRuntimeError extends Schema.TaggedErrorClass<ShellRuntimeError>()(
-	'ShellRuntimeError',
-	{
-		cause: Schema.optional(Schema.Defect()),
-		exitCode: Schema.Number,
-		message: Schema.String,
-	}
-) {}
+export class ShellRuntimeError extends TaggedError('ShellRuntimeError')<{
+	cause?: unknown;
+	exitCode: number;
+	message: string;
+}>() {}
 
 export type ShellErrorCause = ShellDiagnosticError | ShellRuntimeError;
 
@@ -56,6 +49,10 @@ export type ShellErrorCause = ShellDiagnosticError | ShellRuntimeError;
  * shell's context-based reporting.
  */
 export type ShellFailure = CompileError | ParseSyntaxError | ShellErrorCause;
+
+export type ShellResult<T, E = ShellFailure> =
+	| Result<T, E>
+	| Promise<Result<T, E>>;
 
 export interface FailureContext extends StderrSink {
 	status?: number;
@@ -104,24 +101,19 @@ export function reportShellFailure(
 }
 
 /**
- * Run an effect at an async-generator (stream) boundary. Failures are
+ * Run a result at an async-generator (stream) boundary. Failures are
  * reported to the execution context instead of escaping as rejections.
  */
 export async function runOrReport<T>(
-	effect: Effect.Effect<T, ShellFailure>,
+	result: ShellResult<T>,
 	context: FailureContext
 ): Promise<{ ok: false } | { ok: true; value: T }> {
-	return Effect.runPromise(
-		effect.pipe(
-			Effect.match({
-				onFailure: (failure) => {
-					reportShellFailure(context, failure);
-					return { ok: false } as const;
-				},
-				onSuccess: (value) => ({ ok: true, value }) as const,
-			})
-		)
-	);
+	const settled = await result;
+	if (Result.isError(settled)) {
+		reportShellFailure(context, settled.error);
+		return { ok: false };
+	}
+	return { ok: true, value: settled.value };
 }
 
 export function createDiagnosticError(

@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { ShellRuntimeError } from '../../diagnostics';
 import type { FS } from '../../fs/fs';
 import type { ActionEffect } from '../types';
@@ -33,120 +33,121 @@ function joinPath(base: string, suffix: string): string {
 	);
 }
 
-const isDirectory = Effect.fnUntraced(function* (fs: FS, path: string) {
-	return yield* Effect.tryPromise({
+function isDirectory(fs: FS, path: string) {
+	return Result.tryPromise({
 		try: () => fs.stat(path),
 		catch: () =>
 			new ShellRuntimeError({
 				exitCode: 1,
 				message: '',
 			}),
-	}).pipe(
-		Effect.match({
-			onFailure: () => false,
-			onSuccess: (stat) => stat.isDirectory,
+	}).then((result) =>
+		result.match({
+			err: () => Result.ok(false),
+			ok: (stat) => Result.ok(stat.isDirectory),
 		})
 	);
-});
+}
 
-const assertCanMoveToDestination = Effect.fnUntraced(function* (
+function assertCanMoveToDestination(
 	fs: FS,
 	dest: string,
 	force: boolean,
 	interactive: boolean
 ) {
-	const exists = yield* Effect.tryPromise({
-		try: () => fs.exists(dest),
-		catch: (cause) =>
-			new ShellRuntimeError({
-				cause,
+	return Result.gen(async function* () {
+		const exists = yield* await Result.tryPromise({
+			try: () => fs.exists(dest),
+			catch: (cause) =>
+				new ShellRuntimeError({
+					cause,
+					exitCode: 1,
+					message:
+						cause instanceof Error ? cause.message : String(cause),
+				}),
+		});
+		if (!exists) {
+			return Result.ok();
+		}
+		if (interactive) {
+			return yield* new ShellRuntimeError({
 				exitCode: 1,
-				message: cause instanceof Error ? cause.message : String(cause),
-			}),
+				message: `mv: destination exists (interactive): ${dest}`,
+			});
+		}
+		if (!force) {
+			return yield* new ShellRuntimeError({
+				exitCode: 1,
+				message: `mv: destination exists (use -f to overwrite): ${dest}`,
+			});
+		}
+		return Result.ok();
 	});
-	if (!exists) {
-		return;
-	}
-	if (interactive) {
-		return yield* new ShellRuntimeError({
-			exitCode: 1,
-			message: `mv: destination exists (interactive): ${dest}`,
-		});
-	}
-	if (!force) {
-		return yield* new ShellRuntimeError({
-			exitCode: 1,
-			message: `mv: destination exists (use -f to overwrite): ${dest}`,
-		});
-	}
-});
+}
 
 export function mv(fs: FS): ActionEffect<MvArgs> {
-	return Effect.fn('mv')(function* ({
-		srcs,
-		dest,
-		force = false,
-		interactive = false,
-	}) {
-		if (srcs.length === 0) {
-			return yield* new ShellRuntimeError({
-				exitCode: 1,
-				message: 'mv requires at least one source',
-			});
-		}
-
-		const destinationIsDirectory = yield* isDirectory(fs, dest);
-		if (srcs.length > 1 && !destinationIsDirectory) {
-			return yield* new ShellRuntimeError({
-				exitCode: 1,
-				message:
-					'mv destination must be a directory for multiple sources',
-			});
-		}
-
-		for (const src of srcs) {
-			const sourceStat = yield* Effect.tryPromise({
-				try: () => fs.stat(src),
-				catch: (cause) =>
-					new ShellRuntimeError({
-						cause,
-						exitCode: 1,
-						message:
-							cause instanceof Error
-								? cause.message
-								: String(cause),
-					}),
-			});
-			if (sourceStat.isDirectory) {
+	return ({ srcs, dest, force = false, interactive = false }) =>
+		Result.gen(async function* () {
+			if (srcs.length === 0) {
 				return yield* new ShellRuntimeError({
 					exitCode: 1,
-					message: `mv: directory moves are not supported: ${src}`,
+					message: 'mv requires at least one source',
 				});
 			}
 
-			const targetPath =
-				destinationIsDirectory || srcs.length > 1
-					? joinPath(dest, extractFileName(src))
-					: dest;
+			const destinationIsDirectory = yield* await isDirectory(fs, dest);
+			if (srcs.length > 1 && !destinationIsDirectory) {
+				return yield* new ShellRuntimeError({
+					exitCode: 1,
+					message:
+						'mv destination must be a directory for multiple sources',
+				});
+			}
 
-			yield* assertCanMoveToDestination(
-				fs,
-				targetPath,
-				force,
-				interactive
-			);
-			yield* Effect.tryPromise({
-				try: () => fs.rename(src, targetPath),
-				catch: (cause) =>
-					new ShellRuntimeError({
-						cause,
+			for (const src of srcs) {
+				const sourceStat = yield* await Result.tryPromise({
+					try: () => fs.stat(src),
+					catch: (cause) =>
+						new ShellRuntimeError({
+							cause,
+							exitCode: 1,
+							message:
+								cause instanceof Error
+									? cause.message
+									: String(cause),
+						}),
+				});
+				if (sourceStat.isDirectory) {
+					return yield* new ShellRuntimeError({
 						exitCode: 1,
-						message:
-							cause instanceof Error
-								? cause.message
-								: String(cause),
-					}),
-			});
-		}
-	});
+						message: `mv: directory moves are not supported: ${src}`,
+					});
+				}
+
+				const targetPath =
+					destinationIsDirectory || srcs.length > 1
+						? joinPath(dest, extractFileName(src))
+						: dest;
+
+				yield* await assertCanMoveToDestination(
+					fs,
+					targetPath,
+					force,
+					interactive
+				);
+				yield* await Result.tryPromise({
+					try: () => fs.rename(src, targetPath),
+					catch: (cause) =>
+						new ShellRuntimeError({
+							cause,
+							exitCode: 1,
+							message:
+								cause instanceof Error
+									? cause.message
+									: String(cause),
+						}),
+				});
+			}
+			return Result.ok();
+		});
 }

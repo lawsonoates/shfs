@@ -4,7 +4,7 @@ import {
 	type FindStep,
 	hasErrorDiagnostics,
 } from '@shfs/compiler';
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import picomatch from 'picomatch';
 
 import type { BuiltinContext } from '../../builtin/types';
@@ -12,6 +12,7 @@ import {
 	exitCodeForDiagnostics,
 	isShellDiagnosticError,
 	type ShellErrorCause,
+	type ShellResult,
 	ShellRuntimeError,
 	writeDiagnosticsToStderr,
 } from '../../diagnostics';
@@ -76,34 +77,36 @@ export async function* find(
 		return;
 	}
 
-	const resolvedPredicateBranches = await Effect.runPromise(
-		resolvePredicatesEffect(args.predicateBranches, fs, context).pipe(
-			Effect.match({
-				onFailure: (error) => {
-					context.status = diagnosticExitCode(error);
-					writeErrorToStderr(context, error);
-					return null;
-				},
-				onSuccess: (branches) => branches,
-			})
-		)
+	const predicateResult = await resolvePredicatesEffect(
+		args.predicateBranches,
+		fs,
+		context
 	);
+	const resolvedPredicateBranches = predicateResult.match({
+		err: (error) => {
+			context.status = diagnosticExitCode(error);
+			writeErrorToStderr(context, error);
+			return null;
+		},
+		ok: (branches) => branches,
+	});
 	if (resolvedPredicateBranches === null) {
 		return;
 	}
 
-	const startPaths = await Effect.runPromise(
-		resolveStartPathsEffect(fs, context, args.startPaths).pipe(
-			Effect.match({
-				onFailure: (error) => {
-					context.status = diagnosticExitCode(error);
-					writeErrorToStderr(context, error);
-					return null;
-				},
-				onSuccess: (paths) => paths,
-			})
-		)
+	const startPathResult = await resolveStartPathsEffect(
+		fs,
+		context,
+		args.startPaths
 	);
+	const startPaths = startPathResult.match({
+		err: (error) => {
+			context.status = diagnosticExitCode(error);
+			writeErrorToStderr(context, error);
+			return null;
+		},
+		ok: (paths) => paths,
+	});
 	if (startPaths === null) {
 		return;
 	}
@@ -169,17 +172,14 @@ async function* walkEntry(
 	let childPaths: string[] | null = null;
 
 	if (shouldReadChildren) {
-		childPaths = await Effect.runPromise(
-			Effect.tryPromise({
-				try: () => readChildren(fs, entry.absolutePath),
-				catch: (error) => error,
-			}).pipe(
-				Effect.match({
-					onFailure: () => null,
-					onSuccess: (paths) => paths,
-				})
-			)
-		);
+		const childPathResult = await Result.tryPromise({
+			try: () => readChildren(fs, entry.absolutePath),
+			catch: (error) => error,
+		});
+		childPaths = childPathResult.match({
+			err: () => null,
+			ok: (paths) => paths,
+		});
 		if (childPaths === null) {
 			state.hadError = true;
 			writeDiagnosticsToStderr(context, [
@@ -254,15 +254,15 @@ function resolvePredicatesEffect(
 	predicateBranches: FindPredicateIR[][],
 	fs: FS,
 	context: BuiltinContext
-): Effect.Effect<ResolvedFindPredicate[][], ShellErrorCause> {
-	return Effect.gen(function* () {
+): ShellResult<ResolvedFindPredicate[][], ShellErrorCause> {
+	return Result.gen(async function* () {
 		const resolved: ResolvedFindPredicate[][] = [];
 		for (const branch of predicateBranches) {
 			const resolvedBranch: ResolvedFindPredicate[] = [];
 			for (const predicate of branch) {
 				switch (predicate.kind) {
 					case 'name': {
-						const pattern = yield* evaluateExpandedWordEffect(
+						const pattern = yield* await evaluateExpandedWordEffect(
 							predicate.pattern,
 							fs,
 							context
@@ -277,7 +277,7 @@ function resolvePredicatesEffect(
 						break;
 					}
 					case 'iname': {
-						const pattern = yield* evaluateExpandedWordEffect(
+						const pattern = yield* await evaluateExpandedWordEffect(
 							predicate.pattern,
 							fs,
 							context
@@ -293,7 +293,7 @@ function resolvePredicatesEffect(
 						break;
 					}
 					case 'path': {
-						const pattern = yield* evaluateExpandedWordEffect(
+						const pattern = yield* await evaluateExpandedWordEffect(
 							predicate.pattern,
 							fs,
 							context
@@ -308,7 +308,7 @@ function resolvePredicatesEffect(
 						break;
 					}
 					case 'ipath': {
-						const pattern = yield* evaluateExpandedWordEffect(
+						const pattern = yield* await evaluateExpandedWordEffect(
 							predicate.pattern,
 							fs,
 							context
@@ -324,28 +324,27 @@ function resolvePredicatesEffect(
 						break;
 					}
 					case 'regex': {
-						const pattern = yield* evaluateExpandedWordEffect(
+						const pattern = yield* await evaluateExpandedWordEffect(
 							predicate.pattern,
 							fs,
 							context
 						);
 						resolvedBranch.push({
 							kind: 'regex',
-							matcher: yield* compileFindRegexMatcher(
-								pattern,
-								predicate.caseInsensitive
-							).pipe(
-								Effect.mapError(
-									(cause) =>
-										new ShellRuntimeError({
-											cause,
-											exitCode: 1,
-											message:
-												cause instanceof Error
-													? cause.message
-													: String(cause),
-										})
-								)
+							matcher: yield* Result.mapError(
+								compileFindRegexMatcher(
+									pattern,
+									predicate.caseInsensitive
+								),
+								(cause) =>
+									new ShellRuntimeError({
+										cause,
+										exitCode: 1,
+										message:
+											cause instanceof Error
+												? cause.message
+												: String(cause),
+									})
 							),
 						});
 						break;
@@ -381,7 +380,7 @@ function resolvePredicatesEffect(
 			}
 			resolved.push(resolvedBranch);
 		}
-		return resolved;
+		return Result.ok(resolved);
 	});
 }
 
@@ -389,11 +388,11 @@ function resolveStartPathsEffect(
 	fs: FS,
 	context: BuiltinContext,
 	startPathWords: FindStep['args']['startPaths']
-): Effect.Effect<FindResolvedPath[], ShellErrorCause> {
-	return Effect.gen(function* () {
+): ShellResult<FindResolvedPath[], ShellErrorCause> {
+	return Result.gen(async function* () {
 		const startPaths: FindResolvedPath[] = [];
 		for (const word of startPathWords) {
-			const expandedValues = yield* evaluateExpandedPathWordEffect(
+			const expandedValues = yield* await evaluateExpandedPathWordEffect(
 				'find',
 				word,
 				fs,
@@ -411,7 +410,7 @@ function resolveStartPathsEffect(
 				});
 			}
 		}
-		return startPaths;
+		return Result.ok(startPaths);
 	});
 }
 
@@ -478,8 +477,8 @@ function matchesPredicate(
 function compileFindRegexMatcher(
 	pattern: string,
 	caseInsensitive: boolean
-): Effect.Effect<(value: string) => boolean, unknown> {
-	return Effect.try({
+): Result<(value: string) => boolean, unknown> {
+	return Result.try({
 		try: () => {
 			const translatedPattern = translateFindRegexPattern(pattern);
 			const flags = caseInsensitive ? 'i' : '';
@@ -579,16 +578,14 @@ function statOrNull(
 	fs: FS,
 	path: string
 ): Promise<Awaited<ReturnType<FS['stat']>> | null> {
-	return Effect.runPromise(
-		Effect.tryPromise({
-			try: () => fs.stat(path),
-			catch: (error) => error,
-		}).pipe(
-			Effect.match({
-				onFailure: () => null,
-				onSuccess: (stat) => stat,
-			})
-		)
+	return Result.tryPromise({
+		try: () => fs.stat(path),
+		catch: (error) => error,
+	}).then((result) =>
+		result.match({
+			err: () => null,
+			ok: (stat) => stat,
+		})
 	);
 }
 

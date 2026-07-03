@@ -1,7 +1,11 @@
 import { expandedWordToString, type RedirectionIR } from '@shfs/compiler';
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import type { BuiltinContext } from '../builtin/types';
-import { type ShellErrorCause, ShellRuntimeError } from '../diagnostics';
+import {
+	type ShellErrorCause,
+	type ShellResult,
+	ShellRuntimeError,
+} from '../diagnostics';
 import type { FS } from '../fs/fs';
 import { evaluateExpandedSinglePathEffect, resolvePathFromCwd } from './path';
 
@@ -109,20 +113,20 @@ function resolveFileRedirectEffect(
 	redirection: RedirectionIR,
 	fs: FS,
 	context: BuiltinContext
-): Effect.Effect<ResolvedFileRedirect, ShellErrorCause> {
-	return Effect.gen(function* () {
-		const targetPath = yield* evaluateExpandedSinglePathEffect(
+): ShellResult<ResolvedFileRedirect, ShellErrorCause> {
+	return Result.gen(async function* () {
+		const targetPath = yield* await evaluateExpandedSinglePathEffect(
 			command,
 			'redirection target must expand to exactly 1 path',
 			redirection.target,
 			fs,
 			context
 		);
-		return {
+		return Result.ok({
 			path: resolvePathFromCwd(context.cwd, targetPath),
 			append: redirection.append ?? false,
 			noclobber: redirection.noclobber ?? false,
-		};
+		});
 	});
 }
 
@@ -152,18 +156,18 @@ function applyInputRedirectionEffect(params: {
 	descriptors: Map<number, InputDescriptor>;
 	fs: FS;
 	redirection: RedirectionIR;
-}): Effect.Effect<void, ShellErrorCause> {
-	return Effect.gen(function* () {
+}): ShellResult<void, ShellErrorCause> {
+	return Result.gen(async function* () {
 		const { command, context, descriptors, fs, redirection } = params;
 		if (redirection.kind !== 'input') {
-			return;
+			return Result.ok();
 		}
 
 		const sourceFd = getSourceFd(redirection);
 		const mode = getRedirectionMode(redirection);
 		if (mode === 'close') {
 			descriptors.set(sourceFd, { kind: 'closed' });
-			return;
+			return Result.ok();
 		}
 		if (mode === 'fd') {
 			const targetFd = getTargetFd(redirection);
@@ -177,13 +181,13 @@ function applyInputRedirectionEffect(params: {
 				sourceFd,
 				ensureInputDescriptor(descriptors, targetFd)
 			);
-			return;
+			return Result.ok();
 		}
 		if (mode !== 'file') {
-			return;
+			return Result.ok();
 		}
 
-		const resolved = yield* resolveFileRedirectEffect(
+		const resolved = yield* await resolveFileRedirectEffect(
 			command,
 			redirection,
 			fs,
@@ -191,7 +195,7 @@ function applyInputRedirectionEffect(params: {
 		);
 		const optionalMissing =
 			isOptionalInput(redirection) &&
-			!(yield* Effect.tryPromise({
+			!(yield* await Result.tryPromise({
 				try: () => fs.exists(resolved.path),
 				catch: (cause) =>
 					new ShellRuntimeError({
@@ -204,12 +208,13 @@ function applyInputRedirectionEffect(params: {
 					}),
 			}));
 		if (optionalMissing) {
-			return;
+			return Result.ok();
 		}
 		updateDescriptor(
 			ensureInputDescriptor(descriptors, sourceFd),
 			resolved.path
 		);
+		return Result.ok();
 	});
 }
 
@@ -218,16 +223,16 @@ export function resolveInputRedirectEffect(
 	redirections: RedirectionIR[] | undefined,
 	fs: FS,
 	context: BuiltinContext
-): Effect.Effect<ResolvedInputRedirect, ShellErrorCause> {
-	return Effect.gen(function* () {
+): ShellResult<ResolvedInputRedirect, ShellErrorCause> {
+	return Result.gen(async function* () {
 		if (!redirections || redirections.length === 0) {
-			return { path: null, closed: false };
+			return Result.ok({ path: null, closed: false });
 		}
 
 		const descriptors = new Map<number, InputDescriptor>();
 
 		for (const redirection of redirections) {
-			yield* applyInputRedirectionEffect({
+			yield* await applyInputRedirectionEffect({
 				command,
 				context,
 				descriptors,
@@ -237,13 +242,13 @@ export function resolveInputRedirectEffect(
 		}
 
 		const stdinDescriptor = ensureInputDescriptor(descriptors, 0);
-		return {
+		return Result.ok({
 			path:
 				stdinDescriptor.kind === 'path'
 					? (stdinDescriptor.path ?? null)
 					: null,
 			closed: stdinDescriptor.kind === 'closed',
-		};
+		});
 	});
 }
 
@@ -260,29 +265,29 @@ export function resolveRedirectPathEffect(
 	kind: RedirectionIR['kind'],
 	fs: FS,
 	context: BuiltinContext
-): Effect.Effect<string | null, ShellErrorCause> {
-	return Effect.gen(function* () {
+): ShellResult<string | null, ShellErrorCause> {
+	return Result.gen(async function* () {
 		if (kind === 'input') {
-			const resolvedInput = yield* resolveInputRedirectEffect(
+			const resolvedInput = yield* await resolveInputRedirectEffect(
 				command,
 				redirections,
 				fs,
 				context
 			);
-			return resolvedInput.path;
+			return Result.ok(resolvedInput.path);
 		}
 
 		const redirect = getLastDefaultFileRedirect(redirections, kind);
 		if (!redirect) {
-			return null;
+			return Result.ok(null);
 		}
-		const resolved = yield* resolveFileRedirectEffect(
+		const resolved = yield* await resolveFileRedirectEffect(
 			command,
 			redirect,
 			fs,
 			context
 		);
-		return resolved.path;
+		return Result.ok(resolved.path);
 	});
 }
 

@@ -10,7 +10,7 @@
  * - Preserves word structure for runtime expansion
  */
 
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../diagnostic';
 import {
 	commandSub,
@@ -47,17 +47,19 @@ import { CommandHandler } from './command/handler';
  * @returns The compiled ScriptIR
  */
 export function compile(program: Program): ScriptIR {
-	return Effect.runSync(compileEffect(program));
+	const result = compileEffect(program);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const compileEffect: (
 	program: Program
-) => Effect.Effect<ScriptIR, CompileError> = Effect.fn('Compiler.compile')(
-	function* (program) {
-		const compiler = new ProgramCompiler();
-		return yield* compiler.compileProgram(program);
-	}
-);
+) => Result<ScriptIR, CompileError> = (program) => {
+	const compiler = new ProgramCompiler();
+	return compiler.compileProgram(program);
+};
 
 /**
  * Compiler that traverses the AST to produce IR.
@@ -70,9 +72,9 @@ class ProgramCompiler {
 	/**
 	 * Compile a Program to a ScriptIR.
 	 */
-	compileProgram(node: Program): Effect.Effect<ScriptIR, CompileError> {
+	compileProgram(node: Program): Result<ScriptIR, CompileError> {
 		const compiler = this;
-		return Effect.gen(function* () {
+		return Result.gen(function* () {
 			const statements = new Array<ScriptStatementIR>(
 				node.statements.length
 			);
@@ -83,31 +85,29 @@ class ProgramCompiler {
 						yield* compiler.compileStatement(statement);
 				}
 			}
-			return { statements };
+			return Result.ok({ statements });
 		});
 	}
 
 	/**
 	 * Compile a script statement to ScriptStatementIR.
 	 */
-	compileStatement(
-		node: Statement
-	): Effect.Effect<ScriptStatementIR, CompileError> {
+	compileStatement(node: Statement): Result<ScriptStatementIR, CompileError> {
 		const compiler = this;
-		return Effect.gen(function* () {
-			return {
+		return Result.gen(function* () {
+			return Result.ok({
 				chainMode: node.chainMode,
 				pipeline: yield* compiler.compilePipeline(node.pipeline),
-			};
+			});
 		});
 	}
 
 	/**
 	 * Compile a Pipeline to a PipelineIR.
 	 */
-	compilePipeline(node: Pipeline): Effect.Effect<PipelineIR, CompileError> {
+	compilePipeline(node: Pipeline): Result<PipelineIR, CompileError> {
 		const compiler = this;
-		return Effect.gen(function* () {
+		return Result.gen(function* () {
 			const commands = new Array<SimpleCommandIR>(node.commands.length);
 			for (let index = 0; index < node.commands.length; index++) {
 				const command = node.commands[index];
@@ -139,11 +139,11 @@ class ProgramCompiler {
 				}
 			}
 
-			return {
+			return Result.ok({
 				source,
 				steps,
 				firstCommand: firstCmd,
-			};
+			});
 		});
 	}
 
@@ -275,9 +275,9 @@ class ProgramCompiler {
 	 */
 	private compileCommandToStep(
 		cmd: SimpleCommandIR
-	): Effect.Effect<StepIR, CompileError> {
+	): Result<StepIR, CompileError> {
 		const compiler = this;
-		return Effect.gen(function* () {
+		return Result.gen(function* () {
 			const cmdName = compiler.extractLiteralString(cmd.name);
 			if (!cmdName) {
 				return yield* new CompileError(
@@ -291,10 +291,10 @@ class ProgramCompiler {
 
 			const handler = yield* CommandHandler.get(cmdName);
 			const step = yield* handler(cmd);
-			return {
+			return Result.ok({
 				...step,
 				redirections: cmd.redirections,
-			};
+			});
 		});
 	}
 

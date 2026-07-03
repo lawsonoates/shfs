@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import type { ExpandedWord } from '../../../ir';
 import { expandedWordToString } from '../../../ir';
 import { parseArgsWithIndex, parseArgsWithIndexEffect } from './parse/engine';
@@ -44,7 +44,7 @@ export function createArgParserEffect(
 ): (
 	args: readonly string[],
 	options?: ParseOptions
-) => Effect.Effect<ParseResult, ArgParseError> {
+) => Result<ParseResult, ArgParseError> {
 	const index = buildFlagIndex(flagDefs);
 	return (args: readonly string[], options?: ParseOptions) => {
 		return parseArgsWithIndexEffect(args, index, options);
@@ -79,10 +79,10 @@ export function createWordParserEffect<TWord>(
 ): (
 	words: readonly TWord[],
 	options?: ParseOptions
-) => Effect.Effect<ParseWordsResult<TWord>, ArgParseError> {
+) => Result<ParseWordsResult<TWord>, ArgParseError> {
 	const parseWithIndex = createArgParserEffect(flagDefs);
 	return (words: readonly TWord[], options?: ParseOptions) =>
-		Effect.gen(function* () {
+		Result.gen(function* () {
 			const args = words.map(wordToString);
 			const parsed = yield* parseWithIndex(args, options);
 			const positionalWords = parsed.positionalIndices.flatMap(
@@ -91,7 +91,7 @@ export function createWordParserEffect<TWord>(
 					return word === undefined ? [] : [word];
 				}
 			);
-			return { ...parsed, positionalWords };
+			return Result.ok({ ...parsed, positionalWords });
 		});
 }
 
@@ -108,7 +108,7 @@ export function parseArgsEffect(
 	args: readonly string[],
 	flagDefs: Record<string, FlagDef>,
 	options?: ParseOptions
-): Effect.Effect<ParseResult, ArgParseError> {
+): Result<ParseResult, ArgParseError> {
 	const parser = createArgParserEffect(flagDefs);
 	return parser(args, options);
 }
@@ -129,7 +129,7 @@ export function parseWordsEffect(
 	words: readonly ExpandedWord[],
 	flagDefs: Record<string, FlagDef>,
 	options?: ParseOptions
-): Effect.Effect<ParseWordsResult<ExpandedWord>, ArgParseError> {
+): Result<ParseWordsResult<ExpandedWord>, ArgParseError> {
 	const parser = createWordParserEffect<ExpandedWord>(
 		flagDefs,
 		expandedWordToString

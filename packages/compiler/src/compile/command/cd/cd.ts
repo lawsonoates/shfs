@@ -2,7 +2,7 @@
  * cd command handler for the AST-based compiler.
  */
 
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import { literal, type SimpleCommandIR, type StepIR } from '../../../ir';
 
@@ -12,13 +12,17 @@ const ROOT_DIRECTORY = '/';
  * Compile a cd command from SimpleCommandIR to StepIR.
  */
 export function compileCd(cmd: SimpleCommandIR): StepIR {
-	return Effect.runSync(compileCdEffect(cmd));
+	const result = compileCdEffect(cmd);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const compileCdEffect: (
 	cmd: SimpleCommandIR
-) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.cd')(
-	function* (cmd) {
+) => Result<StepIR, CompileError> = (cmd) =>
+	Result.gen(function* () {
 		const startsWithSeparator =
 			cmd.args[0]?.kind === 'literal' && cmd.args[0].value === '--';
 		const positionalArgs = startsWithSeparator
@@ -36,9 +40,8 @@ export const compileCdEffect: (
 		}
 
 		const path = positionalArgs[0] ?? literal(ROOT_DIRECTORY);
-		return {
+		return Result.ok({
 			cmd: 'cd',
 			args: { path },
-		} as const;
-	}
-);
+		} as const satisfies StepIR);
+	});

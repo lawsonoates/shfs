@@ -1,5 +1,5 @@
 import { expandedWordToString, type WcArgsIR } from '@shfs/compiler';
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 
 import type { BuiltinContext } from '../../builtin/types';
 import { createShellInput, type ShellInput } from '../../execute/io';
@@ -362,22 +362,17 @@ async function readFileOrReport(
 	displayPath: string,
 	stderr: string[]
 ): Promise<Uint8Array | null> {
-	return Effect.runPromise(
-		Effect.tryPromise({
-			try: () => fs.readFile(path),
-			catch: (error) => error,
-		}).pipe(
-			Effect.match({
-				onFailure: () => {
-					stderr.push(
-						`wc: ${displayPath}: No such file or directory`
-					);
-					return null;
-				},
-				onSuccess: (bytes) => bytes,
-			})
-		)
-	);
+	const result = await Result.tryPromise({
+		try: () => fs.readFile(path),
+		catch: (error) => error,
+	});
+	return result.match({
+		err: () => {
+			stderr.push(`wc: ${displayPath}: No such file or directory`);
+			return null;
+		},
+		ok: (bytes) => bytes,
+	});
 }
 
 function createStdinReader(

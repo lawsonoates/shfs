@@ -2,7 +2,7 @@
  * mkdir command handler for the AST-based compiler.
  */
 
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
@@ -26,34 +26,38 @@ const parseMkdirArgs = createWordParser<ExpandedWord>(
  * Compile a mkdir command from SimpleCommandIR to StepIR.
  */
 export function compileMkdir(cmd: SimpleCommandIR): StepIR {
-	return Effect.runSync(compileMkdirEffect(cmd));
+	const result = compileMkdirEffect(cmd);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const compileMkdirEffect: (
 	cmd: SimpleCommandIR
-) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.mkdir')(
-	function* (cmd) {
-		const parsed = parseMkdirArgs(cmd.args, {
-			unknownFlagPolicy: 'positional',
-		});
+) => Result<StepIR, CompileError> = (cmd) => {
+	const parsed = parseMkdirArgs(cmd.args, {
+		unknownFlagPolicy: 'positional',
+	});
 
-		const parents = parsed.flags.parents === true;
-		const recursive = parents;
-		const paths = parsed.positionalWords;
+	const parents = parsed.flags.parents === true;
+	const recursive = parents;
+	const paths = parsed.positionalWords;
 
-		if (paths.length === 0) {
-			return yield* new CompileError(
+	if (paths.length === 0) {
+		return Result.err(
+			new CompileError(
 				createCommandDiagnostic(
 					'mkdir',
 					'missing-path',
 					'mkdir requires at least one path'
 				)
-			);
-		}
-
-		return {
-			cmd: 'mkdir',
-			args: { parents, paths, recursive },
-		} as const;
+			)
+		);
 	}
-);
+
+	return Result.ok({
+		cmd: 'mkdir',
+		args: { parents, paths, recursive },
+	} as const satisfies StepIR);
+};

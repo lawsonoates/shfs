@@ -2,7 +2,7 @@
  * mv command handler for the AST-based compiler.
  */
 
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
@@ -24,45 +24,51 @@ const parseMvArgs = createWordParser<ExpandedWord>(flags, expandedWordToString);
  * Compile a mv command from SimpleCommandIR to StepIR.
  */
 export function compileMv(cmd: SimpleCommandIR): StepIR {
-	return Effect.runSync(compileMvEffect(cmd));
+	const result = compileMvEffect(cmd);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const compileMvEffect: (
 	cmd: SimpleCommandIR
-) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.mv')(
-	function* (cmd) {
-		const parsed = parseMvArgs(cmd.args, {
-			unknownFlagPolicy: 'positional',
-		});
-		const force = parsed.flags.force === true;
-		const interactive = parsed.flags.interactive === true;
-		const filteredArgs = parsed.positionalWords;
+) => Result<StepIR, CompileError> = (cmd) => {
+	const parsed = parseMvArgs(cmd.args, {
+		unknownFlagPolicy: 'positional',
+	});
+	const force = parsed.flags.force === true;
+	const interactive = parsed.flags.interactive === true;
+	const filteredArgs = parsed.positionalWords;
 
-		if (filteredArgs.length < 2) {
-			return yield* new CompileError(
+	if (filteredArgs.length < 2) {
+		return Result.err(
+			new CompileError(
 				createCommandDiagnostic(
 					'mv',
 					'missing-operand',
 					'mv requires source and destination'
 				)
-			);
-		}
+			)
+		);
+	}
 
-		const dest = filteredArgs.pop();
-		if (!dest) {
-			return yield* new CompileError(
+	const dest = filteredArgs.pop();
+	if (!dest) {
+		return Result.err(
+			new CompileError(
 				createCommandDiagnostic(
 					'mv',
 					'missing-destination',
 					'mv requires source and destination'
 				)
-			);
-		}
-		const srcs = filteredArgs;
-
-		return {
-			cmd: 'mv',
-			args: { dest, force, interactive, srcs },
-		} as const;
+			)
+		);
 	}
-);
+	const srcs = filteredArgs;
+
+	return Result.ok({
+		cmd: 'mv',
+		args: { dest, force, interactive, srcs },
+	} as const satisfies StepIR);
+};

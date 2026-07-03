@@ -9,7 +9,7 @@ import {
 	type GrepOptionsIR,
 	type RedirectionIR,
 } from '@shfs/compiler';
-import { Effect, Result } from 'effect';
+import { Result } from 'better-result';
 import picomatch from 'picomatch';
 
 import type { BuiltinContext } from '../../builtin/types';
@@ -160,40 +160,36 @@ export async function runGrepCommand(
 		return { stdout: [], stderr: [], exitCode: hadError ? 2 : 1 };
 	}
 
-	const inputRedirect = await Effect.runPromise(
-		Effect.result(
-			resolveRedirectPathEffect(
-				'grep',
-				options.redirections,
-				'input',
-				options.fs,
-				options.context
-			)
-		)
+	const inputRedirect = await resolveRedirectPathEffect(
+		'grep',
+		options.redirections,
+		'input',
+		options.fs,
+		options.context
 	);
-	if (Result.isFailure(inputRedirect)) {
+	if (Result.isError(inputRedirect)) {
 		hadError = true;
 	}
-	const inputRedirectPath = Result.getOrElse(inputRedirect, () => null);
+	const inputRedirectPath = Result.isError(inputRedirect)
+		? null
+		: inputRedirect.value;
 
 	const outputRedirect =
 		options.resolvedOutputRedirectPath === undefined
-			? await Effect.runPromise(
-					Effect.result(
-						resolveRedirectPathEffect(
-							'grep',
-							options.redirections,
-							'output',
-							options.fs,
-							options.context
-						)
-					)
+			? await resolveRedirectPathEffect(
+					'grep',
+					options.redirections,
+					'output',
+					options.fs,
+					options.context
 				)
-			: Result.succeed<string | null>(options.resolvedOutputRedirectPath);
-	if (Result.isFailure(outputRedirect)) {
+			: Result.ok<string | null>(options.resolvedOutputRedirectPath);
+	if (Result.isError(outputRedirect)) {
 		hadError = true;
 	}
-	const outputRedirectPath = Result.getOrElse(outputRedirect, () => null);
+	const outputRedirectPath = Result.isError(outputRedirect)
+		? null
+		: outputRedirect.value;
 
 	if (
 		hasInputOutputConflict(
@@ -373,14 +369,15 @@ async function normalizeInvocation(
 	let hadError = false;
 
 	for (const patternRef of parseResult.explicitPatterns) {
-		const pattern = await Effect.runPromise(
-			evaluatePatternWordEffect(patternRef, fs, context).pipe(
-				Effect.match({
-					onFailure: () => null,
-					onSuccess: (text) => text,
-				})
-			)
+		const patternResult = await evaluatePatternWordEffect(
+			patternRef,
+			fs,
+			context
 		);
+		const pattern = patternResult.match({
+			err: () => null,
+			ok: (text) => text,
+		});
 		if (pattern === null) {
 			hadError = true;
 		} else {
@@ -444,23 +441,23 @@ function evaluatePatternWordEffect(
 	word: ExpandedWord,
 	fs: FS,
 	context: BuiltinContext
-): Effect.Effect<string, unknown> {
-	return Effect.gen(function* () {
+): Promise<Result<string, unknown>> {
+	return Result.gen(async function* () {
 		if (!expandedWordHasCommandSub(word)) {
-			return expandedWordToString(word);
+			return Result.ok(expandedWordToString(word));
 		}
 
 		const segments: string[] = [];
 		for (const part of expandedWordParts(word)) {
 			if (part.kind === 'commandSub') {
 				segments.push(
-					yield* evaluateExpandedWordEffect(part, fs, context)
+					yield* await evaluateExpandedWordEffect(part, fs, context)
 				);
 				continue;
 			}
 			segments.push(expandedWordToString(part));
 		}
-		return segments.join('');
+		return Result.ok(segments.join(''));
 	});
 }
 
@@ -469,14 +466,16 @@ async function expandPathWordSafe(
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string[] | null> {
-	return Effect.runPromise(
-		evaluateExpandedPathWordEffect('grep', word, fs, context).pipe(
-			Effect.match({
-				onFailure: () => null,
-				onSuccess: (paths) => paths,
-			})
-		)
+	const result = await evaluateExpandedPathWordEffect(
+		'grep',
+		word,
+		fs,
+		context
 	);
+	return result.match({
+		err: () => null,
+		ok: (paths) => paths,
+	});
 }
 
 async function loadPatternsFromFile(
@@ -532,16 +531,14 @@ async function listSortedDirectoryChildren(
 }
 
 function readFileOrNull(fs: FS, path: string): Promise<Uint8Array | null> {
-	return Effect.runPromise(
-		Effect.tryPromise({
-			try: () => fs.readFile(path),
-			catch: (error) => error,
-		}).pipe(
-			Effect.match({
-				onFailure: () => null,
-				onSuccess: (bytes) => bytes,
-			})
-		)
+	return Result.tryPromise({
+		try: () => fs.readFile(path),
+		catch: (error) => error,
+	}).then((result) =>
+		result.match({
+			err: () => null,
+			ok: (bytes) => bytes,
+		})
 	);
 }
 
@@ -549,16 +546,14 @@ function statOrNull(
 	fs: FS,
 	path: string
 ): Promise<Awaited<ReturnType<FS['stat']>> | null> {
-	return Effect.runPromise(
-		Effect.tryPromise({
-			try: () => fs.stat(path),
-			catch: (error) => error,
-		}).pipe(
-			Effect.match({
-				onFailure: () => null,
-				onSuccess: (stat) => stat,
-			})
-		)
+	return Result.tryPromise({
+		try: () => fs.stat(path),
+		catch: (error) => error,
+	}).then((result) =>
+		result.match({
+			err: () => null,
+			ok: (stat) => stat,
+		})
 	);
 }
 
@@ -599,17 +594,14 @@ async function collectSearchTargets(
 		rootPath: string,
 		preferRelative: boolean
 	): Promise<void> => {
-		const childPaths = await Effect.runPromise(
-			Effect.tryPromise({
-				try: () => listSortedDirectoryChildren(fs, rootPath),
-				catch: (error) => error,
-			}).pipe(
-				Effect.match({
-					onFailure: () => null,
-					onSuccess: (paths) => paths,
-				})
-			)
-		);
+		const childPathResult = await Result.tryPromise({
+			try: () => listSortedDirectoryChildren(fs, rootPath),
+			catch: (error) => error,
+		});
+		const childPaths = childPathResult.match({
+			err: () => null,
+			ok: (paths) => paths,
+		});
 		if (childPaths === null) {
 			hadError = true;
 			return;
@@ -909,24 +901,21 @@ function compileRegexPattern(
 	ignoreCase: boolean,
 	usesSpaceEscape: boolean
 ): CompiledRegexPattern | null {
-	return Effect.runSync(
-		Effect.try({
-			try: () => {
-				const flagBase = ignoreCase ? 'iu' : 'u';
-				return {
-					globalRegex: new RegExp(source, `g${flagBase}`),
-					regex: new RegExp(source, flagBase),
-					usesSpaceEscape,
-				};
-			},
-			catch: (error) => error,
-		}).pipe(
-			Effect.match({
-				onFailure: () => null,
-				onSuccess: (pattern) => pattern,
-			})
-		)
-	);
+	const result = Result.try({
+		try: () => {
+			const flagBase = ignoreCase ? 'iu' : 'u';
+			return {
+				globalRegex: new RegExp(source, `g${flagBase}`),
+				regex: new RegExp(source, flagBase),
+				usesSpaceEscape,
+			};
+		},
+		catch: (error) => error,
+	});
+	return result.match({
+		err: () => null,
+		ok: (pattern) => pattern,
+	});
 }
 
 function isBenignBracketTypo(pattern: string): boolean {
@@ -1610,20 +1599,17 @@ function splitIntoRecords(bytes: Uint8Array, separator: number): TextRecord[] {
 }
 
 function isValidUtf8(bytes: Uint8Array): boolean {
-	return Effect.runSync(
-		Effect.try({
-			try: () => {
-				new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-				return true;
-			},
-			catch: (error) => error,
-		}).pipe(
-			Effect.match({
-				onFailure: () => false,
-				onSuccess: (isValid) => isValid,
-			})
-		)
-	);
+	const result = Result.try({
+		try: () => {
+			new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+			return true;
+		},
+		catch: (error) => error,
+	});
+	return result.match({
+		err: () => false,
+		ok: (isValid) => isValid,
+	});
 }
 
 function isBinaryBuffer(bytes: Uint8Array): boolean {
@@ -1732,17 +1718,14 @@ function getCorpusEntries(): CorpusEntry[] {
 		if (!existsSync(filePath)) {
 			continue;
 		}
-		const lines = Effect.runSync(
-			Effect.try({
-				try: () => readFileSync(filePath, 'utf8').split('\n'),
-				catch: (error) => error,
-			}).pipe(
-				Effect.match({
-					onFailure: () => [],
-					onSuccess: (fixtureLines) => fixtureLines,
-				})
-			)
-		);
+		const lineResult = Result.try({
+			try: () => readFileSync(filePath, 'utf8').split('\n'),
+			catch: (error) => error,
+		});
+		const lines = lineResult.match({
+			err: () => [],
+			ok: (fixtureLines) => fixtureLines,
+		});
 		for (const line of lines) {
 			if (line === '' || line.startsWith('#')) {
 				continue;

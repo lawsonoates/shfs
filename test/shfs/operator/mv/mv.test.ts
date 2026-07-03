@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { Effect } from 'effect';
 
 import type { FS } from '#shfs/fs/fs';
 import { mv } from '#shfs/operator/mv/mv';
@@ -102,9 +101,7 @@ test('mv uses rename for a single file move', async () => {
 	});
 
 	const effect = mv(fs);
-	await Effect.runPromise(
-		effect({ srcs: ['/source.txt'], dest: '/dest.txt' })
-	);
+	(await effect({ srcs: ['/source.txt'], dest: '/dest.txt' })).unwrap();
 
 	expect(fs.renameCalls).toEqual([{ src: '/source.txt', dest: '/dest.txt' }]);
 	expect(await fs.exists('/source.txt')).toBeFalse();
@@ -118,7 +115,7 @@ test('mv resolves directory destinations before renaming', async () => {
 	});
 
 	const effect = mv(fs);
-	await Effect.runPromise(effect({ srcs: ['/file.txt'], dest: '/dir/' }));
+	(await effect({ srcs: ['/file.txt'], dest: '/dir/' })).unwrap();
 
 	expect(fs.renameCalls).toEqual([
 		{ src: '/file.txt', dest: '/dir/file.txt' },
@@ -133,12 +130,12 @@ test('mv renames each source when moving multiple files to a directory', async (
 	});
 
 	const effect = mv(fs);
-	await Effect.runPromise(
-		effect({
+	(
+		await effect({
 			srcs: ['/file1.txt', '/file2.txt'],
 			dest: '/dir/',
 		})
-	);
+	).unwrap();
 
 	expect(fs.renameCalls).toEqual([
 		{ src: '/file1.txt', dest: '/dir/file1.txt' },
@@ -155,7 +152,9 @@ test('mv fails deterministically when destination exists without force', async (
 
 	const effect = mv(fs);
 	await expect(
-		Effect.runPromise(effect({ srcs: ['/source.txt'], dest: '/dest.txt' }))
+		effect({ srcs: ['/source.txt'], dest: '/dest.txt' }).then((result) =>
+			result.unwrap()
+		)
 	).rejects.toThrow(
 		'mv: destination exists (use -f to overwrite): /dest.txt'
 	);
@@ -170,13 +169,13 @@ test('mv allows force overwrites through the rename primitive', async () => {
 	});
 
 	const effect = mv(fs);
-	await Effect.runPromise(
-		effect({
+	(
+		await effect({
 			srcs: ['/source.txt'],
 			dest: '/dest.txt',
 			force: true,
 		})
-	);
+	).unwrap();
 
 	expect(fs.renameCalls).toEqual([{ src: '/source.txt', dest: '/dest.txt' }]);
 	expect(await fs.exists('/source.txt')).toBeFalse();

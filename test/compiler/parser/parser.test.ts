@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { Effect } from 'effect';
 
 import { Parser, parse, parseEffect } from '#compiler/parser/parser';
 import { ParseSyntaxError } from '#compiler/parser/syntax-error';
@@ -169,17 +168,12 @@ test('parse records chain metadata for and/or statements', () => {
 test('unexpected token syntax failures surface through shared parse diagnostics', () => {
 	const parser = new Parser('echo )');
 
-	const error = Effect.runSync(
-		Effect.try({
-			try: () => parser.parse(),
-			catch: (cause) => cause,
-		}).pipe(
-			Effect.match({
-				onFailure: (cause) => cause,
-				onSuccess: () => null,
-			})
-		)
-	);
+	let error: unknown = null;
+	try {
+		parser.parse();
+	} catch (cause) {
+		error = cause;
+	}
 	expect(error).toBeInstanceOf(ParseSyntaxError);
 	if (!(error instanceof ParseSyntaxError)) {
 		return;
@@ -201,17 +195,12 @@ test('unexpected token syntax failures surface through shared parse diagnostics'
 test('unexpected EOF syntax failures surface through shared parse diagnostics', () => {
 	const parser = new Parser('cat <');
 
-	const error = Effect.runSync(
-		Effect.try({
-			try: () => parser.parse(),
-			catch: (cause) => cause,
-		}).pipe(
-			Effect.match({
-				onFailure: (cause) => cause,
-				onSuccess: () => null,
-			})
-		)
-	);
+	let error: unknown = null;
+	try {
+		parser.parse();
+	} catch (cause) {
+		error = cause;
+	}
 	expect(error).toBeInstanceOf(ParseSyntaxError);
 	if (!(error instanceof ParseSyntaxError)) {
 		return;
@@ -225,8 +214,10 @@ test('unexpected EOF syntax failures surface through shared parse diagnostics', 
 	expect(error.diagnostic.message).toContain('Unexpected end of input');
 });
 
-test('parseEffect yields syntax failures on the Effect error channel', async () => {
-	await expect(
-		Effect.runPromise(parseEffect('cat <'))
-	).rejects.toBeInstanceOf(ParseSyntaxError);
+test('parseEffect yields syntax failures on the result error channel', () => {
+	const result = parseEffect('cat <');
+	expect(result.isErr()).toBeTrue();
+	if (result.isErr()) {
+		expect(result.error).toBeInstanceOf(ParseSyntaxError);
+	}
 });

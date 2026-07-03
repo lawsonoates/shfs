@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { Effect } from 'effect';
 import {
 	compile,
 	glob,
@@ -68,7 +67,7 @@ test('writes stream output to redirected file', async () => {
 	};
 
 	const result = execute(ir, fs);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('output.txt'))).toBe(
 		'alpha\nbeta\ngamma'
@@ -99,7 +98,7 @@ test('uses input redirection when no file args are provided', async () => {
 	};
 
 	const result = execute(ir, fs);
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -132,7 +131,7 @@ test('supports combined input and output redirection', async () => {
 	};
 
 	const result = execute(ir, fs);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('copy.txt'))).toBe(
 		'alpha\nbeta\ngamma'
@@ -161,7 +160,7 @@ test('creates an empty output file when redirecting sink commands', async () => 
 	};
 
 	const result = execute(ir, fs);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 
 	expect(await fs.exists('created.txt')).toBe(true);
 	expect(textDecoder.decode(await fs.readFile('logs.txt'))).toBe('');
@@ -182,7 +181,7 @@ test('/dev/null stdout redirection discards without writing through readonly fs'
 		fs,
 		context
 	);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 	expect(context.status).toBe(0);
 	expect(stderr.snapshot()).toEqual([]);
 });
@@ -203,7 +202,7 @@ test('/dev/null stderr redirection discards without writing through readonly fs'
 		context
 	);
 
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const fileRecords = records.filter(
 		(record): record is FileRecord => record.kind === 'file'
 	);
@@ -226,7 +225,7 @@ test('variable-expanded output redirection resolves relative to cwd', async () =
 		fs,
 		context
 	);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('/workspace/logs.txt'))).toBe(
 		'hello'
@@ -241,7 +240,7 @@ test('variable-expanded input redirection resolves relative to cwd', async () =>
 		cwd: '/workspace',
 		globalVars: new Map<string, string>([['INPUTFILE', 'input.txt']]),
 	});
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -254,7 +253,7 @@ test('command substitution can produce an output redirection target', async () =
 	const result = execute(compile(parse('echo hello > (echo out.txt)')), fs, {
 		cwd: '/workspace',
 	});
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('/workspace/out.txt'))).toBe(
 		'hello'
@@ -275,7 +274,7 @@ test('redirect target expansion failures stop sink commands before side effects'
 		fs,
 		context
 	);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 	expect(context.status).toBe(1);
 	expect(context.stderr.snapshot().join('\n')).toContain(
 		'touch: redirection target must expand to exactly 1 path, got 2'
@@ -296,7 +295,7 @@ test('empty-expanded redirect targets fail before resolving cwd', async () => {
 		fs,
 		context
 	);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 	expect(context.status).toBe(1);
 	expect(context.stderr.snapshot().join('\n')).toContain(
 		'echo: redirection target must expand to exactly 1 path, got empty path'
@@ -324,7 +323,7 @@ test('empty-expanded single-path destinations fail deterministically', async () 
 		fs,
 		copyContext
 	);
-	await Effect.runPromise(collectRecordStream(copyResult));
+	(await collectRecordStream(copyResult)).unwrap();
 	expect(copyContext.status).toBe(1);
 	expect(copyContext.stderr.snapshot().join('\n')).toContain(
 		'cp: destination must expand to exactly 1 path, got empty path'
@@ -339,7 +338,7 @@ test('empty-expanded single-path destinations fail deterministically', async () 
 		fs,
 		moveContext
 	);
-	await Effect.runPromise(collectRecordStream(moveResult));
+	(await collectRecordStream(moveResult)).unwrap();
 	expect(moveContext.status).toBe(1);
 	expect(moveContext.stderr.snapshot().join('\n')).toContain(
 		'mv: destination must expand to exactly 1 path, got empty path'
@@ -372,7 +371,7 @@ test('grep reuses a resolved output redirect target for conflict checks and writ
 			cwd: '/workspace',
 		}
 	);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('/workspace/first.txt'))).toBe(
 		'match'
@@ -420,7 +419,7 @@ test('executes multi-step stream pipelines end-to-end', async () => {
 	};
 
 	const result = execute(ir, fs);
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -476,7 +475,7 @@ test('find pipelines formatted paths into downstream cat consumers', async () =>
 	};
 
 	const result = execute(ir, fs, { cwd: '/workspace' });
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -497,7 +496,7 @@ test('find pipelines formatted paths into grep', async () => {
 		cwd: '/workspace',
 	});
 
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -520,7 +519,7 @@ test('find OR expressions compose in pipelines', async () => {
 		}
 	);
 
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -536,7 +535,7 @@ test('find piped to tail outputs paths, not file contents', async () => {
 	const result = execute(compile(parse('find dir -type f | tail -10')), fs, {
 		cwd: '/workspace',
 	});
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -553,7 +552,7 @@ test('find piped to head outputs paths, not file contents', async () => {
 	const result = execute(compile(parse('find dir -type f | head -1')), fs, {
 		cwd: '/workspace',
 	});
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -574,7 +573,7 @@ test('find pipelines formatted paths into read', async () => {
 		}
 	);
 
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -598,7 +597,7 @@ test('find piped to grep supports BRE alternation over formatted paths', async (
 	const command = String.raw`find /slides -maxdepth 1 -type f | grep '/slides/16[0-9]-\|/slides/17[0-9]-\|/slides/180-'`;
 	const result = execute(compile(parse(command)), fs);
 
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -620,7 +619,7 @@ test('find piped to wc counts formatted path lines', async () => {
 		cwd: '/workspace',
 	});
 
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -636,7 +635,7 @@ test('cat/head/tail expand glob file arguments relative to cwd', async () => {
 		const result = execute(compile(parse(command)), fs, {
 			cwd: '/workspace',
 		});
-		const records = await Effect.runPromise(collectRecordStream(result));
+		const records = (await collectRecordStream(result)).unwrap();
 		return records
 			.filter((record): record is LineRecord => record.kind === 'line')
 			.map((record) => record.text);
@@ -678,7 +677,7 @@ test('wires cp force flag through execute', async () => {
 	};
 
 	const firstResult = execute(withoutForce, fs, withoutForceContext);
-	await Effect.runPromise(collectRecordStream(firstResult));
+	(await collectRecordStream(firstResult)).unwrap();
 	expect(withoutForceContext.status).toBe(1);
 	expect(withoutForceContext.stderr.snapshot().join('\n')).toContain(
 		'cp: destination exists (use -f to overwrite): /dest.txt'
@@ -701,7 +700,7 @@ test('wires cp force flag through execute', async () => {
 	};
 
 	const secondResult = execute(withForce, fs);
-	await Effect.runPromise(collectRecordStream(secondResult));
+	(await collectRecordStream(secondResult)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('dest.txt'))).toBe(
 		'from source'
@@ -730,7 +729,7 @@ test('wires mkdir through execute', async () => {
 	};
 
 	const result = execute(ir, fs);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 
 	const stat = await fs.stat('/newdir');
 	expect(stat.isDirectory).toBe(true);
@@ -762,7 +761,7 @@ test('wires mv force flag through execute', async () => {
 	};
 
 	const result = execute(ir, fs);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('/dest.txt'))).toBe(
 		'new content'
@@ -794,7 +793,7 @@ test('wires rm force flag through execute', async () => {
 	};
 
 	const result = execute(ir, fs);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 });
 
 test('wires ls long format through execute', async () => {
@@ -821,7 +820,7 @@ test('wires ls long format through execute', async () => {
 	};
 
 	const result = execute(ir, fs);
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lineRecords = records.filter(
 		(record): record is LineRecord => record.kind === 'line'
 	);
@@ -854,7 +853,7 @@ test('ls with dot path does not recurse into nested paths', async () => {
 	};
 
 	const result = execute(ir, fs);
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const filePaths = records
 		.filter((record): record is FileRecord => record.kind === 'file')
 		.map((record) => record.path);
@@ -889,7 +888,7 @@ test('ls with dot path uses execution context cwd', async () => {
 	};
 
 	const result = execute(ir, fs, { cwd: '/workspace' });
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const filePaths = records
 		.filter((record): record is FileRecord => record.kind === 'file')
 		.map((record) => record.path);
@@ -918,7 +917,7 @@ test('wires pwd through execute', async () => {
 
 	const result = execute(ir, fs);
 
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
@@ -946,7 +945,7 @@ test('pwd uses execution context cwd', async () => {
 
 	const result = execute(ir, fs, { cwd: '/workspace/project' });
 
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
@@ -975,7 +974,7 @@ test('cd updates execution context cwd for absolute paths', async () => {
 	};
 
 	const result = execute(ir, fs, context);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 
 	expect(context.cwd).toBe('/workspace');
 });
@@ -1001,7 +1000,7 @@ test('cd resolves relative and parent paths against cwd', async () => {
 	};
 
 	const result = execute(ir, fs, context);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 
 	expect(context.cwd).toBe('/workspace');
 });
@@ -1029,7 +1028,7 @@ test('cd reports an error when target does not exist', async () => {
 	};
 
 	const result = execute(ir, fs, context);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 	expect(context.status).toBe(1);
 	expect(context.stderr.snapshot().join('\n')).toContain(
 		'cd: directory does not exist: /missing'
@@ -1060,7 +1059,7 @@ test('cd reports an error when target is a file', async () => {
 	};
 
 	const result = execute(ir, fs, context);
-	await Effect.runPromise(collectRecordStream(result));
+	(await collectRecordStream(result)).unwrap();
 	expect(context.status).toBe(1);
 	expect(context.stderr.snapshot().join('\n')).toContain(
 		'cd: not a directory: /file.txt'
@@ -1146,7 +1145,7 @@ test('executes script statements in deterministic order', async () => {
 	};
 
 	const result = execute(script, fs, context);
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
@@ -1200,7 +1199,7 @@ test('script execution reuses shared context across statements', async () => {
 	};
 
 	const result = execute(script, fs, context);
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
@@ -1215,7 +1214,7 @@ test('and/or chain modes gate statements based on prior status', async () => {
 	const ir = compile(parse('test 1 = 2; and echo pass; or echo fail'));
 
 	const result = execute(ir, fs, context);
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
@@ -1235,7 +1234,7 @@ test('expanded command substitution can feed path-taking commands', async () => 
 	const ir = compile(parse('cd (echo $TARGET); pwd'));
 
 	const result = execute(ir, fs, context);
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
@@ -1251,7 +1250,7 @@ test('mixed command substitution words concatenate literal prefixes and suffixes
 		status: 0,
 	});
 
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);
@@ -1269,7 +1268,7 @@ test('mixed glob words preserve literal prefixes and suffixes at execution', asy
 		status: 0,
 	});
 
-	const records = await Effect.runPromise(collectRecordStream(result));
+	const records = (await collectRecordStream(result)).unwrap();
 	const lines = records
 		.filter((record): record is LineRecord => record.kind === 'line')
 		.map((record) => record.text);

@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 
 import type { FS } from '../fs/fs';
 import {
@@ -76,17 +76,14 @@ export async function isDirectoryRecord(
 		return record.isDirectory;
 	}
 
-	return Effect.runPromise(
-		Effect.tryPromise({
-			try: () => fs.stat(record.path),
-			catch: (error) => error,
-		}).pipe(
-			Effect.match({
-				onFailure: () => false,
-				onSuccess: (stat) => stat.isDirectory,
-			})
-		)
-	);
+	const result = await Result.tryPromise({
+		try: () => fs.stat(record.path),
+		catch: (error) => error,
+	});
+	return result.match({
+		err: () => false,
+		ok: (stat) => stat.isDirectory,
+	});
 }
 
 export function formatRecord(record: ShellRecord): string {

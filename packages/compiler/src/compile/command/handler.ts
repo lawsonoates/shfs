@@ -5,7 +5,7 @@
  * Each handler extracts values from ExpandedWord types.
  */
 
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../../diagnostic';
 import type { SimpleCommandIR, StepIR } from '../../ir';
 import { compileCatEffect } from './cat/cat';
@@ -35,9 +35,7 @@ import { compileXargsEffect } from './xargs/xargs';
  * Handler function type for compiler.
  * Accepts a SimpleCommandIR and returns a StepIR.
  */
-export type Handler = (
-	cmd: SimpleCommandIR
-) => Effect.Effect<StepIR, CompileError>;
+export type Handler = (cmd: SimpleCommandIR) => Result<StepIR, CompileError>;
 
 /**
  * Registry of command handlers for the compiler.
@@ -46,18 +44,18 @@ const handlers: Record<string, Handler> = {
 	cat: compileCatEffect,
 	cd: compileCdEffect,
 	cp: compileCpEffect,
-	echo: (cmd) => Effect.sync(() => compileEcho(cmd)),
-	find: (cmd) => Effect.sync(() => compileFind(cmd)),
-	grep: (cmd) => Effect.sync(() => compileGrep(cmd)),
+	echo: (cmd) => Result.ok(compileEcho(cmd)),
+	find: (cmd) => Result.ok(compileFind(cmd)),
+	grep: (cmd) => Result.ok(compileGrep(cmd)),
 	head: compileHeadEffect,
-	ls: (cmd) => Effect.sync(() => compileLs(cmd)),
+	ls: (cmd) => Result.ok(compileLs(cmd)),
 	mkdir: compileMkdirEffect,
 	mv: compileMvEffect,
 	pwd: compilePwdEffect,
 	read: compileReadEffect,
 	rm: compileRmEffect,
 	set: compileSetEffect,
-	sort: (cmd) => Effect.sync(() => compileSort(cmd)),
+	sort: (cmd) => Result.ok(compileSort(cmd)),
 	string: compileStringEffect,
 	tail: compileTailEffect,
 	test: compileTestEffect,
@@ -71,20 +69,20 @@ const handlers: Record<string, Handler> = {
  * Get a handler for a command name.
  * @throws CompileError if the command is unknown
  */
-function get(name: string): Effect.Effect<Handler, CompileError> {
-	return Effect.gen(function* () {
-		const handler = handlers[name];
-		if (!handler) {
-			return yield* new CompileError(
+function get(name: string): Result<Handler, CompileError> {
+	const handler = handlers[name];
+	if (!handler) {
+		return Result.err(
+			new CompileError(
 				createCommandDiagnostic(
 					name,
 					'unknown-command',
 					`Unknown command: ${name}`
 				)
-			);
-		}
-		return handler;
-	});
+			)
+		);
+	}
+	return Result.ok(handler);
 }
 
 /**

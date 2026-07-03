@@ -1,5 +1,5 @@
-import { compileEffect, parseEffect, type ScriptIR } from '@shfs/compiler';
-import { Effect } from 'effect';
+import { compile, parse, type ScriptIR } from '@shfs/compiler';
+import { Result } from 'better-result';
 
 import { isShellFailure, reportShellFailure } from '../diagnostics';
 import { execute } from '../execute/execute';
@@ -237,10 +237,17 @@ export class Shell {
 	private _exec(strings: TemplateStringsArray, ...exprs: unknown[]) {
 		const source = String.raw(strings, ...exprs);
 		const fs = this.fs;
-		const ir = Effect.gen(function* () {
-			const ast = yield* parseEffect(source);
-			return yield* compileEffect(ast);
-		});
+		const parseCommand = () =>
+			Result.gen(function* () {
+				const ast = yield* Result.try({
+					try: () => parse(source),
+					catch: (error) => error,
+				});
+				return Result.try({
+					try: () => compile(ast),
+					catch: (error) => error,
+				});
+			});
 
 		return createShellCommand(
 			new ShellPromise(async (cwdOverride) => {
@@ -254,47 +261,44 @@ export class Shell {
 					globalVars: this.globalVars,
 					localVars: new Map<string, string>(),
 				};
-				const runCommand = Effect.gen(function* () {
-					const script: ScriptIR = yield* ir;
-					const stdout: Record[] = yield* collectRecordStream(
-						execute(script, fs, context)
-					);
+				try {
+					const runCommand = await Result.gen(async function* () {
+						const script: ScriptIR = yield* parseCommand();
+						const stdout: Record[] =
+							yield* await collectRecordStream(
+								execute(script, fs, context)
+							);
+						return Result.ok({
+							stdout,
+							stderr: context.stderr.snapshot(),
+							exitCode: context.status,
+						});
+					});
+					if (Result.isOk(runCommand)) {
+						return runCommand.value;
+					}
+					const error = runCommand.error;
+					if (!isShellFailure(error)) {
+						// Unknown errors are bugs; surface them to the caller
+						// like a plain throw would.
+						context.status = 1;
+						throw error;
+					}
+					reportShellFailure(context, error);
 					return {
-						stdout,
+						stdout: [],
 						stderr: context.stderr.snapshot(),
-						exitCode: context.status,
+						exitCode: context.status ?? 1,
 					};
-				}).pipe(
-					Effect.catch((error: unknown) =>
-						Effect.sync(() => {
-							if (!isShellFailure(error)) {
-								// Unknown errors are bugs; surface them to
-								// the caller like a plain throw would.
-								context.status = 1;
-								throw error;
-							}
-							reportShellFailure(context, error);
-							return {
-								stdout: [],
-								stderr: context.stderr.snapshot(),
-								exitCode: context.status ?? 1,
-							};
-						})
-					),
-					Effect.ensuring(
-						Effect.sync(() => {
-							this.currentStatus =
-								context.status ?? this.currentStatus;
-							if (
-								cwdOverride === undefined ||
-								context.cwd !== commandStartCwd
-							) {
-								this.currentCwd = context.cwd;
-							}
-						})
-					)
-				);
-				return await Effect.runPromise(runCommand);
+				} finally {
+					this.currentStatus = context.status ?? this.currentStatus;
+					if (
+						cwdOverride === undefined ||
+						context.cwd !== commandStartCwd
+					) {
+						this.currentCwd = context.cwd;
+					}
+				}
 			})
 		);
 	}

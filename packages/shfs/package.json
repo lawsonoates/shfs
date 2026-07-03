@@ -1,9 +1,5 @@
 {
 	"author": "Lawson Oates (https://github.com/lawsonoates)",
-	"dependencies": {
-		"effect": "4.0.0-beta.91",
-		"picomatch": "^4.0.3"
-	},
 	"description": "A library of simulated fish commands",
 	"devDependencies": {
 		"@tsconfig/bun": "catalog:",
@@ -11,6 +7,8 @@
 		"@types/bun": "catalog:",
 		"@types/picomatch": "^4.0.2",
 		"@typescript/native-preview": "catalog:",
+		"better-result": "^2.9.2",
+		"picomatch": "^4.0.3",
 		"tsdown": "catalog:",
 		"typescript": "^5.0.0"
 	},

@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { Effect } from 'effect';
 
 import { MemoryFS } from '#shfs/fs/memory';
 import { ShellError, ShellOutput } from '#shfs/output-channels';
@@ -136,17 +135,12 @@ test('shell throws Bun-like ShellError by default for non-zero exits', async () 
 	await fs.mkdir('/workspace/b', true);
 	const shell = new Shell(fs, { cwd: '/workspace' });
 
-	const error = await Effect.runPromise(
-		Effect.tryPromise({
-			try: () => shell.$`echo hello > *`,
-			catch: (cause) => cause,
-		}).pipe(
-			Effect.match({
-				onFailure: (cause) => cause,
-				onSuccess: () => null,
-			})
-		)
-	);
+	let error: unknown = null;
+	try {
+		await shell.$`echo hello > *`;
+	} catch (cause) {
+		error = cause;
+	}
 	expect(error).toBeInstanceOf(ShellError);
 	if (!(error instanceof ShellError)) {
 		return;

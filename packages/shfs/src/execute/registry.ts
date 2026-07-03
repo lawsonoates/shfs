@@ -1,5 +1,5 @@
 import type { StepIR } from '@shfs/compiler';
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { cd } from '../builtin/cd/cd';
 import { echo } from '../builtin/echo/echo';
 import { read } from '../builtin/read/read';
@@ -11,6 +11,7 @@ import {
 	isShellRuntimeError,
 	runOrReport,
 	type ShellErrorCause,
+	type ShellResult,
 	ShellRuntimeError,
 } from '../diagnostics';
 import type { FS } from '../fs/fs';
@@ -131,7 +132,7 @@ type ActionCommandHandler<TCommand extends ActionCommand = ActionCommand> =
 		step: ActionStepForCommand<TCommand>;
 		fs: FS;
 		context: ExecuteStepContext;
-	}) => Effect.Effect<void, ShellErrorCause>;
+	}) => ShellResult<void, ShellErrorCause>;
 
 type CommandRegistryEntry =
 	| {
@@ -252,14 +253,14 @@ function executeActionStep({
 	step,
 	fs,
 	context,
-}: ExecuteActionStepParams): Effect.Effect<void, ShellErrorCause> {
-	return Effect.gen(function* () {
+}: ExecuteActionStepParams): ShellResult<void, ShellErrorCause> {
+	return Result.gen(async function* () {
 		const verificationError = verifyCommandRegistries();
 		if (verificationError) {
 			return yield* verificationError;
 		}
 		const handler = yield* CommandRegistry.getEffect(step.cmd);
-		return yield* handler({
+		return await handler({
 			step,
 			fs,
 			context,
@@ -337,15 +338,15 @@ function getStream<TCommand extends StreamCommand>(
 
 function getEffect<TCommand extends ActionCommand>(
 	command: TCommand
-): Effect.Effect<ActionCommandHandler<TCommand>, ShellErrorCause> {
+): Result<ActionCommandHandler<TCommand>, ShellErrorCause> {
 	const entry = commands.get(command);
 	if (!entry) {
-		return Effect.fail(unknownCommandError(command));
+		return Result.err(unknownCommandError(command));
 	}
 	if (entry.kind !== 'action') {
-		return Effect.fail(commandKindError(command, 'action'));
+		return Result.err(commandKindError(command, 'action'));
 	}
-	return Effect.succeed(
+	return Result.ok(
 		entry.handler as unknown as ActionCommandHandler<TCommand>
 	);
 }
@@ -357,10 +358,10 @@ function isActionStep(step: StepIR): step is ActionStep {
 function executeStep(params: ExecuteStreamStepParams): RecordStream;
 function executeStep(
 	params: ExecuteActionStepParams
-): Effect.Effect<void, ShellErrorCause>;
+): ShellResult<void, ShellErrorCause>;
 function executeStep(
 	params: ExecuteStreamStepParams | ExecuteActionStepParams
-): RecordStream | Effect.Effect<void, ShellErrorCause> {
+): RecordStream | ShellResult<void, ShellErrorCause> {
 	if (isActionStep(params.step)) {
 		return executeActionStep(params as ExecuteActionStepParams);
 	}
@@ -864,148 +865,157 @@ CommandRegistry.register('string', {
 
 CommandRegistry.register('cd', {
 	kind: 'action',
-	handler: Effect.fn('CommandRegistry.cd')(function* ({ step, fs, context }) {
-		yield* cd(createBuiltinRuntime(fs, context, null), step.args);
-	}),
+	handler: ({ step, fs, context }) =>
+		Result.gen(async function* () {
+			yield* await cd(createBuiltinRuntime(fs, context, null), step.args);
+			return Result.ok();
+		}),
 });
 
 CommandRegistry.register('cp', {
 	kind: 'action',
-	handler: Effect.fn('CommandRegistry.cp')(function* ({ step, fs, context }) {
-		const srcValues = yield* evaluateExpandedPathWordsEffect(
-			'cp',
-			step.args.srcs,
-			fs,
-			context
-		);
-		const srcPaths = resolvePathsFromCwd(context.cwd, srcValues);
-		const destinationValue = yield* evaluateExpandedSinglePathEffect(
-			'cp',
-			'destination must expand to exactly 1 path',
-			step.args.dest,
-			fs,
-			context
-		);
-		const destinationPaths = resolvePathsFromCwd(context.cwd, [
-			destinationValue,
-		]);
-		const destinationPath = destinationPaths.at(0);
-		if (destinationPath === undefined) {
-			return yield* new ShellRuntimeError({
-				exitCode: 1,
-				message: 'cp: destination missing after expansion',
-			});
-		}
-		yield* cp(fs)({
-			srcs: srcPaths,
-			dest: destinationPath,
-			force: step.args.force,
-			interactive: step.args.interactive,
-			recursive: step.args.recursive,
-		});
-		context.status = 0;
-	}),
-});
-
-CommandRegistry.register('mkdir', {
-	kind: 'action',
-	handler: Effect.fn('CommandRegistry.mkdir')(function* ({
-		step,
-		fs,
-		context,
-	}) {
-		const pathValues = yield* evaluateExpandedPathWordsEffect(
-			'mkdir',
-			step.args.paths,
-			fs,
-			context
-		);
-		const paths = resolvePathsFromCwd(context.cwd, pathValues);
-		for (const path of paths) {
-			yield* mkdir(fs)({ path, recursive: step.args.recursive });
-		}
-		context.status = 0;
-	}),
-});
-
-CommandRegistry.register('mv', {
-	kind: 'action',
-	handler: Effect.fn('CommandRegistry.mv')(function* ({ step, fs, context }) {
-		const srcValues = yield* evaluateExpandedPathWordsEffect(
-			'mv',
-			step.args.srcs,
-			fs,
-			context
-		);
-		const srcPaths = resolvePathsFromCwd(context.cwd, srcValues);
-		const destinationValue = yield* evaluateExpandedSinglePathEffect(
-			'mv',
-			'destination must expand to exactly 1 path',
-			step.args.dest,
-			fs,
-			context
-		);
-		const destinationPaths = resolvePathsFromCwd(context.cwd, [
-			destinationValue,
-		]);
-		const destinationPath = destinationPaths.at(0);
-		if (destinationPath === undefined) {
-			return yield* new ShellRuntimeError({
-				exitCode: 1,
-				message: 'mv: destination missing after expansion',
-			});
-		}
-		yield* mv(fs)({
-			srcs: srcPaths,
-			dest: destinationPath,
-			force: step.args.force,
-			interactive: step.args.interactive,
-		});
-		context.status = 0;
-	}),
-});
-
-CommandRegistry.register('rm', {
-	kind: 'action',
-	handler: Effect.fn('CommandRegistry.rm')(function* ({ step, fs, context }) {
-		const pathValues = yield* evaluateExpandedPathWordsEffect(
-			'rm',
-			step.args.paths,
-			fs,
-			context
-		);
-		const paths = resolvePathsFromCwd(context.cwd, pathValues);
-		for (const path of paths) {
-			yield* rm(fs)({
-				path,
+	handler: ({ step, fs, context }) =>
+		Result.gen(async function* () {
+			const srcValues = yield* await evaluateExpandedPathWordsEffect(
+				'cp',
+				step.args.srcs,
+				fs,
+				context
+			);
+			const srcPaths = resolvePathsFromCwd(context.cwd, srcValues);
+			const destinationValue =
+				yield* await evaluateExpandedSinglePathEffect(
+					'cp',
+					'destination must expand to exactly 1 path',
+					step.args.dest,
+					fs,
+					context
+				);
+			const destinationPaths = resolvePathsFromCwd(context.cwd, [
+				destinationValue,
+			]);
+			const destinationPath = destinationPaths.at(0);
+			if (destinationPath === undefined) {
+				return yield* new ShellRuntimeError({
+					exitCode: 1,
+					message: 'cp: destination missing after expansion',
+				});
+			}
+			yield* await cp(fs)({
+				srcs: srcPaths,
+				dest: destinationPath,
 				force: step.args.force,
 				interactive: step.args.interactive,
 				recursive: step.args.recursive,
 			});
-		}
-		context.status = 0;
-	}),
+			context.status = 0;
+			return Result.ok();
+		}),
+});
+
+CommandRegistry.register('mkdir', {
+	kind: 'action',
+	handler: ({ step, fs, context }) =>
+		Result.gen(async function* () {
+			const pathValues = yield* await evaluateExpandedPathWordsEffect(
+				'mkdir',
+				step.args.paths,
+				fs,
+				context
+			);
+			const paths = resolvePathsFromCwd(context.cwd, pathValues);
+			for (const path of paths) {
+				yield* await mkdir(fs)({
+					path,
+					recursive: step.args.recursive,
+				});
+			}
+			context.status = 0;
+			return Result.ok();
+		}),
+});
+
+CommandRegistry.register('mv', {
+	kind: 'action',
+	handler: ({ step, fs, context }) =>
+		Result.gen(async function* () {
+			const srcValues = yield* await evaluateExpandedPathWordsEffect(
+				'mv',
+				step.args.srcs,
+				fs,
+				context
+			);
+			const srcPaths = resolvePathsFromCwd(context.cwd, srcValues);
+			const destinationValue =
+				yield* await evaluateExpandedSinglePathEffect(
+					'mv',
+					'destination must expand to exactly 1 path',
+					step.args.dest,
+					fs,
+					context
+				);
+			const destinationPaths = resolvePathsFromCwd(context.cwd, [
+				destinationValue,
+			]);
+			const destinationPath = destinationPaths.at(0);
+			if (destinationPath === undefined) {
+				return yield* new ShellRuntimeError({
+					exitCode: 1,
+					message: 'mv: destination missing after expansion',
+				});
+			}
+			yield* await mv(fs)({
+				srcs: srcPaths,
+				dest: destinationPath,
+				force: step.args.force,
+				interactive: step.args.interactive,
+			});
+			context.status = 0;
+			return Result.ok();
+		}),
+});
+
+CommandRegistry.register('rm', {
+	kind: 'action',
+	handler: ({ step, fs, context }) =>
+		Result.gen(async function* () {
+			const pathValues = yield* await evaluateExpandedPathWordsEffect(
+				'rm',
+				step.args.paths,
+				fs,
+				context
+			);
+			const paths = resolvePathsFromCwd(context.cwd, pathValues);
+			for (const path of paths) {
+				yield* await rm(fs)({
+					path,
+					force: step.args.force,
+					interactive: step.args.interactive,
+					recursive: step.args.recursive,
+				});
+			}
+			context.status = 0;
+			return Result.ok();
+		}),
 });
 
 CommandRegistry.register('touch', {
 	kind: 'action',
-	handler: Effect.fn('CommandRegistry.touch')(function* ({
-		step,
-		fs,
-		context,
-	}) {
-		const fileValues = yield* evaluateExpandedPathWordsEffect(
-			'touch',
-			step.args.files,
-			fs,
-			context
-		);
-		const filePaths = resolvePathsFromCwd(context.cwd, fileValues);
-		yield* touch(fs)({
-			files: filePaths,
-			accessTimeOnly: step.args.accessTimeOnly,
-			modificationTimeOnly: step.args.modificationTimeOnly,
-		});
-		context.status = 0;
-	}),
+	handler: ({ step, fs, context }) =>
+		Result.gen(async function* () {
+			const fileValues = yield* await evaluateExpandedPathWordsEffect(
+				'touch',
+				step.args.files,
+				fs,
+				context
+			);
+			const filePaths = resolvePathsFromCwd(context.cwd, fileValues);
+			yield* await touch(fs)({
+				files: filePaths,
+				accessTimeOnly: step.args.accessTimeOnly,
+				modificationTimeOnly: step.args.modificationTimeOnly,
+			});
+			context.status = 0;
+			return Result.ok();
+		}),
 });

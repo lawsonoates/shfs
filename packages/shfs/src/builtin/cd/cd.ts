@@ -1,5 +1,5 @@
 import type { CdStep } from '@shfs/compiler';
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { ShellRuntimeError } from '../../diagnostics';
 import {
 	evaluateExpandedSinglePathEffect,
@@ -7,9 +7,9 @@ import {
 } from '../../execute/path';
 import type { ActionBuiltin } from '../types';
 
-export const cd: ActionBuiltin<CdStep['args']> = Effect.fn('cd')(
-	function* (runtime, args) {
-		const requestedPath = yield* evaluateExpandedSinglePathEffect(
+export const cd: ActionBuiltin<CdStep['args']> = (runtime, args) => {
+	return Result.gen(async function* () {
+		const requestedPath = yield* await evaluateExpandedSinglePathEffect(
 			'cd',
 			'expected exactly 1 path after expansion',
 			args.path,
@@ -28,7 +28,7 @@ export const cd: ActionBuiltin<CdStep['args']> = Effect.fn('cd')(
 			runtime.context.cwd,
 			requestedPath
 		);
-		const stat = yield* Effect.tryPromise({
+		const stat = yield* await Result.tryPromise({
 			try: () => runtime.fs.stat(resolvedPath),
 			catch: (cause) =>
 				new ShellRuntimeError({
@@ -47,5 +47,6 @@ export const cd: ActionBuiltin<CdStep['args']> = Effect.fn('cd')(
 
 		runtime.context.cwd = resolvedPath;
 		runtime.context.status = 0;
-	}
-);
+		return Result.ok();
+	});
+};

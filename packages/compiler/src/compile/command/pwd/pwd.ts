@@ -2,7 +2,7 @@
  * pwd command handler for the AST-based compiler.
  */
 
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import type { SimpleCommandIR, StepIR } from '../../../ir';
 
@@ -10,13 +10,17 @@ import type { SimpleCommandIR, StepIR } from '../../../ir';
  * Compile a pwd command from SimpleCommandIR to StepIR.
  */
 export function compilePwd(cmd: SimpleCommandIR): StepIR {
-	return Effect.runSync(compilePwdEffect(cmd));
+	const result = compilePwdEffect(cmd);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const compilePwdEffect: (
 	cmd: SimpleCommandIR
-) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.pwd')(
-	function* (cmd) {
+) => Result<StepIR, CompileError> = (cmd) =>
+	Result.gen(function* () {
 		if (cmd.args.length > 0) {
 			return yield* new CompileError(
 				createCommandDiagnostic(
@@ -27,9 +31,8 @@ export const compilePwdEffect: (
 			);
 		}
 
-		return {
+		return Result.ok({
 			cmd: 'pwd',
 			args: {},
-		} as const;
-	}
-);
+		} as const satisfies StepIR);
+	});

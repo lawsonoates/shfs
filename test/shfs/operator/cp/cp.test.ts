@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { Effect } from 'effect';
 
 import { MemoryFS } from '#shfs/fs/memory';
 import { cp } from '#shfs/operator/cp/cp';
@@ -13,9 +12,9 @@ test('cp copies file from source to destination', async () => {
 	fs.setFile(sourcePath, sourceContent);
 
 	const effect = cp(fs);
-	await Effect.runPromise(
-		effect({ srcs: [sourcePath], dest: destPath, recursive: false })
-	);
+	(
+		await effect({ srcs: [sourcePath], dest: destPath, recursive: false })
+	).unwrap();
 
 	const destContent = await fs.readFile(destPath);
 	expect(new TextDecoder().decode(destContent)).toBe(sourceContent);
@@ -29,13 +28,13 @@ test('cp recursively copies nested directory contents', async () => {
 	fs.setFile('/source/nested/leaf.txt', 'leaf');
 
 	const effect = cp(fs);
-	await Effect.runPromise(
-		effect({
+	(
+		await effect({
 			srcs: ['/source'],
 			dest: '/dest',
 			recursive: true,
 		})
-	);
+	).unwrap();
 
 	expect(new TextDecoder().decode(await fs.readFile('/dest/root.txt'))).toBe(
 		'root'

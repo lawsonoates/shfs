@@ -2,7 +2,7 @@
  * head command handler for the AST-based compiler.
  */
 
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
@@ -30,32 +30,35 @@ const parseHeadArgs = createWordParserEffect<ExpandedWord>(
  * Compile a head command from SimpleCommandIR to StepIR.
  */
 export function compileHead(cmd: SimpleCommandIR): StepIR {
-	return Effect.runSync(compileHeadEffect(cmd));
+	const result = compileHeadEffect(cmd);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const compileHeadEffect: (
 	cmd: SimpleCommandIR
-) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.head')(
-	function* (cmd) {
+) => Result<StepIR, CompileError> = (cmd) =>
+	Result.gen(function* () {
 		const parsed = yield* parseHeadArgsEffect(cmd.args);
 
 		const n = yield* parseHeadCount(parsed.flags.lines);
 		const files = parsed.positionalWords;
 
-		return {
+		return Result.ok({
 			cmd: 'head',
 			args: { files, n },
-		} as const;
-	}
-);
+		} as const satisfies StepIR);
+	});
 
 function parseHeadCount(
 	value: ParsedFlagValue | undefined
-): Effect.Effect<number, CompileError> {
-	return Effect.gen(function* () {
+): Result<number, CompileError> {
+	return Result.gen(function* () {
 		const lastValue = yield* getLastValueToken(value);
 		if (lastValue === undefined) {
-			return DEFAULT_LINE_COUNT;
+			return Result.ok(DEFAULT_LINE_COUNT);
 		}
 
 		const parsedValue = Number(lastValue);
@@ -69,41 +72,43 @@ function parseHeadCount(
 			);
 		}
 
-		return parsedValue;
+		return Result.ok(parsedValue);
 	});
 }
 
 function getLastValueToken(
 	value: ParsedFlagValue | undefined
-): Effect.Effect<string | undefined, CompileError> {
-	return Effect.gen(function* () {
-		if (value === undefined) {
-			return undefined;
-		}
-		if (typeof value === 'string') {
-			return value;
-		}
-		if (Array.isArray(value)) {
-			const lastValue = value.at(-1);
-			return lastValue;
-		}
-		return yield* new CompileError(
+): Result<string | undefined, CompileError> {
+	if (value === undefined) {
+		return Result.ok(undefined);
+	}
+	if (typeof value === 'string') {
+		return Result.ok(value);
+	}
+	if (Array.isArray(value)) {
+		return Result.ok(value.at(-1));
+	}
+	return Result.err(
+		new CompileError(
 			createCommandDiagnostic(
 				'head',
 				'invalid-count',
 				'Invalid head count'
 			)
-		);
-	});
+		)
+	);
 }
 
 function parseHeadArgsEffect(
 	args: readonly ExpandedWord[]
-): Effect.Effect<ParseWordsResult<ExpandedWord>, CompileError> {
-	return parseHeadArgs(args, {
-		negativeNumberFlag: 'lines',
-		negativeNumberPolicy: 'value',
-	}).pipe(Effect.mapError(normalizeHeadParseError));
+): Result<ParseWordsResult<ExpandedWord>, CompileError> {
+	return Result.mapError(
+		parseHeadArgs(args, {
+			negativeNumberFlag: 'lines',
+			negativeNumberPolicy: 'value',
+		}),
+		normalizeHeadParseError
+	);
 }
 
 function normalizeHeadParseError(cause: {

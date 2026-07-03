@@ -2,7 +2,7 @@
  * tree command handler for the AST-based compiler.
  */
 
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
@@ -50,27 +50,30 @@ const parseTreeArgs = createWordParserEffect<ExpandedWord>(
 );
 
 export function compileTree(command: SimpleCommandIR): StepIR {
-	return Effect.runSync(compileTreeEffect(command));
+	const result = compileTreeEffect(command);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const compileTreeEffect: (
 	command: SimpleCommandIR
-) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.tree')(
-	function* (command) {
-		const parsed = yield* parseTreeArgs(command.args).pipe(
-			Effect.mapError(
-				(cause) =>
-					new CompileError(
-						createCommandDiagnostic(
-							'tree',
-							'invalid-option',
-							cause.message
-						)
+) => Result<StepIR, CompileError> = (command) =>
+	Result.gen(function* () {
+		const parsed = yield* Result.mapError(
+			parseTreeArgs(command.args),
+			(cause) =>
+				new CompileError(
+					createCommandDiagnostic(
+						'tree',
+						'invalid-option',
+						cause.message
 					)
-			)
+				)
 		);
 
-		return {
+		return Result.ok({
 			cmd: 'tree',
 			args: {
 				ascii: parsed.flags.ascii === true,
@@ -97,16 +100,13 @@ export const compileTreeEffect: (
 				prune: parsed.flags.prune === true,
 				showAll: parsed.flags.showAll === true,
 			} satisfies TreeArgsIR,
-		} as const;
-	}
-);
+		} as const satisfies StepIR);
+	});
 
-function parseMaxDepth(
-	value: unknown
-): Effect.Effect<number | null, CompileError> {
-	return Effect.gen(function* () {
+function parseMaxDepth(value: unknown): Result<number | null, CompileError> {
+	return Result.gen(function* () {
 		if (typeof value !== 'string') {
-			return null;
+			return Result.ok(null);
 		}
 		const maxDepth = Number.parseInt(value, 10);
 		if (!Number.isFinite(maxDepth) || maxDepth < 0) {
@@ -118,7 +118,7 @@ function parseMaxDepth(
 				)
 			);
 		}
-		return maxDepth;
+		return Result.ok(maxDepth);
 	});
 }
 

@@ -1,19 +1,20 @@
 import {
-	compileEffect,
+	compile,
 	createExpansionDiagnostic,
 	type ExpandedWord,
 	type ExpandedWordPart,
 	expandedWordHasGlob,
 	expandedWordParts,
-	parseEffect,
+	parse,
 } from '@shfs/compiler';
 
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import picomatch from 'picomatch';
 import type { BuiltinContext } from '../builtin/types';
 import {
 	createDiagnosticError,
 	type ShellErrorCause,
+	type ShellResult,
 	ShellRuntimeError,
 } from '../diagnostics';
 import type { FS } from '../fs/fs';
@@ -39,19 +40,29 @@ function evaluateCommandSubstitutionEffect(
 	command: string,
 	fs: FS,
 	context: BuiltinContext
-): Effect.Effect<string, ShellErrorCause> {
-	return Effect.gen(function* () {
-		const parsed = yield* parseEffect(command).pipe(
-			Effect.mapError(toShellErrorCause)
+): ShellResult<string, ShellErrorCause> {
+	return Result.gen(async function* () {
+		const parsed = yield* Result.mapError(
+			Result.try({ try: () => parse(command), catch: toShellErrorCause }),
+			toShellErrorCause
 		);
-		const nestedIR = yield* compileEffect(parsed).pipe(
-			Effect.mapError(toShellErrorCause)
+		const nestedIR = yield* Result.mapError(
+			Result.try({
+				try: () => compile(parsed),
+				catch: toShellErrorCause,
+			}),
+			toShellErrorCause
 		);
-		const executeModule = yield* Effect.promise(() => import('./execute'));
-		const records = yield* collectRecordStream(
-			executeModule.execute(nestedIR, fs, context)
-		).pipe(Effect.mapError(toShellErrorCause));
-		return records.map((record) => formatRecord(record)).join('\n');
+		const executeModule = await import('./execute');
+		const records = yield* Result.mapError(
+			await collectRecordStream(
+				executeModule.execute(nestedIR, fs, context)
+			),
+			toShellErrorCause
+		);
+		return Result.ok(
+			records.map((record) => formatRecord(record)).join('\n')
+		);
 	});
 }
 
@@ -134,10 +145,10 @@ async function readDirectoryPaths(
 function walkFilesystemEntriesEffect(
 	fs: FS,
 	rootDir = ROOT_DIRECTORY
-): Effect.Effect<FsEntry[], ShellErrorCause> {
-	return Effect.gen(function* () {
+): ShellResult<FsEntry[], ShellErrorCause> {
+	return Result.gen(async function* () {
 		const normalizedRoot = normalizeAbsolutePath(rootDir);
-		const rootStat = yield* Effect.tryPromise({
+		const rootStat = yield* await Result.tryPromise({
 			try: () => fs.stat(normalizedRoot),
 			catch: toShellErrorCause,
 		});
@@ -157,12 +168,12 @@ function walkFilesystemEntriesEffect(
 				continue;
 			}
 
-			const children = yield* Effect.tryPromise({
+			const children = yield* await Result.tryPromise({
 				try: () => readDirectoryPaths(fs, currentDirectory),
 				catch: toShellErrorCause,
 			});
 			for (const childPath of children) {
-				const stat = yield* Effect.tryPromise({
+				const stat = yield* await Result.tryPromise({
 					try: () => fs.stat(childPath),
 					catch: toShellErrorCause,
 				});
@@ -177,7 +188,7 @@ function walkFilesystemEntriesEffect(
 		}
 
 		entries.sort((left, right) => left.path.localeCompare(right.path));
-		return entries;
+		return Result.ok(entries);
 	});
 }
 
@@ -225,12 +236,12 @@ function expandGlobPatternEffect(
 	pattern: string,
 	fs: FS,
 	context: BuiltinContext
-): Effect.Effect<string[], ShellErrorCause> {
-	return Effect.gen(function* () {
+): ShellResult<string[], ShellErrorCause> {
+	return Result.gen(async function* () {
 		const directoryOnly = pattern.endsWith(ROOT_DIRECTORY);
 		const isAbsolutePattern = pattern.startsWith(ROOT_DIRECTORY);
 		const matcher = picomatch(pattern, { bash: true, dot: false });
-		const entries = yield* walkFilesystemEntriesEffect(fs);
+		const entries = yield* await walkFilesystemEntriesEffect(fs);
 		const matches: string[] = [];
 
 		for (const entry of entries) {
@@ -249,7 +260,7 @@ function expandGlobPatternEffect(
 		}
 
 		matches.sort((left, right) => left.localeCompare(right));
-		return matches;
+		return Result.ok(matches);
 	});
 }
 
@@ -258,8 +269,8 @@ function expectSingleExpandedPathEffect(
 	expectation: string,
 	values: string[],
 	allowEmpty = false
-): Effect.Effect<string, ShellErrorCause> {
-	return Effect.gen(function* () {
+): ShellResult<string, ShellErrorCause> {
+	return Result.gen(function* () {
 		if (values.length !== 1) {
 			return yield* createDiagnosticError(
 				createExpansionDiagnostic(
@@ -289,7 +300,7 @@ function expectSingleExpandedPathEffect(
 				)
 			);
 		}
-		return resolvedValue;
+		return Result.ok(resolvedValue);
 	});
 }
 
@@ -299,9 +310,16 @@ export async function evaluateExpandedPathWords(
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string[]> {
-	return Effect.runPromise(
-		evaluateExpandedPathWordsEffect(command, words, fs, context)
+	const result = await evaluateExpandedPathWordsEffect(
+		command,
+		words,
+		fs,
+		context
 	);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const evaluateExpandedPathWordsEffect: (
@@ -309,54 +327,58 @@ export const evaluateExpandedPathWordsEffect: (
 	words: ExpandedWord[],
 	fs: FS,
 	context: BuiltinContext
-) => Effect.Effect<string[], ShellErrorCause> = Effect.fn(
-	'Path.evaluateExpandedPathWords'
-)(function* (command, words, fs, context) {
-	const resolvedWords: string[] = [];
-	for (const word of words) {
-		const values = yield* evaluateExpandedPathWordEffect(
-			command,
-			word,
-			fs,
-			context
-		);
-		resolvedWords.push(...values);
-	}
-	return resolvedWords;
-});
+) => ShellResult<string[], ShellErrorCause> = (command, words, fs, context) =>
+	Result.gen(async function* () {
+		const resolvedWords: string[] = [];
+		for (const word of words) {
+			const values = yield* await evaluateExpandedPathWordEffect(
+				command,
+				word,
+				fs,
+				context
+			);
+			resolvedWords.push(...values);
+		}
+		return Result.ok(resolvedWords);
+	});
 
 export const evaluateExpandedPathWordEffect: (
 	command: string,
 	word: ExpandedWord,
 	fs: FS,
 	context: BuiltinContext
-) => Effect.Effect<string[], ShellErrorCause> = Effect.fn(
-	'Path.evaluateExpandedPathWord'
-)(function* (command, word, fs, context) {
-	if (!expandedWordHasGlob(word)) {
-		return [yield* evaluateExpandedWordEffect(word, fs, context)];
-	}
+) => ShellResult<string[], ShellErrorCause> = (command, word, fs, context) =>
+	Result.gen(async function* () {
+		if (!expandedWordHasGlob(word)) {
+			return Result.ok([
+				yield* await evaluateExpandedWordEffect(word, fs, context),
+			]);
+		}
 
-	const patternSegments: string[] = [];
-	for (const part of expandedWordParts(word)) {
-		patternSegments.push(
-			yield* evaluateExpandedWordPartEffect(part, fs, context)
-		);
-	}
+		const patternSegments: string[] = [];
+		for (const part of expandedWordParts(word)) {
+			patternSegments.push(
+				yield* await evaluateExpandedWordPartEffect(part, fs, context)
+			);
+		}
 
-	const pattern = patternSegments.join('');
-	const matches = yield* expandGlobPatternEffect(pattern, fs, context);
-	if (matches.length === 0) {
-		return yield* createDiagnosticError(
-			createExpansionDiagnostic(
-				command,
-				'no-match',
-				`${NO_GLOB_MATCH_MESSAGE}: ${pattern}`
-			)
+		const pattern = patternSegments.join('');
+		const matches = yield* await expandGlobPatternEffect(
+			pattern,
+			fs,
+			context
 		);
-	}
-	return matches;
-});
+		if (matches.length === 0) {
+			return yield* createDiagnosticError(
+				createExpansionDiagnostic(
+					command,
+					'no-match',
+					`${NO_GLOB_MATCH_MESSAGE}: ${pattern}`
+				)
+			);
+		}
+		return Result.ok(matches);
+	});
 
 export const evaluateExpandedSinglePathEffect: (
 	command: string,
@@ -365,77 +387,96 @@ export const evaluateExpandedSinglePathEffect: (
 	fs: FS,
 	context: BuiltinContext,
 	options?: { allowEmpty?: boolean }
-) => Effect.Effect<string, ShellErrorCause> = Effect.fn(
-	'Path.evaluateExpandedSinglePath'
-)(function* (command, expectation, word, fs, context, options) {
-	return yield* expectSingleExpandedPathEffect(
-		command,
-		expectation,
-		yield* evaluateExpandedPathWordEffect(command, word, fs, context),
-		options?.allowEmpty ?? false
-	);
-});
+) => ShellResult<string, ShellErrorCause> = (
+	command,
+	expectation,
+	word,
+	fs,
+	context,
+	options
+) =>
+	Result.gen(async function* () {
+		return await expectSingleExpandedPathEffect(
+			command,
+			expectation,
+			yield* await evaluateExpandedPathWordEffect(
+				command,
+				word,
+				fs,
+				context
+			),
+			options?.allowEmpty ?? false
+		);
+	});
 
 export async function evaluateExpandedWords(
 	words: ExpandedWord[],
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string[]> {
-	return Effect.runPromise(evaluateExpandedWordsEffect(words, fs, context));
+	const result = await evaluateExpandedWordsEffect(words, fs, context);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const evaluateExpandedWordsEffect: (
 	words: ExpandedWord[],
 	fs: FS,
 	context: BuiltinContext
-) => Effect.Effect<string[], ShellErrorCause> = Effect.fn(
-	'Path.evaluateExpandedWords'
-)(function* (words, fs, context) {
-	const resolvedWords: string[] = [];
-	for (const word of words) {
-		resolvedWords.push(
-			yield* evaluateExpandedWordEffect(word, fs, context)
-		);
-	}
-	return resolvedWords;
-});
+) => ShellResult<string[], ShellErrorCause> = (words, fs, context) =>
+	Result.gen(async function* () {
+		const resolvedWords: string[] = [];
+		for (const word of words) {
+			resolvedWords.push(
+				yield* await evaluateExpandedWordEffect(word, fs, context)
+			);
+		}
+		return Result.ok(resolvedWords);
+	});
 
 export async function evaluateExpandedWord(
 	word: ExpandedWord,
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string> {
-	return Effect.runPromise(evaluateExpandedWordEffect(word, fs, context));
+	const result = await evaluateExpandedWordEffect(word, fs, context);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const evaluateExpandedWordEffect: (
 	word: ExpandedWord,
 	fs: FS,
 	context: BuiltinContext
-) => Effect.Effect<string, ShellErrorCause> = Effect.fn(
-	'Path.evaluateExpandedWord'
-)(function* (word, fs, context) {
-	const segments: string[] = [];
-	for (const part of expandedWordParts(word)) {
-		segments.push(yield* evaluateExpandedWordPartEffect(part, fs, context));
-	}
-	return segments.join('');
-});
+) => ShellResult<string, ShellErrorCause> = (word, fs, context) =>
+	Result.gen(async function* () {
+		const segments: string[] = [];
+		for (const part of expandedWordParts(word)) {
+			segments.push(
+				yield* await evaluateExpandedWordPartEffect(part, fs, context)
+			);
+		}
+		return Result.ok(segments.join(''));
+	});
 
 function evaluateExpandedWordPartEffect(
 	part: ExpandedWordPart,
 	fs: FS,
 	context: BuiltinContext
-): Effect.Effect<string, ShellErrorCause> {
-	return Effect.gen(function* () {
+): ShellResult<string, ShellErrorCause> {
+	return Result.gen(async function* () {
 		switch (part.kind) {
 			case 'literal':
-				return expandVariables(part.value, context);
+				return Result.ok(expandVariables(part.value, context));
 			case 'glob':
-				return expandVariables(part.pattern, context);
+				return Result.ok(expandVariables(part.pattern, context));
 			case 'commandSub': {
 				const commandText = expandVariables(part.command, context);
-				return yield* evaluateCommandSubstitutionEffect(
+				return await evaluateCommandSubstitutionEffect(
 					commandText,
 					fs,
 					context

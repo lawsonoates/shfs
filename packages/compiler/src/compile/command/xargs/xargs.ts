@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	expandedWordToString,
@@ -15,82 +15,88 @@ const VALUE_OPTIONS = ['-n', '-L', '-E', '-I', '-d'] as const;
 type ValueOption = (typeof VALUE_OPTIONS)[number];
 
 export function compileXargs(command: SimpleCommandIR): StepIR {
-	return Effect.runSync(compileXargsEffect(command));
+	const result = compileXargsEffect(command);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const compileXargsEffect: (
 	command: SimpleCommandIR
-) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.xargs')(
-	function* (command) {
-		return {
+) => Result<StepIR, CompileError> = (command) =>
+	Result.gen(function* () {
+		return Result.ok({
 			cmd: 'xargs',
 			args: yield* parseXargsArgsEffect(command.args),
-		} as const;
-	}
-);
+		} as const satisfies StepIR);
+	});
 
 export function parseXargsArgs(argv: SimpleCommandIR['args']): XargsArgsIR {
-	return Effect.runSync(parseXargsArgsEffect(argv));
+	const result = parseXargsArgsEffect(argv);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const parseXargsArgsEffect: (
 	argv: SimpleCommandIR['args']
-) => Effect.Effect<XargsArgsIR, CompileError> = Effect.fn(
-	'Compiler.xargs.parseArgs'
-)(function* (argv) {
-	const args: XargsArgsIR = {
-		command: DEFAULT_COMMAND,
-		delimiter: null,
-		eof: null,
-		maxArgs: null,
-		maxLines: null,
-		noRunIfEmpty: false,
-		replace: null,
-	};
+) => Result<XargsArgsIR, CompileError> = (argv) =>
+	Result.gen(function* () {
+		const args: XargsArgsIR = {
+			command: DEFAULT_COMMAND,
+			delimiter: null,
+			eof: null,
+			maxArgs: null,
+			maxLines: null,
+			noRunIfEmpty: false,
+			replace: null,
+		};
 
-	let index = 0;
-	while (index < argv.length) {
-		const word = argv[index];
-		if (!word) {
-			break;
+		let index = 0;
+		while (index < argv.length) {
+			const word = argv[index];
+			if (!word) {
+				break;
+			}
+			const token = expandedWordToString(word);
+			const parsed = yield* parseOption(argv, index, token, args);
+			if (!parsed.matched) {
+				break;
+			}
+			index = parsed.nextIndex;
 		}
-		const token = expandedWordToString(word);
-		const parsed = yield* parseOption(argv, index, token, args);
-		if (!parsed.matched) {
-			break;
-		}
-		index = parsed.nextIndex;
-	}
 
-	const commandWords = argv.slice(index);
-	if (commandWords.length > 0) {
-		args.command = commandWords;
-	}
-	return args;
-});
+		const commandWords = argv.slice(index);
+		if (commandWords.length > 0) {
+			args.command = commandWords;
+		}
+		return Result.ok(args);
+	});
 
 function parseOption(
 	argv: SimpleCommandIR['args'],
 	index: number,
 	token: string,
 	args: XargsArgsIR
-): Effect.Effect<{ matched: boolean; nextIndex: number }, CompileError> {
-	return Effect.gen(function* () {
+): Result<{ matched: boolean; nextIndex: number }, CompileError> {
+	return Result.gen(function* () {
 		if (token === '--') {
-			return { matched: true, nextIndex: index + 1 };
+			return Result.ok({ matched: true, nextIndex: index + 1 });
 		}
 		if (applySimpleOption(args, token)) {
-			return { matched: true, nextIndex: index + 1 };
+			return Result.ok({ matched: true, nextIndex: index + 1 });
 		}
 
 		const valueOption = getValueOption(token);
 		if (valueOption) {
 			const value = yield* optionValue(argv, index, token, valueOption);
 			yield* applyValueOption(args, valueOption, value.value);
-			return { matched: true, nextIndex: value.nextIndex };
+			return Result.ok({ matched: true, nextIndex: value.nextIndex });
 		}
 
-		return { matched: false, nextIndex: index };
+		return Result.ok({ matched: false, nextIndex: index });
 	});
 }
 
@@ -120,34 +126,34 @@ function applyValueOption(
 	args: XargsArgsIR,
 	option: ValueOption,
 	value: string
-): Effect.Effect<void, CompileError> {
-	return Effect.gen(function* () {
+): Result<void, CompileError> {
+	return Result.gen(function* () {
 		switch (option) {
 			case '-n':
 				setMaxArgsMode(
 					args,
 					yield* parsePositiveInteger(value, option)
 				);
-				return;
+				return Result.ok();
 			case '-L':
 				setMaxLinesMode(
 					args,
 					yield* parsePositiveInteger(value, option)
 				);
-				return;
+				return Result.ok();
 			case '-E':
 				args.eof = value;
-				return;
+				return Result.ok();
 			case '-I':
 				setReplaceMode(args, value);
-				return;
+				return Result.ok();
 			case '-d':
 				args.delimiter = decodeDelimiter(value);
 				args.eof = null;
-				return;
+				return Result.ok();
 			default: {
 				const _exhaustive: never = option;
-				return _exhaustive;
+				return Result.ok(_exhaustive);
 			}
 		}
 	});
@@ -176,10 +182,13 @@ function optionValue(
 	index: number,
 	token: string,
 	option: string
-): Effect.Effect<{ nextIndex: number; value: string }, CompileError> {
-	return Effect.gen(function* () {
+): Result<{ nextIndex: number; value: string }, CompileError> {
+	return Result.gen(function* () {
 		if (token.length > option.length) {
-			return { nextIndex: index + 1, value: token.slice(option.length) };
+			return Result.ok({
+				nextIndex: index + 1,
+				value: token.slice(option.length),
+			});
 		}
 
 		const next = argv[index + 1];
@@ -192,15 +201,18 @@ function optionValue(
 				)
 			);
 		}
-		return { nextIndex: index + 2, value: expandedWordToString(next) };
+		return Result.ok({
+			nextIndex: index + 2,
+			value: expandedWordToString(next),
+		});
 	});
 }
 
 function parsePositiveInteger(
 	value: string,
 	option: string
-): Effect.Effect<number, CompileError> {
-	return Effect.gen(function* () {
+): Result<number, CompileError> {
+	return Result.gen(function* () {
 		const parsed = Number.parseInt(value, 10);
 		if (!Number.isInteger(parsed) || parsed < 1) {
 			return yield* new CompileError(
@@ -211,7 +223,7 @@ function parsePositiveInteger(
 				)
 			);
 		}
-		return parsed;
+		return Result.ok(parsed);
 	});
 }
 

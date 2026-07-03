@@ -10,4 +10,8 @@ export default defineConfig({
 	dts: true,
 	clean: true,
 	sourcemap: true,
+	deps: {
+		alwaysBundle: [/^better-result(?:\/.*)?$/, /^picomatch(?:\/.*)?$/],
+		onlyBundle: false,
+	},
 });

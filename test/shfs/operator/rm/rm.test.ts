@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { Effect } from 'effect';
 
 import { MemoryFS } from '#shfs/fs/memory';
 import { rm } from '#shfs/operator/rm/rm';
@@ -10,7 +9,7 @@ test('rm deletes a file', async () => {
 
 	fs.setFile(filePath, 'content to be deleted');
 
-	await Effect.runPromise(rm(fs)({ path: filePath, recursive: false }));
+	(await rm(fs)({ path: filePath, recursive: false })).unwrap();
 
 	expect(await fs.exists(filePath)).toBe(false);
 });
@@ -21,7 +20,7 @@ test('rm recursively deletes nested files', async () => {
 	fs.setFile('/dir/root.txt', 'root');
 	fs.setFile('/dir/subdir/leaf.txt', 'leaf');
 
-	await Effect.runPromise(rm(fs)({ path: '/dir', recursive: true }));
+	(await rm(fs)({ path: '/dir', recursive: true })).unwrap();
 
 	expect(await fs.exists('/dir/root.txt')).toBe(false);
 	expect(await fs.exists('/dir/subdir/leaf.txt')).toBe(false);

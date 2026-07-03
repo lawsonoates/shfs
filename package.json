@@ -20,7 +20,6 @@
 		"@tsconfig/bun": "catalog:",
 		"@types/bun": "catalog:",
 		"turbo": "^2",
-		"effect": "4.0.0-beta.91",
 		"ultracite": "7.0.11"
 	},
 	"scripts": {

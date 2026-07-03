@@ -1,15 +1,19 @@
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import type { SimpleCommandIR, StepIR } from '../../../ir';
 
 export function compileTest(cmd: SimpleCommandIR): StepIR {
-	return Effect.runSync(compileTestEffect(cmd));
+	const result = compileTestEffect(cmd);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const compileTestEffect: (
 	cmd: SimpleCommandIR
-) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.test')(
-	function* (cmd) {
+) => Result<StepIR, CompileError> = (cmd) =>
+	Result.gen(function* () {
 		if (cmd.args.length === 0) {
 			return yield* new CompileError(
 				createCommandDiagnostic(
@@ -20,11 +24,10 @@ export const compileTestEffect: (
 			);
 		}
 
-		return {
+		return Result.ok({
 			cmd: 'test',
 			args: {
 				operands: [...cmd.args],
 			},
-		} as const;
-	}
-);
+		} as const satisfies StepIR);
+	});

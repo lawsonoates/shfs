@@ -2,7 +2,7 @@
  * tail command handler for the AST-based compiler.
  */
 
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
@@ -30,32 +30,35 @@ const parseTailArgs = createWordParserEffect<ExpandedWord>(
  * Compile a tail command from SimpleCommandIR to StepIR.
  */
 export function compileTail(cmd: SimpleCommandIR): StepIR {
-	return Effect.runSync(compileTailEffect(cmd));
+	const result = compileTailEffect(cmd);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const compileTailEffect: (
 	cmd: SimpleCommandIR
-) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.tail')(
-	function* (cmd) {
+) => Result<StepIR, CompileError> = (cmd) =>
+	Result.gen(function* () {
 		const parsed = yield* parseTailArgsEffect(cmd.args);
 
 		const n = yield* parseTailCount(parsed.flags.lines);
 		const files = parsed.positionalWords;
 
-		return {
+		return Result.ok({
 			cmd: 'tail',
 			args: { files, n },
-		} as const;
-	}
-);
+		} as const satisfies StepIR);
+	});
 
 function parseTailCount(
 	value: ParsedFlagValue | undefined
-): Effect.Effect<number, CompileError> {
-	return Effect.gen(function* () {
+): Result<number, CompileError> {
+	return Result.gen(function* () {
 		const lastValue = yield* getLastValueToken(value);
 		if (lastValue === undefined) {
-			return DEFAULT_LINE_COUNT;
+			return Result.ok(DEFAULT_LINE_COUNT);
 		}
 
 		const parsedValue = Number(lastValue);
@@ -69,41 +72,43 @@ function parseTailCount(
 			);
 		}
 
-		return parsedValue;
+		return Result.ok(parsedValue);
 	});
 }
 
 function getLastValueToken(
 	value: ParsedFlagValue | undefined
-): Effect.Effect<string | undefined, CompileError> {
-	return Effect.gen(function* () {
-		if (value === undefined) {
-			return undefined;
-		}
-		if (typeof value === 'string') {
-			return value;
-		}
-		if (Array.isArray(value)) {
-			const lastValue = value.at(-1);
-			return lastValue;
-		}
-		return yield* new CompileError(
+): Result<string | undefined, CompileError> {
+	if (value === undefined) {
+		return Result.ok(undefined);
+	}
+	if (typeof value === 'string') {
+		return Result.ok(value);
+	}
+	if (Array.isArray(value)) {
+		return Result.ok(value.at(-1));
+	}
+	return Result.err(
+		new CompileError(
 			createCommandDiagnostic(
 				'tail',
 				'invalid-count',
 				'Invalid tail count'
 			)
-		);
-	});
+		)
+	);
 }
 
 function parseTailArgsEffect(
 	args: readonly ExpandedWord[]
-): Effect.Effect<ParseWordsResult<ExpandedWord>, CompileError> {
-	return parseTailArgs(args, {
-		negativeNumberFlag: 'lines',
-		negativeNumberPolicy: 'value',
-	}).pipe(Effect.mapError(normalizeTailParseError));
+): Result<ParseWordsResult<ExpandedWord>, CompileError> {
+	return Result.mapError(
+		parseTailArgs(args, {
+			negativeNumberFlag: 'lines',
+			negativeNumberPolicy: 'value',
+		}),
+		normalizeTailParseError
+	);
 }
 
 function normalizeTailParseError(cause: {

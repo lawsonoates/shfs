@@ -26,7 +26,7 @@
  * - Background jobs (&)
  */
 
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { type SourcePosition, SourceSpan } from '../lexer/position';
 import { Scanner } from '../lexer/scanner';
 import { Token, TokenKind } from '../lexer/token';
@@ -281,19 +281,14 @@ export function parse(input: string): Program {
 	return parser.parse();
 }
 
-export const parseEffect: (
-	input: string
-) => Effect.Effect<Program, ParseSyntaxError> = Effect.fn('Parser.parse')(
-	function* (input: string) {
-		return yield* Effect.suspend(() => {
-			try {
-				return Effect.succeed(new Parser(input).parse());
-			} catch (error) {
-				if (isParseSyntaxError(error)) {
-					return Effect.fail(error);
-				}
-				throw error;
+export const parseEffect: (input: string) => Result<Program, ParseSyntaxError> =
+	(input: string) => {
+		try {
+			return Result.ok(new Parser(input).parse());
+		} catch (error) {
+			if (isParseSyntaxError(error)) {
+				return Result.err(error);
 			}
-		});
-	}
-);
+			throw error;
+		}
+	};

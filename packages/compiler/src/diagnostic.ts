@@ -1,41 +1,8 @@
-import { Schema } from 'effect';
-import { SourcePosition, SourceSpan } from './lexer/position';
+import { TaggedError } from 'better-result';
+import type { SourceSpan } from './lexer/position';
 
 export type DiagnosticPhase = 'compile' | 'expansion' | 'parse' | 'runtime';
 export type DiagnosticSeverity = 'error' | 'info' | 'warning';
-
-export const SourcePositionSchema = Schema.instanceOf(SourcePosition);
-
-export const SourceSpanSchema = Schema.instanceOf(SourceSpan);
-
-export const DiagnosticPhaseSchema = Schema.Literals([
-	'compile',
-	'expansion',
-	'parse',
-	'runtime',
-]);
-
-export const DiagnosticSeveritySchema = Schema.Literals([
-	'error',
-	'info',
-	'warning',
-]);
-
-export const DiagnosticLocationSchema = Schema.Struct({
-	command: Schema.optional(Schema.String),
-	path: Schema.optional(Schema.String),
-	span: Schema.optional(SourceSpanSchema),
-	token: Schema.optional(Schema.String),
-	tokenIndex: Schema.optional(Schema.Number),
-});
-
-export const ShellDiagnosticSchema = Schema.Struct({
-	code: Schema.String,
-	location: DiagnosticLocationSchema,
-	message: Schema.String,
-	phase: DiagnosticPhaseSchema,
-	severity: DiagnosticSeveritySchema,
-});
 
 export interface DiagnosticLocation {
 	command?: string;
@@ -53,13 +20,10 @@ export interface ShellDiagnostic {
 	severity: DiagnosticSeverity;
 }
 
-export class CompileError extends Schema.TaggedErrorClass<CompileError>()(
-	'CompileError',
-	{
-		diagnostic: ShellDiagnosticSchema,
-		message: Schema.String,
-	}
-) {
+export class CompileError extends TaggedError('CompileError')<{
+	diagnostic: ShellDiagnostic;
+	message: string;
+}>() {
 	constructor(diagnostic: ShellDiagnostic) {
 		super({
 			diagnostic,

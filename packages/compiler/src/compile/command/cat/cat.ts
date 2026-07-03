@@ -2,7 +2,7 @@
  * cat command handler for the AST-based compiler.
  */
 
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
@@ -29,27 +29,30 @@ const parseCatArgs = createArgParserEffect(flags);
  * Compile a cat command from SimpleCommandIR to StepIR.
  */
 export function compileCat(cmd: SimpleCommandIR): StepIR {
-	return Effect.runSync(compileCatEffect(cmd));
+	const result = compileCatEffect(cmd);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const compileCatEffect: (
 	cmd: SimpleCommandIR
-) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.cat')(
-	function* (cmd) {
+) => Result<StepIR, CompileError> = (cmd) =>
+	Result.gen(function* () {
 		// Convert ExpandedWord[] to string[] for arg parsing
 		const argStrings = cmd.args.map(expandedWordToString);
 
-		const parsed = yield* parseCatArgs(argStrings).pipe(
-			Effect.mapError(
-				(cause) =>
-					new CompileError(
-						createCommandDiagnostic(
-							'cat',
-							'invalid-option',
-							cause.message
-						)
+		const parsed = yield* Result.mapError(
+			parseCatArgs(argStrings),
+			(cause) =>
+				new CompileError(
+					createCommandDiagnostic(
+						'cat',
+						'invalid-option',
+						cause.message
 					)
-			)
+				)
 		);
 
 		// Use parser positional indices to map back to original ExpandedWord args.
@@ -82,7 +85,7 @@ export const compileCatEffect: (
 			);
 		}
 
-		return {
+		return Result.ok({
 			cmd: 'cat',
 			args: {
 				files: fileArgs,
@@ -94,6 +97,5 @@ export const compileCatEffect: (
 				showTabs: parsed.flags.showTabs === true,
 				squeezeBlank: parsed.flags.squeezeBlank === true,
 			},
-		} as const;
-	}
-);
+		} as const satisfies StepIR);
+	});

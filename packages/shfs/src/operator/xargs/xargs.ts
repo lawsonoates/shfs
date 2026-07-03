@@ -1,10 +1,10 @@
 import {
-	compileEffect,
-	parseEffect,
+	compile,
+	parse,
 	type XargsArgsIR,
 	type XargsStep,
 } from '@shfs/compiler';
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 
 import type { BuiltinContext } from '../../builtin/types';
 import { createShellInput, type ShellInput } from '../../execute/io';
@@ -55,29 +55,23 @@ export async function runXargsCommand(
 async function runXargsCommandInner(
 	options: RunXargsCommandOptions
 ): Promise<RunXargsCommandResult> {
-	const input = await Effect.runPromise(
-		readInputEffect(options).pipe(
-			Effect.match({
-				onFailure: () => null,
-				onSuccess: (text) => text,
-			})
-		)
-	);
+	const inputResult = await readInputEffect(options);
+	const input = inputResult.match({
+		err: () => null,
+		ok: (text) => text,
+	});
 	if (input === null) {
 		return { exitCode: 1, stderr: [], stdout: [] };
 	}
-	const command = await Effect.runPromise(
-		evaluateExpandedWordsEffect(
-			options.parsed.command,
-			options.fs,
-			options.context
-		).pipe(
-			Effect.match({
-				onFailure: () => null,
-				onSuccess: (words) => words,
-			})
-		)
+	const commandResult = await evaluateExpandedWordsEffect(
+		options.parsed.command,
+		options.fs,
+		options.context
 	);
+	const command = commandResult.match({
+		err: () => null,
+		ok: (words) => words,
+	});
 	if (command === null) {
 		return { exitCode: 1, stderr: [], stdout: [] };
 	}
@@ -112,22 +106,24 @@ async function runXargsCommandInner(
 
 function readInputEffect(
 	options: RunXargsCommandOptions
-): Effect.Effect<string, unknown> {
-	return Effect.gen(function* () {
+): Promise<Result<string, unknown>> {
+	return Result.gen(async function* () {
 		if (options.inputPath) {
-			return TEXT_DECODER.decode(
-				yield* Effect.tryPromise({
-					try: () => options.fs.readFile(options.inputPath ?? ''),
-					catch: (cause) => cause,
-				})
+			return Result.ok(
+				TEXT_DECODER.decode(
+					yield* await Result.tryPromise({
+						try: () => options.fs.readFile(options.inputPath ?? ''),
+						catch: (cause) => cause,
+					})
+				)
 			);
 		}
 		if (!options.input) {
-			return '';
+			return Result.ok('');
 		}
 
 		const records: string[] = [];
-		yield* Effect.tryPromise({
+		yield* await Result.tryPromise({
 			try: async () => {
 				for await (const line of (
 					options.stdin ?? createShellInput(options.input)
@@ -137,7 +133,7 @@ function readInputEffect(
 			},
 			catch: (cause) => cause,
 		});
-		return records.join('\n');
+		return Result.ok(records.join('\n'));
 	});
 }
 
@@ -356,19 +352,20 @@ async function runCommand(
 		stderr: new BufferedOutputStream(),
 	};
 	const executeModule = await import('../../execute/execute');
-	const ir = await Effect.runPromise(
-		Effect.gen(function* () {
-			const parsed = yield* parseEffect(
-				argv.map(quoteShellWord).join(' ')
-			);
-			return yield* compileEffect(parsed);
-		}).pipe(
-			Effect.match({
-				onFailure: () => null,
-				onSuccess: (script) => script,
-			})
-		)
-	);
+	const irResult = Result.gen(function* () {
+		const parsed = yield* Result.try({
+			try: () => parse(argv.map(quoteShellWord).join(' ')),
+			catch: (error) => error,
+		});
+		return Result.try({
+			try: () => compile(parsed),
+			catch: (error) => error,
+		});
+	});
+	const ir = irResult.match({
+		err: () => null,
+		ok: (script) => script,
+	});
 	if (ir === null) {
 		return { exitCode: 1, stderr: [], stdout: [] };
 	}
@@ -384,8 +381,11 @@ async function runCommand(
 async function collectStdout(
 	result: ReturnType<typeof import('../../execute/execute').execute>
 ): Promise<string[]> {
-	const records = await Effect.runPromise(collectRecordStream(result));
-	return records.map((record) => formatRecord(record));
+	const records = await collectRecordStream(result);
+	if (Result.isError(records)) {
+		throw records.error;
+	}
+	return records.value.map((record) => formatRecord(record));
 }
 
 function quoteShellWord(value: string): string {

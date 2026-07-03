@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { Effect } from 'effect';
 
 import { compile, compileEffect } from '#compiler/compile/compile';
 import { CompileError } from '#compiler/diagnostic';
@@ -151,8 +150,10 @@ test('compile preserves and/or chain metadata', () => {
 	]);
 });
 
-test('compileEffect yields compile failures on the Effect error channel', async () => {
-	await expect(
-		Effect.runPromise(compileEffect(parse('definitely-not-a-command')))
-	).rejects.toBeInstanceOf(CompileError);
+test('compileEffect yields compile failures on the result error channel', () => {
+	const result = compileEffect(parse('definitely-not-a-command'));
+	expect(result.isErr()).toBeTrue();
+	if (result.isErr()) {
+		expect(result.error).toBeInstanceOf(CompileError);
+	}
 });

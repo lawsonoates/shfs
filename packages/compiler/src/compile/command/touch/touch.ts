@@ -2,7 +2,7 @@
  * touch command handler for the AST-based compiler.
  */
 
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
@@ -27,36 +27,40 @@ const parseTouchArgs = createWordParser<ExpandedWord>(
  * Compile a touch command from SimpleCommandIR to StepIR.
  */
 export function compileTouch(cmd: SimpleCommandIR): StepIR {
-	return Effect.runSync(compileTouchEffect(cmd));
+	const result = compileTouchEffect(cmd);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const compileTouchEffect: (
 	cmd: SimpleCommandIR
-) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.touch')(
-	function* (cmd) {
-		const parsed = parseTouchArgs(cmd.args, {
-			unknownFlagPolicy: 'positional',
-		});
-		const accessTimeOnly = parsed.flags.accessTimeOnly === true;
-		const modificationTimeOnly = parsed.flags.modificationTimeOnly === true;
-		const files = parsed.positionalWords.filter((arg) => {
-			const argStr = expandedWordToString(arg);
-			return !argStr.startsWith('-');
-		});
+) => Result<StepIR, CompileError> = (cmd) => {
+	const parsed = parseTouchArgs(cmd.args, {
+		unknownFlagPolicy: 'positional',
+	});
+	const accessTimeOnly = parsed.flags.accessTimeOnly === true;
+	const modificationTimeOnly = parsed.flags.modificationTimeOnly === true;
+	const files = parsed.positionalWords.filter((arg) => {
+		const argStr = expandedWordToString(arg);
+		return !argStr.startsWith('-');
+	});
 
-		if (files.length === 0) {
-			return yield* new CompileError(
+	if (files.length === 0) {
+		return Result.err(
+			new CompileError(
 				createCommandDiagnostic(
 					'touch',
 					'missing-file',
 					'touch requires at least one file'
 				)
-			);
-		}
-
-		return {
-			cmd: 'touch',
-			args: { accessTimeOnly, files, modificationTimeOnly },
-		} as const;
+			)
+		);
 	}
-);
+
+	return Result.ok({
+		cmd: 'touch',
+		args: { accessTimeOnly, files, modificationTimeOnly },
+	} as const satisfies StepIR);
+};

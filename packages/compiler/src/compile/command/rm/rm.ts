@@ -2,7 +2,7 @@
  * rm command handler for the AST-based compiler.
  */
 
-import { Effect } from 'effect';
+import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
@@ -25,34 +25,38 @@ const parseRmArgs = createWordParser<ExpandedWord>(flags, expandedWordToString);
  * Compile a rm command from SimpleCommandIR to StepIR.
  */
 export function compileRm(cmd: SimpleCommandIR): StepIR {
-	return Effect.runSync(compileRmEffect(cmd));
+	const result = compileRmEffect(cmd);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
 export const compileRmEffect: (
 	cmd: SimpleCommandIR
-) => Effect.Effect<StepIR, CompileError> = Effect.fn('Compiler.rm')(
-	function* (cmd) {
-		const parsed = parseRmArgs(cmd.args, {
-			unknownFlagPolicy: 'positional',
-		});
-		const recursive = parsed.flags.recursive === true;
-		const force = parsed.flags.force === true;
-		const interactive = parsed.flags.interactive === true;
-		const paths = parsed.positionalWords;
+) => Result<StepIR, CompileError> = (cmd) => {
+	const parsed = parseRmArgs(cmd.args, {
+		unknownFlagPolicy: 'positional',
+	});
+	const recursive = parsed.flags.recursive === true;
+	const force = parsed.flags.force === true;
+	const interactive = parsed.flags.interactive === true;
+	const paths = parsed.positionalWords;
 
-		if (paths.length === 0) {
-			return yield* new CompileError(
+	if (paths.length === 0) {
+		return Result.err(
+			new CompileError(
 				createCommandDiagnostic(
 					'rm',
 					'missing-path',
 					'rm requires at least one path'
 				)
-			);
-		}
-
-		return {
-			cmd: 'rm',
-			args: { force, interactive, paths, recursive },
-		} as const;
+			)
+		);
 	}
-);
+
+	return Result.ok({
+		cmd: 'rm',
+		args: { force, interactive, paths, recursive },
+	} as const satisfies StepIR);
+};
