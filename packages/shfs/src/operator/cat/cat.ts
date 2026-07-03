@@ -135,31 +135,44 @@ async function* emitFileLines(
 	fs: FS,
 	record: FileRecord,
 	state: CatState,
-	options: Required<CatOptions>
+	options: Required<CatOptions>,
+	onReadError?: (message: string) => void
 ): AsyncIterable<LineRecord> {
 	if (await isDirectoryRecord(fs, record)) {
 		return;
 	}
 
 	let sourceLineNum = 1;
-	for await (const rawText of fs.readLines(record.path)) {
-		const rendered = nextRenderedLine(rawText, state, options);
-		if (rendered.isSkipped) {
-			continue;
-		}
+	try {
+		for await (const rawText of fs.readLines(record.path)) {
+			const rendered = nextRenderedLine(rawText, state, options);
+			if (rendered.isSkipped) {
+				continue;
+			}
 
-		yield {
-			file: record.path,
-			kind: 'line',
-			lineNum: sourceLineNum++,
-			text: renderLineText(rendered.text, rendered.lineNumber, options),
-		};
+			yield {
+				file: record.path,
+				kind: 'line',
+				lineNum: sourceLineNum++,
+				text: renderLineText(
+					rendered.text,
+					rendered.lineNumber,
+					options
+				),
+			};
+		}
+	} catch (error) {
+		if (!onReadError) {
+			throw error;
+		}
+		onReadError(error instanceof Error ? error.message : String(error));
 	}
 }
 
 export function cat(
 	fs: FS,
-	options?: CatOptions
+	options?: CatOptions,
+	onReadError?: (message: string) => void
 ): Transducer<Record, LineRecord> {
 	const normalized = normalizeOptions(options);
 	const state: CatState = {
@@ -177,7 +190,7 @@ export function cat(
 				yield* emitJsonRecord(record.value, state, normalized);
 				continue;
 			}
-			yield* emitFileLines(fs, record, state, normalized);
+			yield* emitFileLines(fs, record, state, normalized, onReadError);
 		}
 	};
 }

@@ -419,15 +419,24 @@ CommandRegistry.register('cat', {
 					resolvePathsFromCwd(context.cwd, expandedFiles.value),
 					inputPathResult.value
 				);
+				let hadReadError = false;
+				const onReadError = (message: string) => {
+					hadReadError = true;
+					context.stderr.append(message);
+				};
 				if (filePaths.length > 0) {
-					yield* cat(fs, options)(files(...filePaths));
-					context.status = 0;
+					yield* cat(fs, options, onReadError)(files(...filePaths));
+					context.status = hadReadError ? 1 : 0;
 					return;
 				}
 				if (input) {
-					yield* cat(fs, options)(toFormattedLineStream(input));
+					yield* cat(
+						fs,
+						options,
+						onReadError
+					)(toFormattedLineStream(input));
 				}
-				context.status = 0;
+				context.status = hadReadError ? 1 : 0;
 			})()
 		);
 	},

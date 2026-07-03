@@ -116,3 +116,18 @@ test('a missing-file read reports an error but the script continues', async () =
 
 	expect(result.stdout.toString()).toBe('AFTER');
 });
+
+test('cat keeps output from readable operands around a missing one', async () => {
+	await run('mkdir -p /w');
+	await run('cd /w');
+	await run('echo hello > /w/a.txt');
+	await run('echo world > /w/b.txt');
+
+	const result = await run('cat /w/a.txt /w/missing.txt /w/b.txt');
+
+	expect(result.stdout.toString()).toBe('hello\nworld');
+	expect(result.stderr.toString()).toContain(
+		'File not found: /w/missing.txt'
+	);
+	expect(result.exitCode).toBe(1);
+});
