@@ -71,7 +71,7 @@ test('2> redirects an expansion-failure diagnostic to a file, not shell stderr',
 	);
 });
 
-test('2> redirects stream collection failures to a file, not shell stderr', async () => {
+test('2> redirects command read errors to a file, not shell stderr', async () => {
 	await run('mkdir -p /w');
 	await run('cd /w');
 
@@ -83,7 +83,7 @@ test('2> redirects stream collection failures to a file, not shell stderr', asyn
 
 	const errFile = await run('cat /w/stream-err.txt');
 	expect(errFile.stdout.toString()).toContain(
-		'File not found: /w/missing.txt'
+		'cat: /w/missing.txt: No such file or directory'
 	);
 });
 
@@ -117,6 +117,19 @@ test('a missing-file read reports an error but the script continues', async () =
 	expect(result.stdout.toString()).toBe('AFTER');
 });
 
+test('cat reports a missing file GNU-style and exits 1', async () => {
+	await run('mkdir -p /w');
+	await run('cd /w');
+
+	const result = await run('cat /w/missing.txt');
+
+	expect(result.stdout.toString()).toBe('');
+	expect(result.stderr.toString()).toContain(
+		'cat: /w/missing.txt: No such file or directory'
+	);
+	expect(result.exitCode).toBe(1);
+});
+
 test('cat keeps output from readable operands around a missing one', async () => {
 	await run('mkdir -p /w');
 	await run('cd /w');
@@ -127,7 +140,7 @@ test('cat keeps output from readable operands around a missing one', async () =>
 
 	expect(result.stdout.toString()).toBe('hello\nworld');
 	expect(result.stderr.toString()).toContain(
-		'File not found: /w/missing.txt'
+		'cat: /w/missing.txt: No such file or directory'
 	);
 	expect(result.exitCode).toBe(1);
 });

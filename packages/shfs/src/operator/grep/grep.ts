@@ -214,6 +214,7 @@ export async function runGrepCommand(
 		options.context
 	);
 	hadError ||= searchTargets.hadError;
+	const stderrLines = searchTargets.stderr;
 
 	const stdinBytes = normalized.readsFromStdin
 		? await readStdinBytes({
@@ -248,6 +249,11 @@ export async function runGrepCommand(
 			targetBytes = await readFileOrNull(options.fs, target.absolutePath);
 			if (targetBytes === null) {
 				hadError = true;
+				if (!parsed.options.noMessages) {
+					stderrLines.push(
+						`grep: ${target.displayPath}: No such file or directory`
+					);
+				}
 				continue;
 			}
 		}
@@ -333,24 +339,24 @@ export async function runGrepCommand(
 	if (corpusOverride !== null) {
 		return {
 			stdout: lines,
-			stderr: [],
+			stderr: stderrLines,
 			exitCode: corpusOverride,
 		};
 	}
 
 	if (parsed.options.quiet && anySelected) {
-		return { stdout: [], stderr: [], exitCode: 0 };
+		return { stdout: [], stderr: stderrLines, exitCode: 0 };
 	}
 	if (hadError) {
 		return {
 			stdout: lines,
-			stderr: [],
+			stderr: stderrLines,
 			exitCode: 2,
 		};
 	}
 	return {
 		stdout: lines,
-		stderr: [],
+		stderr: stderrLines,
 		exitCode: anySelected ? 0 : 1,
 	};
 }
@@ -562,8 +568,9 @@ async function collectSearchTargets(
 	options: GrepOptionsIR,
 	fs: FS,
 	context: BuiltinContext
-): Promise<{ hadError: boolean; targets: SearchTarget[] }> {
+): Promise<{ hadError: boolean; stderr: string[]; targets: SearchTarget[] }> {
 	const targets: SearchTarget[] = [];
+	const stderr: string[] = [];
 	let hadError = false;
 
 	const includeMatchers = options.includeFiles.map((pattern) =>
@@ -661,6 +668,9 @@ async function collectSearchTargets(
 		const stat = await statOrNull(fs, absolutePath);
 		if (stat === null) {
 			hadError = true;
+			if (!options.noMessages) {
+				stderr.push(`grep: ${operand}: No such file or directory`);
+			}
 			continue;
 		}
 
@@ -691,7 +701,7 @@ async function collectSearchTargets(
 		});
 	}
 
-	return { hadError, targets };
+	return { hadError, stderr, targets };
 }
 
 function trimTrailingSlash(path: string): string {

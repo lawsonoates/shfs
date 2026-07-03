@@ -19,14 +19,14 @@ import { cat } from '../operator/cat/cat';
 import { cp } from '../operator/cp/cp';
 import { find } from '../operator/find/find';
 import { runGrepCommand } from '../operator/grep/grep';
-import { headLines, headWithN } from '../operator/head/head';
+import { headFiles, headLines } from '../operator/head/head';
 import { ls } from '../operator/ls/ls';
 import { mkdir } from '../operator/mkdir/mkdir';
 import { mv } from '../operator/mv/mv';
 import { pwd } from '../operator/pwd/pwd';
 import { rm } from '../operator/rm/rm';
 import { runSortCommand } from '../operator/sort/sort';
-import { tail } from '../operator/tail/tail';
+import { tail, tailFiles } from '../operator/tail/tail';
 import { touch } from '../operator/touch/touch';
 import { createTreeResolvedArgs, runTreeCommand } from '../operator/tree/tree';
 import { runWcCommand } from '../operator/wc/wc';
@@ -420,12 +420,14 @@ CommandRegistry.register('cat', {
 					inputPathResult.value
 				);
 				let hadReadError = false;
-				const onReadError = (message: string) => {
+				const onMissingFile = (path: string) => {
 					hadReadError = true;
-					context.stderr.append(message);
+					context.stderr.append(
+						`cat: ${path}: No such file or directory`
+					);
 				};
 				if (filePaths.length > 0) {
-					yield* cat(fs, options, onReadError)(files(...filePaths));
+					yield* cat(fs, options, onMissingFile)(files(...filePaths));
 					context.status = hadReadError ? 1 : 0;
 					return;
 				}
@@ -433,7 +435,7 @@ CommandRegistry.register('cat', {
 					yield* cat(
 						fs,
 						options,
-						onReadError
+						onMissingFile
 					)(toFormattedLineStream(input));
 				}
 				context.status = hadReadError ? 1 : 0;
@@ -683,13 +685,29 @@ CommandRegistry.register('head', {
 				if (!expandedFiles.ok) {
 					return;
 				}
-				const filePaths = withInputRedirect(
-					resolvePathsFromCwd(context.cwd, expandedFiles.value),
-					inputPath.value
+				const resolvedPaths = resolvePathsFromCwd(
+					context.cwd,
+					expandedFiles.value
 				);
-				if (filePaths.length > 0) {
-					yield* headWithN(fs, step.args.n)(files(...filePaths));
-					context.status = 0;
+				const entries = resolvedPaths.map((path, index) => ({
+					displayPath: expandedFiles.value[index] ?? path,
+					path,
+				}));
+				if (entries.length === 0 && inputPath.value) {
+					entries.push({
+						displayPath: inputPath.value,
+						path: inputPath.value,
+					});
+				}
+				if (entries.length > 0) {
+					let hadReadError = false;
+					yield* headFiles(fs, step.args.n, entries, (displayPath) => {
+						hadReadError = true;
+						context.stderr.append(
+							`head: cannot open '${displayPath}' for reading: No such file or directory`
+						);
+					});
+					context.status = hadReadError ? 1 : 0;
 					return;
 				}
 				if (input) {
@@ -770,15 +788,29 @@ CommandRegistry.register('tail', {
 				if (!expandedFiles.ok) {
 					return;
 				}
-				const filePaths = withInputRedirect(
-					resolvePathsFromCwd(context.cwd, expandedFiles.value),
-					inputPath.value
+				const resolvedPaths = resolvePathsFromCwd(
+					context.cwd,
+					expandedFiles.value
 				);
-				if (filePaths.length > 0) {
-					for (const filePath of filePaths) {
-						yield* tail(step.args.n)(cat(fs)(files(filePath)));
-					}
-					context.status = 0;
+				const entries = resolvedPaths.map((path, index) => ({
+					displayPath: expandedFiles.value[index] ?? path,
+					path,
+				}));
+				if (entries.length === 0 && inputPath.value) {
+					entries.push({
+						displayPath: inputPath.value,
+						path: inputPath.value,
+					});
+				}
+				if (entries.length > 0) {
+					let hadReadError = false;
+					yield* tailFiles(fs, step.args.n, entries, (displayPath) => {
+						hadReadError = true;
+						context.stderr.append(
+							`tail: cannot open '${displayPath}' for reading: No such file or directory`
+						);
+					});
+					context.status = hadReadError ? 1 : 0;
 					return;
 				}
 				if (input) {

@@ -642,8 +642,20 @@ test('cat/head/tail expand glob file arguments relative to cwd', async () => {
 	};
 
 	expect(await runLines('cat logs/*.txt')).toEqual(['a1', 'a2', 'b1', 'b2']);
-	expect(await runLines('head -n 1 logs/*.txt')).toEqual(['a1', 'b1']);
-	expect(await runLines('tail -n 1 logs/*.txt')).toEqual(['a2', 'b2']);
+	expect(await runLines('head -n 1 logs/*.txt')).toEqual([
+		'==> logs/a.txt <==',
+		'a1',
+		'',
+		'==> logs/b.txt <==',
+		'b1',
+	]);
+	expect(await runLines('tail -n 1 logs/*.txt')).toEqual([
+		'==> logs/a.txt <==',
+		'a2',
+		'',
+		'==> logs/b.txt <==',
+		'b2',
+	]);
 });
 
 test('wires cp force flag through execute', async () => {
