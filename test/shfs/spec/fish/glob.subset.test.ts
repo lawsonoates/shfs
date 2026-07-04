@@ -8,11 +8,13 @@ import { beforeEach, expect, test } from 'bun:test';
 import { MemoryFS } from '#shfs/fs/memory';
 import { Shell } from '#shfs/shell/shell';
 
+let fs!: MemoryFS;
 let shell!: Shell;
 const WHITESPACE_REGEX = /\s+/;
 
 beforeEach(() => {
-	shell = new Shell(new MemoryFS());
+	fs = new MemoryFS();
+	shell = new Shell(fs);
 });
 
 async function run(command: string): Promise<string> {
@@ -57,8 +59,32 @@ test('fish glob: glob.fish - trailing slash matches only directories', async () 
 	expect(await run('echo */')).toBe('abc2/');
 });
 
-// Symlink traversal sections from fish tests/checks/glob.fish are intentionally
-// excluded because symlink behavior is explicitly out of scope for shfs.
+test('fish glob: glob.fish - recursive globs descend into symlinked directories independently', async () => {
+	await run('mkdir -p /workspace/dir1/child1');
+	await run('touch /workspace/dir1/child1/anyfile');
+	await run('mkdir /workspace/dir2');
+	await fs.symlink('../dir1/child1', '/workspace/dir2/link2');
+	await run('cd /workspace');
+
+	expect(sortedWords(await run('echo **/anyfile'))).toEqual([
+		'dir1/child1/anyfile',
+		'dir2/link2/anyfile',
+	]);
+});
+
+test('fish glob: glob.fish - recursive globs explore symlink loops only once', async () => {
+	await run('mkdir -p /workspace/dir1/child2/grandchild1');
+	await run('touch /workspace/dir1/child2/grandchild1/differentfile');
+	await fs.symlink(
+		'../../child2/grandchild1',
+		'/workspace/dir1/child2/grandchild1/link2'
+	);
+	await run('cd /workspace');
+
+	expect(sortedWords(await run('echo **/differentfile'))).toEqual([
+		'dir1/child2/grandchild1/differentfile',
+	]);
+});
 
 test('fish glob: glob.fish - recursive globs support ** patterns and trailing slash semantics', async () => {
 	await run('mkdir -p /workspace');

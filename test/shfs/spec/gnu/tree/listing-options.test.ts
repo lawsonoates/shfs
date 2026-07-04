@@ -1,4 +1,6 @@
-// Translated/adapted from peteretelej/tree tests/integration_tests.rs.
+// Translated/adapted from peteretelej/tree tests:
+// - tests/integration_tests.rs
+// - tests/traversal_tests.rs
 // Copyright (c) 2023 Peter Etelej
 // License: MIT.
 
@@ -31,6 +33,15 @@ test('gnu tree: integration_tests.rs - -F classifies directories with trailing s
 
 	Harness.expectContains(output, 'src/');
 	Harness.expectContains(output, 'docs/');
+});
+
+test('gnu tree: traversal_tests.rs - -F classifies symlinks with trailing at-sign', async () => {
+	const root = '/fixture';
+	await harness.setTextFile(`${root}/target.txt`, 'content');
+	await harness.fs.symlink('target.txt', `${root}/link.txt`);
+
+	const output = await harness.run(`tree -F ${root}`);
+	Harness.expectContains(output, 'link.txt@');
 });
 
 test('gnu tree: integration_tests.rs - --noreport suppresses the summary report', async () => {

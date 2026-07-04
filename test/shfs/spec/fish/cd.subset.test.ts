@@ -8,10 +8,12 @@ import { beforeEach, expect, test } from 'bun:test';
 import { MemoryFS } from '#shfs/fs/memory';
 import { Shell } from '#shfs/shell/shell';
 
+let fs!: MemoryFS;
 let shell!: Shell;
 
 beforeEach(() => {
-	shell = new Shell(new MemoryFS());
+	fs = new MemoryFS();
+	shell = new Shell(fs);
 });
 
 async function run(command: string): Promise<string> {
@@ -20,6 +22,17 @@ async function run(command: string): Promise<string> {
 
 async function runNothrow(command: string): Promise<string> {
 	return await shell.$`${command}`.nothrow().text();
+}
+
+async function runWithStatus(
+	command: string
+): Promise<{ output: string; stderr: string; status: number }> {
+	const result = await shell.$`${command}`.nothrow();
+	return {
+		output: result.text(),
+		stderr: result.stderr.toString(),
+		status: result.exitCode,
+	};
 }
 
 test('fish cd/pwd: cd.fish - supports absolute and relative navigation with . and ..', async () => {
@@ -74,6 +87,17 @@ test('fish cd: cd.fish - pwd remains absolute after relative cd navigation', asy
 	const current = await run('pwd');
 	expect(current.startsWith('/')).toBe(true);
 	expect(current).toBe('/workspace/alpha/beta');
+});
+
+test('fish cd/pwd: cd.fish - default cd keeps the symlink path logically', async () => {
+	await run('mkdir -p /workspace/real/subdir');
+	await fs.symlink('/workspace/real', '/workspace/link');
+
+	await run('cd /workspace/link');
+	expect(await run('pwd')).toBe('/workspace/link');
+
+	await run('cd subdir');
+	expect(await run('pwd')).toBe('/workspace/link/subdir');
 });
 
 test('fish set: cd.fish - global variables persist, local variables are scoped to one script run', async () => {
@@ -164,4 +188,25 @@ test('fish cd errors: cd.fish - file target has stable deterministic message', a
 test('fish cd errors: cd.fish - empty path fails and sets status to 1', async () => {
 	await expect(run('cd ""')).rejects.toThrow('cd: empty path');
 	expect(await run('echo $status')).toBe('1');
+});
+
+test('fish cd errors: cd.fish - broken symlink reports the link target', async () => {
+	await run('mkdir -p /fake');
+	await fs.symlink('no/such/directory', '/fake/broken-symbolic-link');
+
+	const result = await runWithStatus('cd /fake/broken-symbolic-link');
+	expect(result.status).toBe(1);
+	expect(result.stderr).toContain('broken symbolic link');
+	expect(result.stderr).toContain('no/such/directory');
+});
+
+test('fish cd errors: cd.fish - symlink loops report too many levels', async () => {
+	await run('mkdir -p /workspace');
+	await fs.symlink('loop2', '/workspace/loop1');
+	await fs.symlink('loop1', '/workspace/loop2');
+
+	const result = await runWithStatus('cd /workspace/loop1');
+	expect(result.status).toBe(1);
+	expect(result.stderr).toContain('Too many levels of symbolic links');
+	expect(result.stderr).toContain('loop1');
 });
