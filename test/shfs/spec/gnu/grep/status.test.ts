@@ -86,3 +86,19 @@ test('gnu grep: status - missing operand among readable files preserves matches 
 	expect(result.stderr).toContain('MMMMMMMM.MMM');
 	expect(result.stderr).toContain('No such file');
 });
+
+test('gnu grep: status - input redirection expansion failures are reported through stderr routing', async () => {
+	await harness.ensureDir('/tmp');
+
+	const result = await harness.runWithStatus(
+		'grep foo < /tmp/no-* 2> /tmp/err.txt'
+	);
+
+	expect(result.status).toBe(1);
+	expect(result.output).toBe('');
+	expect(result.stderr).toBe('');
+
+	const redirectedStderr = await harness.readTextFile('/tmp/err.txt');
+	expect(redirectedStderr).toContain('error[expansion:no-match]');
+	expect(redirectedStderr).toContain('/tmp/no-*');
+});

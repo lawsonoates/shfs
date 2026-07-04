@@ -13,7 +13,11 @@ import { Result } from 'better-result';
 import picomatch from 'picomatch';
 
 import type { BuiltinContext } from '../../builtin/types';
-import { exitCodeForDiagnostics, formatDiagnostics } from '../../diagnostics';
+import {
+	exitCodeForDiagnostics,
+	formatDiagnostics,
+	runOrReport,
+} from '../../diagnostics';
 import { createShellInput, type ShellInput } from '../../execute/io';
 import {
 	evaluateExpandedPathWordEffect,
@@ -160,36 +164,46 @@ export async function runGrepCommand(
 		return { stdout: [], stderr: [], exitCode: hadError ? 2 : 1 };
 	}
 
-	const inputRedirect = await resolveRedirectPathEffect(
-		'grep',
-		options.redirections,
-		'input',
-		options.fs,
+	const inputRedirect = await runOrReport(
+		resolveRedirectPathEffect(
+			'grep',
+			options.redirections,
+			'input',
+			options.fs,
+			options.context
+		),
 		options.context
 	);
-	if (Result.isError(inputRedirect)) {
-		hadError = true;
+	if (!inputRedirect.ok) {
+		return {
+			stdout: [],
+			stderr: [],
+			exitCode: options.context.status,
+		};
 	}
-	const inputRedirectPath = Result.isError(inputRedirect)
-		? null
-		: inputRedirect.value;
+	const inputRedirectPath = inputRedirect.value;
 
 	const outputRedirect =
 		options.resolvedOutputRedirectPath === undefined
-			? await resolveRedirectPathEffect(
-					'grep',
-					options.redirections,
-					'output',
-					options.fs,
+			? await runOrReport(
+					resolveRedirectPathEffect(
+						'grep',
+						options.redirections,
+						'output',
+						options.fs,
+						options.context
+					),
 					options.context
 				)
-			: Result.ok<string | null>(options.resolvedOutputRedirectPath);
-	if (Result.isError(outputRedirect)) {
-		hadError = true;
+			: { ok: true, value: options.resolvedOutputRedirectPath };
+	if (!outputRedirect.ok) {
+		return {
+			stdout: [],
+			stderr: [],
+			exitCode: options.context.status,
+		};
 	}
-	const outputRedirectPath = Result.isError(outputRedirect)
-		? null
-		: outputRedirect.value;
+	const outputRedirectPath = outputRedirect.value;
 
 	if (
 		hasInputOutputConflict(
