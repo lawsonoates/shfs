@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import type { FS, FsInfo } from '#shfs/fs/fs';
+import { MemoryFS } from '#shfs/fs/memory';
 import { mv } from '#shfs/operator/mv/mv';
 import type { Stream } from '#shfs/stream';
 import { normalizePath } from '#shfs/util/path';
@@ -194,4 +195,18 @@ test('mv allows force overwrites through the rename primitive', async () => {
 	expect(fs.renameCalls).toEqual([{ src: '/source.txt', dest: '/dest.txt' }]);
 	expect(await fs.exists('/source.txt')).toBeFalse();
 	expect(await fs.exists('/dest.txt')).toBeTrue();
+});
+
+test('mv moves a symlink to a directory as a symlink', async () => {
+	const fs = new MemoryFS();
+	await fs.makeDirectory('/target-dir', { recursive: true });
+	fs.setFile('/target-dir/file.txt', 'content');
+	await fs.symlink('/target-dir', '/dirlink');
+
+	const effect = mv(fs);
+	(await effect({ srcs: ['/dirlink'], dest: '/moved-link' })).unwrap();
+
+	expect(await fs.exists('/dirlink')).toBeFalse();
+	expect(await fs.readLink('/moved-link')).toBe('/target-dir');
+	expect(await fs.exists('/target-dir/file.txt')).toBeTrue();
 });

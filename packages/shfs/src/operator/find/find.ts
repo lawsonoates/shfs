@@ -69,6 +69,7 @@ interface FindResolvedPath {
 interface FindEntry extends FindResolvedPath {
 	depth: number;
 	isDirectory: boolean;
+	realPath?: string;
 	size: number;
 	type: FindEntryType;
 	xtype: FindEntryType;
@@ -76,10 +77,25 @@ interface FindEntry extends FindResolvedPath {
 
 interface FindEntryInfo {
 	isDirectory: boolean;
+	realPath?: string;
 	size: number;
 	type: FindEntryType;
 	xtype: FindEntryType;
 }
+
+type FindEntryInfoResult =
+	| {
+			kind: 'found';
+			info: FindEntryInfo;
+	  }
+	| {
+			kind: 'missing';
+	  }
+	| {
+			code: string;
+			kind: 'error';
+			message: string;
+	  };
 
 export async function* find(
 	fs: FS,
@@ -139,7 +155,7 @@ export async function* find(
 			startPath.absolutePath,
 			args.traversal.symlinkMode !== 'physical'
 		);
-		if (startEntryInfo === null) {
+		if (startEntryInfo.kind === 'missing') {
 			state.hadError = true;
 			writeDiagnosticsToStderr(context, [
 				createRuntimeDiagnostic(
@@ -153,19 +169,31 @@ export async function* find(
 			]);
 			continue;
 		}
+		if (startEntryInfo.kind === 'error') {
+			reportFindEntryInfoError(
+				context,
+				startPath.displayPath,
+				startEntryInfo
+			);
+			state.hadError = true;
+			continue;
+		}
+
+		const startEntry = {
+			...startPath,
+			depth: 0,
+			...startEntryInfo.info,
+		};
 
 		yield* walkEntry(
 			fs,
 			context,
-			{
-				...startPath,
-				depth: 0,
-				...startEntryInfo,
-			},
+			startEntry,
 			args,
 			resolvedPredicateBranches,
 			state,
-			hasEmptyPredicate
+			hasEmptyPredicate,
+			initialDirectoryAncestors(startEntry)
 		);
 	}
 
@@ -179,7 +207,8 @@ async function* walkEntry(
 	args: FindStep['args'],
 	predicateBranches: ResolvedFindPredicate[][],
 	state: FindTraversalState,
-	hasEmptyPredicate: boolean
+	hasEmptyPredicate: boolean,
+	directoryAncestors: ReadonlySet<string>
 ): Stream<ShellRecord> {
 	const shouldRecurse =
 		entry.isDirectory &&
@@ -187,31 +216,13 @@ async function* walkEntry(
 			entry.depth < args.traversal.maxdepth);
 	const shouldReadChildren =
 		shouldRecurse || (entry.isDirectory && hasEmptyPredicate);
-	let childPaths: string[] | null = null;
-
-	if (shouldReadChildren) {
-		const childPathResult = await Result.tryPromise({
-			try: () => readChildren(fs, entry.absolutePath),
-			catch: (error) => error,
-		});
-		childPaths = childPathResult.match({
-			err: () => null,
-			ok: (paths) => paths,
-		});
-		if (childPaths === null) {
-			state.hadError = true;
-			writeDiagnosticsToStderr(context, [
-				createRuntimeDiagnostic(
-					'find',
-					'unreadable-directory',
-					'Unable to read directory',
-					{
-						path: entry.displayPath,
-					}
-				),
-			]);
-		}
-	}
+	const childPaths = await readChildPathsForEntry(
+		fs,
+		context,
+		entry,
+		shouldReadChildren,
+		state
+	);
 
 	const matches =
 		entry.depth >= args.traversal.mindepth &&
@@ -222,53 +233,165 @@ async function* walkEntry(
 	}
 
 	if (shouldRecurse && childPaths !== null) {
-		for (const childAbsolutePath of childPaths) {
-			const childInfo = await getFindEntryInfo(
-				fs,
-				childAbsolutePath,
-				args.traversal.symlinkMode === 'logical'
-			);
-			if (childInfo === null) {
-				state.hadError = true;
-				writeDiagnosticsToStderr(context, [
-					createRuntimeDiagnostic(
-						'find',
-						'missing-path',
-						'No such file or directory',
-						{
-							path: appendDisplayPath(
-								entry.displayPath,
-								basename(childAbsolutePath)
-							),
-						}
-					),
-				]);
-				continue;
-			}
-
-			yield* walkEntry(
-				fs,
-				context,
-				{
-					absolutePath: childAbsolutePath,
-					displayPath: appendDisplayPath(
-						entry.displayPath,
-						basename(childAbsolutePath)
-					),
-					depth: entry.depth + 1,
-					...childInfo,
-				},
-				args,
-				predicateBranches,
-				state,
-				hasEmptyPredicate
-			);
-		}
+		yield* walkChildEntries(
+			fs,
+			context,
+			entry,
+			args,
+			predicateBranches,
+			state,
+			hasEmptyPredicate,
+			directoryAncestors,
+			childPaths
+		);
 	}
 
 	if (args.traversal.depth && matches) {
 		yield toFileRecord(entry);
 	}
+}
+
+async function readChildPathsForEntry(
+	fs: FS,
+	context: BuiltinContext,
+	entry: FindEntry,
+	shouldReadChildren: boolean,
+	state: FindTraversalState
+): Promise<string[] | null> {
+	if (!shouldReadChildren) {
+		return null;
+	}
+
+	const childPathResult = await Result.tryPromise({
+		try: () => readChildren(fs, entry.absolutePath),
+		catch: (error) => error,
+	});
+	const childPaths = childPathResult.match({
+		err: () => null,
+		ok: (paths) => paths,
+	});
+	if (childPaths !== null) {
+		return childPaths;
+	}
+
+	state.hadError = true;
+	writeDiagnosticsToStderr(context, [
+		createRuntimeDiagnostic(
+			'find',
+			'unreadable-directory',
+			'Unable to read directory',
+			{
+				path: entry.displayPath,
+			}
+		),
+	]);
+	return null;
+}
+
+async function* walkChildEntries(
+	fs: FS,
+	context: BuiltinContext,
+	entry: FindEntry,
+	args: FindStep['args'],
+	predicateBranches: ResolvedFindPredicate[][],
+	state: FindTraversalState,
+	hasEmptyPredicate: boolean,
+	directoryAncestors: ReadonlySet<string>,
+	childPaths: string[]
+): Stream<ShellRecord> {
+	for (const childAbsolutePath of childPaths) {
+		const childDisplayPath = appendDisplayPath(
+			entry.displayPath,
+			basename(childAbsolutePath)
+		);
+		const childInfo = await getFindEntryInfo(
+			fs,
+			childAbsolutePath,
+			args.traversal.symlinkMode === 'logical'
+		);
+		if (childInfo.kind === 'missing') {
+			reportMissingFindEntry(context, childDisplayPath);
+			state.hadError = true;
+			continue;
+		}
+		if (childInfo.kind === 'error') {
+			reportFindEntryInfoError(context, childDisplayPath, childInfo);
+			state.hadError = true;
+			continue;
+		}
+		if (
+			isLogicalDirectoryLoop(
+				args,
+				directoryAncestors,
+				childAbsolutePath,
+				childInfo.info
+			)
+		) {
+			reportSymlinkLoop(context, childDisplayPath);
+			state.hadError = true;
+			continue;
+		}
+
+		const childEntry = {
+			absolutePath: childAbsolutePath,
+			depth: entry.depth + 1,
+			displayPath: childDisplayPath,
+			...childInfo.info,
+		};
+
+		yield* walkEntry(
+			fs,
+			context,
+			childEntry,
+			args,
+			predicateBranches,
+			state,
+			hasEmptyPredicate,
+			nextDirectoryAncestors(directoryAncestors, childEntry)
+		);
+	}
+}
+
+function reportMissingFindEntry(
+	context: BuiltinContext,
+	displayPath: string
+): void {
+	writeDiagnosticsToStderr(context, [
+		createRuntimeDiagnostic(
+			'find',
+			'missing-path',
+			'No such file or directory',
+			{
+				path: displayPath,
+			}
+		),
+	]);
+}
+
+function isLogicalDirectoryLoop(
+	args: FindStep['args'],
+	directoryAncestors: ReadonlySet<string>,
+	path: string,
+	info: FindEntryInfo
+): boolean {
+	return (
+		info.isDirectory &&
+		args.traversal.symlinkMode === 'logical' &&
+		directoryAncestors.has(directoryIdentity(path, info))
+	);
+}
+
+function reportSymlinkLoop(context: BuiltinContext, displayPath: string): void {
+	writeDiagnosticsToStderr(context, [
+		createRuntimeDiagnostic(
+			'find',
+			'symlink-loop',
+			'File system loop detected',
+			{
+				path: displayPath,
+			}
+		),
+	]);
 }
 
 function resolvePredicatesEffect(
@@ -602,58 +725,153 @@ async function readChildren(fs: FS, path: string): Promise<string[]> {
 	return children;
 }
 
-function statOrNull(
+async function statOrNull(
 	fs: FS,
 	path: string
 ): Promise<Awaited<ReturnType<FS['stat']>> | null> {
-	return Result.tryPromise({
-		try: () => fs.stat(path),
-		catch: (error) => error,
-	}).then((result) =>
-		result.match({
-			err: () => null,
-			ok: (stat) => stat,
-		})
-	);
+	try {
+		return await fs.stat(path);
+	} catch {
+		return null;
+	}
 }
 
 async function getFindEntryInfo(
 	fs: FS,
 	path: string,
 	followTerminalSymlink: boolean
-): Promise<FindEntryInfo | null> {
+): Promise<FindEntryInfoResult> {
 	const linkTarget = await readLinkOrNull(fs, path);
 	if (linkTarget !== null && !followTerminalSymlink) {
-		const targetStat = await statOrNull(fs, path);
-		return {
+		return getPhysicalSymlinkEntryInfo(fs, path);
+	}
+
+	return getFollowedFindEntryInfo(
+		fs,
+		path,
+		linkTarget,
+		followTerminalSymlink
+	);
+}
+
+async function getPhysicalSymlinkEntryInfo(
+	fs: FS,
+	path: string
+): Promise<FindEntryInfoResult> {
+	const targetStat = await statOrNull(fs, path);
+	return {
+		info: {
 			isDirectory: false,
 			size: 0,
 			type: 'l',
 			xtype:
 				targetStat === null ? 'l' : fsTypeToFindType(targetStat.type),
-		};
-	}
+		},
+		kind: 'found',
+	};
+}
 
-	const stat = await statOrNull(fs, path);
-	if (stat === null) {
+async function getFollowedFindEntryInfo(
+	fs: FS,
+	path: string,
+	linkTarget: string | null,
+	followTerminalSymlink: boolean
+): Promise<FindEntryInfoResult> {
+	let stat: Awaited<ReturnType<FS['stat']>>;
+	try {
+		stat = await fs.stat(path);
+	} catch (error) {
+		const errorCode =
+			typeof error === 'object' && error !== null && 'code' in error
+				? error.code
+				: null;
+		if (errorCode === 'ELOOP') {
+			return pathErrorResult(error, 'symlink-loop');
+		}
 		if (linkTarget !== null) {
 			return {
-				isDirectory: false,
-				size: 0,
-				type: 'l',
-				xtype: 'l',
+				info: {
+					isDirectory: false,
+					size: 0,
+					type: 'l',
+					xtype: 'l',
+				},
+				kind: 'found',
 			};
 		}
-		return null;
+		return { kind: 'missing' };
 	}
 
 	const type = fsTypeToFindType(stat.type);
+	let realPath: string | undefined;
+	if (type === 'd' && followTerminalSymlink) {
+		try {
+			realPath = await fs.realPath(path);
+		} catch (error) {
+			const errorCode =
+				typeof error === 'object' && error !== null && 'code' in error
+					? error.code
+					: null;
+			return pathErrorResult(
+				error,
+				errorCode === 'ELOOP' ? 'symlink-loop' : 'path-error'
+			);
+		}
+	}
+
 	return {
-		isDirectory: type === 'd',
-		size: stat.size,
-		type,
-		xtype: type,
+		info: {
+			isDirectory: type === 'd',
+			...(realPath === undefined ? {} : { realPath }),
+			size: stat.size,
+			type,
+			xtype: type,
+		},
+		kind: 'found',
 	};
+}
+
+function pathErrorResult(error: unknown, code: string): FindEntryInfoResult {
+	return {
+		code,
+		kind: 'error',
+		message: error instanceof Error ? error.message : String(error),
+	};
+}
+
+function reportFindEntryInfoError(
+	context: BuiltinContext,
+	displayPath: string,
+	error: Extract<FindEntryInfoResult, { kind: 'error' }>
+): void {
+	writeDiagnosticsToStderr(context, [
+		createRuntimeDiagnostic('find', error.code, error.message, {
+			path: displayPath,
+		}),
+	]);
+}
+
+function initialDirectoryAncestors(entry: FindEntry): ReadonlySet<string> {
+	if (!entry.isDirectory) {
+		return new Set<string>();
+	}
+	return new Set([directoryIdentity(entry.absolutePath, entry)]);
+}
+
+function nextDirectoryAncestors(
+	directoryAncestors: ReadonlySet<string>,
+	entry: FindEntry
+): ReadonlySet<string> {
+	if (!entry.isDirectory) {
+		return directoryAncestors;
+	}
+	const nextAncestors = new Set(directoryAncestors);
+	nextAncestors.add(directoryIdentity(entry.absolutePath, entry));
+	return nextAncestors;
+}
+
+function directoryIdentity(path: string, info: FindEntryInfo): string {
+	return info.realPath ?? path;
 }
 
 function readLinkOrNull(fs: FS, path: string): Promise<string | null> {

@@ -167,21 +167,20 @@ export class MemoryFS implements FS {
 			throw new NotFoundError(path, `No such file or directory: ${path}`);
 		}
 
-		// A terminal symlink is removed as itself, never followed.
-		if (isSymlink) {
-			this.symlinks.delete(normalizedPath);
-			this.untrackChild(normalizedPath);
-			this.fileMetadata.delete(normalizedPath);
+		// Terminal symlinks are removed as links, never followed to targets.
+		if (isSymlink || isFile) {
+			this.removeFileOrSymlink(normalizedPath);
 			return;
 		}
 
-		if (isFile) {
-			this.files.delete(normalizedPath);
-			this.untrackChild(normalizedPath);
-			this.fileMetadata.delete(normalizedPath);
-			return;
-		}
+		this.removeDirectory(normalizedPath, path, recursive);
+	}
 
+	private removeDirectory(
+		normalizedPath: string,
+		requestedPath: string,
+		recursive: boolean
+	): void {
 		if (normalizedPath === '/') {
 			throw new InvalidOperationError('/', "rm: cannot remove '/'");
 		}
@@ -192,8 +191,8 @@ export class MemoryFS implements FS {
 
 		if (!recursive && hasChildren) {
 			throw new DirectoryNotEmptyError(
-				path,
-				`Directory not empty: ${path}`
+				requestedPath,
+				`Directory not empty: ${requestedPath}`
 			);
 		}
 
@@ -475,11 +474,7 @@ export class MemoryFS implements FS {
 		this.untrackChild(sourcePath);
 		this.fileMetadata.delete(sourcePath);
 
-		if (this.files.has(destinationPath)) {
-			this.files.delete(destinationPath);
-			this.untrackChild(destinationPath);
-			this.fileMetadata.delete(destinationPath);
-		}
+		this.removeFileOrSymlink(destinationPath);
 
 		this.files.set(destinationPath, content);
 		this.trackChild(destinationPath);
@@ -503,11 +498,7 @@ export class MemoryFS implements FS {
 		this.untrackChild(sourcePath);
 		this.fileMetadata.delete(sourcePath);
 
-		if (this.files.has(destinationPath)) {
-			this.files.delete(destinationPath);
-			this.untrackChild(destinationPath);
-			this.fileMetadata.delete(destinationPath);
-		}
+		this.removeFileOrSymlink(destinationPath);
 
 		this.symlinks.set(destinationPath, target);
 		this.trackChild(destinationPath);
@@ -625,7 +616,10 @@ export class MemoryFS implements FS {
 		destinationPath: string,
 		sourceIsDirectory: boolean
 	): void {
-		if (this.files.has(destinationPath)) {
+		if (
+			this.files.has(destinationPath) ||
+			this.symlinks.has(destinationPath)
+		) {
 			if (!sourceIsDirectory) {
 				return;
 			}
@@ -641,6 +635,16 @@ export class MemoryFS implements FS {
 				`Cannot replace directory: ${destinationPath}`
 			);
 		}
+	}
+
+	private removeFileOrSymlink(path: string): void {
+		const removedFile = this.files.delete(path);
+		const removedSymlink = this.symlinks.delete(path);
+		if (!(removedFile || removedSymlink)) {
+			return;
+		}
+		this.untrackChild(path);
+		this.fileMetadata.delete(path);
 	}
 
 	private getParentDirectories(path: string): string[] {

@@ -121,6 +121,18 @@ test('-false can be used with -o to select only the right branch', async () => {
 	expect(result.output).toBe('tmp/fred/jim');
 });
 
+test('-L reports ancestor symlink loops without descending through them', async () => {
+	await setTextFile('/tmp/dir/file.txt', 'x');
+	await fs.symlink('.', '/tmp/dir/self');
+
+	const result = await runWithStatus('find -L tmp -maxdepth 6 -print');
+
+	expect(result.status).toBe(1);
+	expect(result.output).toBe(
+		['tmp', 'tmp/dir', 'tmp/dir/file.txt'].join('\n')
+	);
+});
+
 test('-empty matches only empty files and empty directories', async () => {
 	await fs.makeDirectory('/tmp/empty-dir', { recursive: true });
 	await fs.makeDirectory('/tmp/nonempty-dir', { recursive: true });

@@ -157,6 +157,22 @@ test('rename moves a symlink and preserves its raw target', async () => {
 	expect(await fs.readLink('/moved.txt')).toBe('/target.txt');
 });
 
+test('renaming a file onto a symlink replaces the link, not its target', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/source.txt', 'source');
+	fs.setFile('/target.txt', 'target');
+	await fs.symlink('/target.txt', '/dest.txt');
+
+	await fs.rename('/source.txt', '/dest.txt');
+
+	expect(await fs.exists('/source.txt')).toBeFalse();
+	await expect(fs.readLink('/dest.txt')).rejects.toThrow(
+		'Not a symlink: /dest.txt'
+	);
+	expect(await readTextFile(fs, '/dest.txt')).toBe('source');
+	expect(await readTextFile(fs, '/target.txt')).toBe('target');
+});
+
 test('recursively removing a directory deletes nested symlinks', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/dir/target.txt', 'x');

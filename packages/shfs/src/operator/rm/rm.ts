@@ -20,6 +20,22 @@ export function rm(fs: FS): ActionEffect<RmArgs> {
 				});
 			}
 
+			if (await isTerminalSymlink(fs, path)) {
+				yield* await Result.tryPromise({
+					try: () => fs.remove(path),
+					catch: (cause) =>
+						new ShellRuntimeError({
+							cause,
+							exitCode: 1,
+							message:
+								cause instanceof Error
+									? cause.message
+									: String(cause),
+						}),
+				});
+				return Result.ok();
+			}
+
 			const statResult = await Result.tryPromise({
 				try: () => fs.stat(path),
 				catch: (cause) =>
@@ -73,4 +89,16 @@ export function rm(fs: FS): ActionEffect<RmArgs> {
 			});
 			return Result.ok();
 		});
+}
+
+async function isTerminalSymlink(fs: FS, path: string): Promise<boolean> {
+	return Result.tryPromise({
+		try: () => fs.readLink(path),
+		catch: (error) => error,
+	}).then((result) =>
+		result.match({
+			err: () => false,
+			ok: () => true,
+		})
+	);
 }
