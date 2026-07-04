@@ -8,20 +8,27 @@ import {
 	parse,
 } from '@shfs/compiler';
 
+import { Result } from 'better-result';
 import picomatch from 'picomatch';
 import type { BuiltinContext } from '../builtin/types';
-import { createDiagnosticError } from '../diagnostics';
+import {
+	createDiagnosticError,
+	type ShellErrorCause,
+	type ShellResult,
+	ShellRuntimeError,
+} from '../diagnostics';
 import type { FS } from '../fs/fs';
-import { formatRecord, type Record as ShellRecord } from '../record';
+import { formatRecord } from '../record';
+import { collectRecordStream, toShellFailure } from './record-stream';
+
+function toShellErrorCause(cause: unknown): ShellErrorCause {
+	return toShellFailure(cause) as ShellErrorCause;
+}
 
 interface FsEntry {
 	path: string;
 	isDirectory: boolean;
 }
-
-type NestedExecuteResult =
-	| { kind: 'stream'; value: AsyncIterable<ShellRecord> }
-	| { kind: 'sink'; value: Promise<void> };
 
 const MULTIPLE_SLASH_REGEX = /\/+/g;
 const ROOT_DIRECTORY = '/';
@@ -29,32 +36,34 @@ const TRAILING_SLASH_REGEX = /\/+$/;
 const VARIABLE_REFERENCE_REGEX = /\$([A-Za-z_][A-Za-z0-9_]*)/g;
 const NO_GLOB_MATCH_MESSAGE = 'no matches found';
 
-async function collectOutputRecords(
-	result: NestedExecuteResult
-): Promise<string[]> {
-	if (result.kind === 'sink') {
-		await result.value;
-		return [];
-	}
-
-	const outputs: string[] = [];
-	for await (const record of result.value) {
-		outputs.push(formatRecord(record));
-	}
-	return outputs;
-}
-
-async function evaluateCommandSubstitution(
+function evaluateCommandSubstitutionEffect(
 	command: string,
 	fs: FS,
 	context: BuiltinContext
-): Promise<string> {
-	const parsed = parse(command);
-	const nestedIR = compile(parsed);
-	const executeModule = await import('./execute');
-	const result = executeModule.execute(nestedIR, fs, context);
-	const outputs = await collectOutputRecords(result);
-	return outputs.join('\n');
+): ShellResult<string, ShellErrorCause> {
+	return Result.gen(async function* () {
+		const parsed = yield* Result.mapError(
+			Result.try({ try: () => parse(command), catch: toShellErrorCause }),
+			toShellErrorCause
+		);
+		const nestedIR = yield* Result.mapError(
+			Result.try({
+				try: () => compile(parsed),
+				catch: toShellErrorCause,
+			}),
+			toShellErrorCause
+		);
+		const executeModule = await import('./execute');
+		const records = yield* Result.mapError(
+			await collectRecordStream(
+				executeModule.execute(nestedIR, fs, context)
+			),
+			toShellErrorCause
+		);
+		return Result.ok(
+			records.map((record) => formatRecord(record)).join('\n')
+		);
+	});
 }
 
 function resolveVariable(
@@ -121,10 +130,6 @@ export function resolvePathsFromCwd(cwd: string, paths: string[]): string[] {
 	return paths.map((path) => resolvePathFromCwd(cwd, path));
 }
 
-async function listFilesystemEntries(fs: FS): Promise<FsEntry[]> {
-	return await walkFilesystemEntries(fs);
-}
-
 async function readDirectoryPaths(
 	fs: FS,
 	directoryPath: string
@@ -137,40 +142,54 @@ async function readDirectoryPaths(
 	return children;
 }
 
-export async function walkFilesystemEntries(
+function walkFilesystemEntriesEffect(
 	fs: FS,
 	rootDir = ROOT_DIRECTORY
-): Promise<FsEntry[]> {
-	const normalizedRoot = normalizeAbsolutePath(rootDir);
-	const rootStat = await fs.stat(normalizedRoot);
-	if (!rootStat.isDirectory) {
-		throw new Error(`Not a directory: ${normalizedRoot}`);
-	}
-
-	const entries: FsEntry[] = [];
-	const pendingDirectories: string[] = [normalizedRoot];
-
-	while (pendingDirectories.length > 0) {
-		const currentDirectory = pendingDirectories.pop();
-		if (!currentDirectory) {
-			continue;
+): ShellResult<FsEntry[], ShellErrorCause> {
+	return Result.gen(async function* () {
+		const normalizedRoot = normalizeAbsolutePath(rootDir);
+		const rootStat = yield* await Result.tryPromise({
+			try: () => fs.stat(normalizedRoot),
+			catch: toShellErrorCause,
+		});
+		if (!rootStat.isDirectory) {
+			return yield* new ShellRuntimeError({
+				exitCode: 1,
+				message: `Not a directory: ${normalizedRoot}`,
+			});
 		}
 
-		const children = await readDirectoryPaths(fs, currentDirectory);
-		for (const childPath of children) {
-			const stat = await fs.stat(childPath);
-			entries.push({
-				path: childPath,
-				isDirectory: stat.isDirectory,
+		const entries: FsEntry[] = [];
+		const pendingDirectories: string[] = [normalizedRoot];
+
+		while (pendingDirectories.length > 0) {
+			const currentDirectory = pendingDirectories.pop();
+			if (!currentDirectory) {
+				continue;
+			}
+
+			const children = yield* await Result.tryPromise({
+				try: () => readDirectoryPaths(fs, currentDirectory),
+				catch: toShellErrorCause,
 			});
-			if (stat.isDirectory) {
-				pendingDirectories.push(childPath);
+			for (const childPath of children) {
+				const stat = yield* await Result.tryPromise({
+					try: () => fs.stat(childPath),
+					catch: toShellErrorCause,
+				});
+				entries.push({
+					path: childPath,
+					isDirectory: stat.isDirectory,
+				});
+				if (stat.isDirectory) {
+					pendingDirectories.push(childPath);
+				}
 			}
 		}
-	}
 
-	entries.sort((left, right) => left.path.localeCompare(right.path));
-	return entries;
+		entries.sort((left, right) => left.path.localeCompare(right.path));
+		return Result.ok(entries);
+	});
 }
 
 function toRelativePathFromCwd(path: string, cwd: string): string | null {
@@ -213,72 +232,76 @@ function toGlobCandidate(
 	return basePath;
 }
 
-async function expandGlobPattern(
+function expandGlobPatternEffect(
 	pattern: string,
 	fs: FS,
 	context: BuiltinContext
-): Promise<string[]> {
-	const directoryOnly = pattern.endsWith(ROOT_DIRECTORY);
-	const isAbsolutePattern = pattern.startsWith(ROOT_DIRECTORY);
-	const matcher = picomatch(pattern, { bash: true, dot: false });
-	const entries = await listFilesystemEntries(fs);
-	const matches: string[] = [];
+): ShellResult<string[], ShellErrorCause> {
+	return Result.gen(async function* () {
+		const directoryOnly = pattern.endsWith(ROOT_DIRECTORY);
+		const isAbsolutePattern = pattern.startsWith(ROOT_DIRECTORY);
+		const matcher = picomatch(pattern, { bash: true, dot: false });
+		const entries = yield* await walkFilesystemEntriesEffect(fs);
+		const matches: string[] = [];
 
-	for (const entry of entries) {
-		const candidate = toGlobCandidate(
-			entry,
-			context.cwd,
-			isAbsolutePattern,
-			directoryOnly
-		);
-		if (!candidate) {
-			continue;
+		for (const entry of entries) {
+			const candidate = toGlobCandidate(
+				entry,
+				context.cwd,
+				isAbsolutePattern,
+				directoryOnly
+			);
+			if (!candidate) {
+				continue;
+			}
+			if (matcher(candidate)) {
+				matches.push(candidate);
+			}
 		}
-		if (matcher(candidate)) {
-			matches.push(candidate);
-		}
-	}
 
-	matches.sort((left, right) => left.localeCompare(right));
-	return matches;
+		matches.sort((left, right) => left.localeCompare(right));
+		return Result.ok(matches);
+	});
 }
 
-function expectSingleExpandedPath(
+function expectSingleExpandedPathEffect(
 	command: string,
 	expectation: string,
 	values: string[],
 	allowEmpty = false
-): string {
-	if (values.length !== 1) {
-		throw createDiagnosticError(
-			createExpansionDiagnostic(
-				command,
-				'invalid-path-count',
-				`${expectation}, got ${values.length}`
-			)
-		);
-	}
+): ShellResult<string, ShellErrorCause> {
+	return Result.gen(function* () {
+		if (values.length !== 1) {
+			return yield* createDiagnosticError(
+				createExpansionDiagnostic(
+					command,
+					'invalid-path-count',
+					`${expectation}, got ${values.length}`
+				)
+			);
+		}
 
-	const resolvedValue = values.at(0);
-	if (resolvedValue === undefined) {
-		throw createDiagnosticError(
-			createExpansionDiagnostic(
-				command,
-				'missing-path',
-				'path missing after expansion'
-			)
-		);
-	}
-	if (!allowEmpty && resolvedValue === '') {
-		throw createDiagnosticError(
-			createExpansionDiagnostic(
-				command,
-				'invalid-path-count',
-				`${expectation}, got empty path`
-			)
-		);
-	}
-	return resolvedValue;
+		const resolvedValue = values.at(0);
+		if (resolvedValue === undefined) {
+			return yield* createDiagnosticError(
+				createExpansionDiagnostic(
+					command,
+					'missing-path',
+					'path missing after expansion'
+				)
+			);
+		}
+		if (!allowEmpty && resolvedValue === '') {
+			return yield* createDiagnosticError(
+				createExpansionDiagnostic(
+					command,
+					'invalid-path-count',
+					`${expectation}, got empty path`
+				)
+			);
+		}
+		return Result.ok(resolvedValue);
+	});
 }
 
 export async function evaluateExpandedPathWords(
@@ -287,107 +310,185 @@ export async function evaluateExpandedPathWords(
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string[]> {
-	const resolvedWords: string[] = [];
-	for (const word of words) {
-		const values = await evaluateExpandedPathWord(
-			command,
-			word,
-			fs,
-			context
-		);
-		resolvedWords.push(...values);
+	const result = await evaluateExpandedPathWordsEffect(
+		command,
+		words,
+		fs,
+		context
+	);
+	if (Result.isError(result)) {
+		throw result.error;
 	}
-	return resolvedWords;
+	return result.value;
 }
 
-export async function evaluateExpandedPathWord(
+export const evaluateExpandedPathWordsEffect: (
+	command: string,
+	words: ExpandedWord[],
+	fs: FS,
+	context: BuiltinContext
+) => ShellResult<string[], ShellErrorCause> = (command, words, fs, context) =>
+	Result.gen(async function* () {
+		const resolvedWords: string[] = [];
+		for (const word of words) {
+			const values = yield* await evaluateExpandedPathWordEffect(
+				command,
+				word,
+				fs,
+				context
+			);
+			resolvedWords.push(...values);
+		}
+		return Result.ok(resolvedWords);
+	});
+
+export const evaluateExpandedPathWordEffect: (
 	command: string,
 	word: ExpandedWord,
 	fs: FS,
 	context: BuiltinContext
-): Promise<string[]> {
-	if (!expandedWordHasGlob(word)) {
-		return [await evaluateExpandedWord(word, fs, context)];
-	}
+) => ShellResult<string[], ShellErrorCause> = (command, word, fs, context) =>
+	Result.gen(async function* () {
+		if (!expandedWordHasGlob(word)) {
+			return Result.ok([
+				yield* await evaluateExpandedWordEffect(word, fs, context),
+			]);
+		}
 
-	const patternSegments: string[] = [];
-	for (const part of expandedWordParts(word)) {
-		patternSegments.push(await evaluateExpandedWordPart(part, fs, context));
-	}
+		const patternSegments: string[] = [];
+		for (const part of expandedWordParts(word)) {
+			patternSegments.push(
+				yield* await evaluateExpandedWordPartEffect(part, fs, context)
+			);
+		}
 
-	const pattern = patternSegments.join('');
-	const matches = await expandGlobPattern(pattern, fs, context);
-	if (matches.length === 0) {
-		throw createDiagnosticError(
-			createExpansionDiagnostic(
-				command,
-				'no-match',
-				`${NO_GLOB_MATCH_MESSAGE}: ${pattern}`
-			)
+		const pattern = patternSegments.join('');
+		const matches = yield* await expandGlobPatternEffect(
+			pattern,
+			fs,
+			context
 		);
-	}
-	return matches;
-}
+		if (matches.length === 0) {
+			return yield* createDiagnosticError(
+				createExpansionDiagnostic(
+					command,
+					'no-match',
+					`${NO_GLOB_MATCH_MESSAGE}: ${pattern}`
+				)
+			);
+		}
+		return Result.ok(matches);
+	});
 
-export async function evaluateExpandedSinglePath(
+export const evaluateExpandedSinglePathEffect: (
 	command: string,
 	expectation: string,
 	word: ExpandedWord,
 	fs: FS,
 	context: BuiltinContext,
 	options?: { allowEmpty?: boolean }
-): Promise<string> {
-	return expectSingleExpandedPath(
-		command,
-		expectation,
-		await evaluateExpandedPathWord(command, word, fs, context),
-		options?.allowEmpty ?? false
-	);
-}
+) => ShellResult<string, ShellErrorCause> = (
+	command,
+	expectation,
+	word,
+	fs,
+	context,
+	options
+) =>
+	Result.gen(async function* () {
+		return await expectSingleExpandedPathEffect(
+			command,
+			expectation,
+			yield* await evaluateExpandedPathWordEffect(
+				command,
+				word,
+				fs,
+				context
+			),
+			options?.allowEmpty ?? false
+		);
+	});
 
 export async function evaluateExpandedWords(
 	words: ExpandedWord[],
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string[]> {
-	const resolvedWords: string[] = [];
-	for (const word of words) {
-		resolvedWords.push(await evaluateExpandedWord(word, fs, context));
+	const result = await evaluateExpandedWordsEffect(words, fs, context);
+	if (Result.isError(result)) {
+		throw result.error;
 	}
-	return resolvedWords;
+	return result.value;
 }
+
+export const evaluateExpandedWordsEffect: (
+	words: ExpandedWord[],
+	fs: FS,
+	context: BuiltinContext
+) => ShellResult<string[], ShellErrorCause> = (words, fs, context) =>
+	Result.gen(async function* () {
+		const resolvedWords: string[] = [];
+		for (const word of words) {
+			resolvedWords.push(
+				yield* await evaluateExpandedWordEffect(word, fs, context)
+			);
+		}
+		return Result.ok(resolvedWords);
+	});
 
 export async function evaluateExpandedWord(
 	word: ExpandedWord,
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string> {
-	const segments: string[] = [];
-	for (const part of expandedWordParts(word)) {
-		segments.push(await evaluateExpandedWordPart(part, fs, context));
+	const result = await evaluateExpandedWordEffect(word, fs, context);
+	if (Result.isError(result)) {
+		throw result.error;
 	}
-	return segments.join('');
+	return result.value;
 }
 
-async function evaluateExpandedWordPart(
+export const evaluateExpandedWordEffect: (
+	word: ExpandedWord,
+	fs: FS,
+	context: BuiltinContext
+) => ShellResult<string, ShellErrorCause> = (word, fs, context) =>
+	Result.gen(async function* () {
+		const segments: string[] = [];
+		for (const part of expandedWordParts(word)) {
+			segments.push(
+				yield* await evaluateExpandedWordPartEffect(part, fs, context)
+			);
+		}
+		return Result.ok(segments.join(''));
+	});
+
+function evaluateExpandedWordPartEffect(
 	part: ExpandedWordPart,
 	fs: FS,
 	context: BuiltinContext
-): Promise<string> {
-	switch (part.kind) {
-		case 'literal':
-			return expandVariables(part.value, context);
-		case 'glob':
-			return expandVariables(part.pattern, context);
-		case 'commandSub': {
-			const commandText = expandVariables(part.command, context);
-			return await evaluateCommandSubstitution(commandText, fs, context);
+): ShellResult<string, ShellErrorCause> {
+	return Result.gen(async function* () {
+		switch (part.kind) {
+			case 'literal':
+				return Result.ok(expandVariables(part.value, context));
+			case 'glob':
+				return Result.ok(expandVariables(part.pattern, context));
+			case 'commandSub': {
+				const commandText = expandVariables(part.command, context);
+				return await evaluateCommandSubstitutionEffect(
+					commandText,
+					fs,
+					context
+				);
+			}
+			default: {
+				const _exhaustive: never = part;
+				return yield* new ShellRuntimeError({
+					exitCode: 1,
+					message: `Unknown word kind: ${JSON.stringify(_exhaustive)}`,
+				});
+			}
 		}
-		default: {
-			const _exhaustive: never = part;
-			throw new Error(
-				`Unknown word kind: ${JSON.stringify(_exhaustive)}`
-			);
-		}
-	}
+	});
 }

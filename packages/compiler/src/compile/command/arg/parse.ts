@@ -1,8 +1,10 @@
+import { Result } from 'better-result';
 import type { ExpandedWord } from '../../../ir';
 import { expandedWordToString } from '../../../ir';
-import { parseArgsWithIndex } from './parse/engine';
+import { parseArgsWithIndex, parseArgsWithIndexEffect } from './parse/engine';
 import { buildFlagIndex } from './parse/flag-index';
 import type {
+	ArgParseError,
 	FlagDef,
 	ParseOptions,
 	ParseResult,
@@ -10,6 +12,7 @@ import type {
 } from './parse/types';
 
 export type {
+	ArgParseError,
 	ConsumedValueIndices,
 	ConsumedValueSources,
 	FlagDef,
@@ -36,6 +39,18 @@ export function createArgParser(
 	};
 }
 
+export function createArgParserEffect(
+	flagDefs: Record<string, FlagDef>
+): (
+	args: readonly string[],
+	options?: ParseOptions
+) => Result<ParseResult, ArgParseError> {
+	const index = buildFlagIndex(flagDefs);
+	return (args: readonly string[], options?: ParseOptions) => {
+		return parseArgsWithIndexEffect(args, index, options);
+	};
+}
+
 export function createWordParser<TWord>(
 	flagDefs: Record<string, FlagDef>,
 	wordToString: (word: TWord) => string
@@ -58,6 +73,28 @@ export function createWordParser<TWord>(
 	};
 }
 
+export function createWordParserEffect<TWord>(
+	flagDefs: Record<string, FlagDef>,
+	wordToString: (word: TWord) => string
+): (
+	words: readonly TWord[],
+	options?: ParseOptions
+) => Result<ParseWordsResult<TWord>, ArgParseError> {
+	const parseWithIndex = createArgParserEffect(flagDefs);
+	return (words: readonly TWord[], options?: ParseOptions) =>
+		Result.gen(function* () {
+			const args = words.map(wordToString);
+			const parsed = yield* parseWithIndex(args, options);
+			const positionalWords = parsed.positionalIndices.flatMap(
+				(index) => {
+					const word = words[index];
+					return word === undefined ? [] : [word];
+				}
+			);
+			return Result.ok({ ...parsed, positionalWords });
+		});
+}
+
 export function parseArgs(
 	args: readonly string[],
 	flagDefs: Record<string, FlagDef>,
@@ -67,12 +104,33 @@ export function parseArgs(
 	return parser(args, options);
 }
 
+export function parseArgsEffect(
+	args: readonly string[],
+	flagDefs: Record<string, FlagDef>,
+	options?: ParseOptions
+): Result<ParseResult, ArgParseError> {
+	const parser = createArgParserEffect(flagDefs);
+	return parser(args, options);
+}
+
 export function parseWords(
 	words: readonly ExpandedWord[],
 	flagDefs: Record<string, FlagDef>,
 	options?: ParseOptions
 ): ParseWordsResult<ExpandedWord> {
 	const parser = createWordParser<ExpandedWord>(
+		flagDefs,
+		expandedWordToString
+	);
+	return parser(words, options);
+}
+
+export function parseWordsEffect(
+	words: readonly ExpandedWord[],
+	flagDefs: Record<string, FlagDef>,
+	options?: ParseOptions
+): Result<ParseWordsResult<ExpandedWord>, ArgParseError> {
+	const parser = createWordParserEffect<ExpandedWord>(
 		flagDefs,
 		expandedWordToString
 	);

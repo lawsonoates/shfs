@@ -1,4 +1,5 @@
 import { expandedWordToString, type WcArgsIR } from '@shfs/compiler';
+import { Result } from 'better-result';
 
 import type { BuiltinContext } from '../../builtin/types';
 import { createShellInput, type ShellInput } from '../../execute/io';
@@ -146,7 +147,12 @@ export async function runWcCommand(
 	const selection = normalizeSelection(options.parsed);
 	const stderr: string[] = [];
 	const redirectedInputBytes = options.inputPath
-		? await readFileOrReport(options.fs, options.inputPath, stderr)
+		? await readFileOrReport(
+				options.fs,
+				options.inputPath,
+				options.inputPath,
+				stderr
+			)
 		: null;
 	if (redirectedInputBytes === null && options.inputPath) {
 		return { exitCode: 1, stderr, stdout: [] };
@@ -213,15 +219,19 @@ export async function runWcCommand(
 			options.context.cwd,
 			target.path
 		);
-		try {
-			const bytes = await options.fs.readFile(resolvedPath);
+		const bytes = await readFileOrReport(
+			options.fs,
+			resolvedPath,
+			target.displayPath,
+			stderr
+		);
+		if (bytes === null) {
+			hadError = true;
+		} else {
 			countedInputs.push({
 				counts: countBytes(bytes),
 				displayPath: target.displayPath,
 			});
-		} catch {
-			stderr.push(`wc: ${target.displayPath}: No such file or directory`);
-			hadError = true;
 		}
 	}
 
@@ -281,12 +291,16 @@ async function resolveInputSource(options: {
 		namesBytes = await options.readStdinBytes();
 	} else {
 		const path = resolvePathFromCwd(options.context.cwd, files0From);
-		try {
-			namesBytes = await options.fs.readFile(path);
-		} catch {
-			options.stderr.push(`wc: ${files0From}: No such file or directory`);
+		const loadedNames = await readFileOrReport(
+			options.fs,
+			path,
+			files0From,
+			options.stderr
+		);
+		if (loadedNames === null) {
 			return null;
 		}
+		namesBytes = loadedNames;
 	}
 
 	const names = parseNulSeparatedNames(namesBytes, options.stderr);
@@ -345,14 +359,20 @@ function appendName(
 async function readFileOrReport(
 	fs: FS,
 	path: string,
+	displayPath: string,
 	stderr: string[]
 ): Promise<Uint8Array | null> {
-	try {
-		return await fs.readFile(path);
-	} catch {
-		stderr.push(`wc: ${path}: No such file or directory`);
-		return null;
-	}
+	const result = await Result.tryPromise({
+		try: () => fs.readFile(path),
+		catch: (error) => error,
+	});
+	return result.match({
+		err: () => {
+			stderr.push(`wc: ${displayPath}: No such file or directory`);
+			return null;
+		},
+		ok: (bytes) => bytes,
+	});
 }
 
 function createStdinReader(

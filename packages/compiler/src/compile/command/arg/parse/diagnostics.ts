@@ -1,4 +1,4 @@
-import type { ParseDiagnostic } from './types';
+import { ArgParseError, type ParseDiagnostic } from './types';
 
 export const UNKNOWN_FLAG_PREFIX = 'Unknown flag: ';
 
@@ -9,7 +9,9 @@ export function createParseDiagnostic(
 	error: unknown
 ): ParseDiagnostic {
 	let message = 'Unknown parse error.';
-	if (error instanceof Error) {
+	if (isArgParseError(error)) {
+		message = error.message;
+	} else if (error instanceof Error) {
 		message = error.message;
 	} else if (typeof error === 'string') {
 		message = error;
@@ -22,13 +24,36 @@ export function createParseDiagnostic(
 	};
 }
 
-export function throwUnknownFlag(token: string): never {
-	throw new Error(`${UNKNOWN_FLAG_PREFIX}${token}`);
+export function argParseError(
+	code: ArgParseError['code'],
+	message: string,
+	token?: string
+): ArgParseError {
+	return new ArgParseError({
+		code,
+		message,
+		token,
+	});
+}
+
+export function unknownFlagError(token: string): ArgParseError {
+	return argParseError(
+		'unknown-flag',
+		`${UNKNOWN_FLAG_PREFIX}${token}`,
+		token
+	);
 }
 
 export function isUnknownFlagError(error: unknown): boolean {
-	if (!(error instanceof Error)) {
-		return false;
-	}
-	return error.message.startsWith(UNKNOWN_FLAG_PREFIX);
+	return isArgParseError(error) && error.code === 'unknown-flag';
+}
+
+export function isArgParseError(error: unknown): error is ArgParseError {
+	return (
+		error instanceof ArgParseError ||
+		(typeof error === 'object' &&
+			error !== null &&
+			'_tag' in error &&
+			error._tag === 'ArgParseError')
+	);
 }

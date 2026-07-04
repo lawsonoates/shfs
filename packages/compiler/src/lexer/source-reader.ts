@@ -102,37 +102,14 @@ export class StringSourceReader implements SourceReader {
 	readSimpleWord(): SimpleWordRead {
 		const start = this.pos;
 		let kind: TokenKindValue = TokenKind.NUMBER;
-		readChars: while (this.pos < this.input.length) {
+		while (this.pos < this.input.length) {
 			const code = this.input.charCodeAt(this.pos);
-			switch (code) {
-				case 9:
-				case 10:
-				case 32:
-				case 34:
-				case 35:
-				case 39:
-				case 40:
-				case 41:
-				case 42:
-				case 59:
-				case 60:
-				case 62:
-				case 63:
-				case 91:
-				case 92:
-				case 124:
-					break readChars;
+			if (isSimpleWordDelimiterCode(code)) {
+				break;
 			}
 
 			if (kind !== TokenKind.WORD) {
-				const offset = this.pos - start;
-				if (kind === TokenKind.NUMBER) {
-					if (!isDigitCode(code)) {
-						kind = offset === 0 && isNameStartCode(code) ? TokenKind.NAME : TokenKind.WORD;
-					}
-				} else if (!isNameContinueCode(code)) {
-					kind = TokenKind.WORD;
-				}
+				kind = nextSimpleWordKind(kind, code, this.pos - start);
 			}
 			this.pos++;
 		}
@@ -161,4 +138,47 @@ export class StringSourceReader implements SourceReader {
 			this.markState = null;
 		}
 	}
+}
+
+function isSimpleWordDelimiterCode(code: number): boolean {
+	switch (code) {
+		case 9:
+		case 10:
+		case 32:
+		case 34:
+		case 35:
+		case 39:
+		case 40:
+		case 41:
+		case 42:
+		case 59:
+		case 60:
+		case 62:
+		case 63:
+		case 91:
+		case 92:
+		case 124:
+			return true;
+		default:
+			return false;
+	}
+}
+
+function nextSimpleWordKind(
+	kind: TokenKindValue,
+	code: number,
+	offset: number
+): TokenKindValue {
+	if (kind === TokenKind.NUMBER) {
+		if (isDigitCode(code)) {
+			return kind;
+		}
+		return offset === 0 && isNameStartCode(code)
+			? TokenKind.NAME
+			: TokenKind.WORD;
+	}
+	if (!isNameContinueCode(code)) {
+		return TokenKind.WORD;
+	}
+	return kind;
 }

@@ -1,3 +1,4 @@
+import { argParseError } from './diagnostics';
 import type {
 	ConsumedValueIndices,
 	ConsumedValueSources,
@@ -105,7 +106,8 @@ export function setValue(
 
 	// Repeated value flags must be explicit.
 	if (!def.multiple) {
-		throw new Error(
+		throw argParseError(
+			'duplicate-flag',
 			`Duplicate flag "${canonical}". If it is intended to repeat, set { multiple: true } in its definition.`
 		);
 	}
@@ -124,7 +126,10 @@ export function setValue(
 	}
 
 	// Should be unreachable unless user mixes boolean/value definitions for the same canonical key
-	throw new Error(`Invalid state for flag "${canonical}".`);
+	throw argParseError(
+		'invalid-state',
+		`Invalid state for flag "${canonical}".`
+	);
 }
 
 function recordConsumedValueIndex(

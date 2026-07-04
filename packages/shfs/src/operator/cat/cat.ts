@@ -1,3 +1,5 @@
+import { Result } from 'better-result';
+
 import { isDirectoryRecord } from '../../execute/records';
 import type { FS } from '../../fs/fs';
 import type { FileRecord, LineRecord, Record } from '../../record';
@@ -135,8 +137,19 @@ async function* emitFileLines(
 	fs: FS,
 	record: FileRecord,
 	state: CatState,
-	options: Required<CatOptions>
+	options: Required<CatOptions>,
+	onMissingFile?: (path: string) => void
 ): AsyncIterable<LineRecord> {
+	if (onMissingFile) {
+		const stat = await Result.tryPromise({
+			try: () => fs.stat(record.path),
+			catch: (error) => error,
+		});
+		if (Result.isError(stat)) {
+			onMissingFile(record.path);
+			return;
+		}
+	}
 	if (await isDirectoryRecord(fs, record)) {
 		return;
 	}
@@ -159,7 +172,8 @@ async function* emitFileLines(
 
 export function cat(
 	fs: FS,
-	options?: CatOptions
+	options?: CatOptions,
+	onMissingFile?: (path: string) => void
 ): Transducer<Record, LineRecord> {
 	const normalized = normalizeOptions(options);
 	const state: CatState = {
@@ -177,7 +191,7 @@ export function cat(
 				yield* emitJsonRecord(record.value, state, normalized);
 				continue;
 			}
-			yield* emitFileLines(fs, record, state, normalized);
+			yield* emitFileLines(fs, record, state, normalized, onMissingFile);
 		}
 	};
 }

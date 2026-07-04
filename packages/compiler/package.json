@@ -11,6 +11,9 @@
 		"build": "tsdown",
 		"prepublishOnly": "bun run build"
 	},
+	"dependencies": {
+		"better-result": "^2.9.2"
+	},
 	"name": "@shfs/compiler",
 	"peerDependencies": {
 		"typescript": "^5"

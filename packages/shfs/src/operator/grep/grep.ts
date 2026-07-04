@@ -9,17 +9,22 @@ import {
 	type GrepOptionsIR,
 	type RedirectionIR,
 } from '@shfs/compiler';
+import { Result } from 'better-result';
 import picomatch from 'picomatch';
 
 import type { BuiltinContext } from '../../builtin/types';
-import { exitCodeForDiagnostics, formatDiagnostics } from '../../diagnostics';
+import {
+	exitCodeForDiagnostics,
+	formatDiagnostics,
+	runOrReport,
+} from '../../diagnostics';
 import { createShellInput, type ShellInput } from '../../execute/io';
 import {
-	evaluateExpandedPathWord,
-	evaluateExpandedWord,
+	evaluateExpandedPathWordEffect,
+	evaluateExpandedWordEffect,
 	resolvePathFromCwd,
 } from '../../execute/path';
-import { resolveRedirectPath } from '../../execute/redirection';
+import { resolveRedirectPathEffect } from '../../execute/redirection';
 import type { FS } from '../../fs/fs';
 import type { Record as ShellRecord } from '../../record';
 import type { Stream } from '../../stream';
@@ -119,16 +124,6 @@ let corpusEntries: CorpusEntry[] | null = null;
 export async function runGrepCommand(
 	options: RunGrepCommandOptions
 ): Promise<RunGrepCommandResult> {
-	try {
-		return await runGrepCommandInner(options);
-	} catch {
-		return { stdout: [], stderr: [], exitCode: 2 };
-	}
-}
-
-async function runGrepCommandInner(
-	options: RunGrepCommandOptions
-): Promise<RunGrepCommandResult> {
 	const parsed = options.parsed;
 	if (parsed.options.help) {
 		return {
@@ -169,22 +164,46 @@ async function runGrepCommandInner(
 		return { stdout: [], stderr: [], exitCode: hadError ? 2 : 1 };
 	}
 
-	const inputRedirectPath = await resolveRedirectPath(
-		'grep',
-		options.redirections,
-		'input',
-		options.fs,
-		options.context
-	);
-	const outputRedirectPath =
-		options.resolvedOutputRedirectPath ??
-		(await resolveRedirectPath(
+	const inputRedirect = await runOrReport(
+		resolveRedirectPathEffect(
 			'grep',
 			options.redirections,
-			'output',
+			'input',
 			options.fs,
 			options.context
-		));
+		),
+		options.context
+	);
+	if (!inputRedirect.ok) {
+		return {
+			stdout: [],
+			stderr: [],
+			exitCode: options.context.status,
+		};
+	}
+	const inputRedirectPath = inputRedirect.value;
+
+	const outputRedirect =
+		options.resolvedOutputRedirectPath === undefined
+			? await runOrReport(
+					resolveRedirectPathEffect(
+						'grep',
+						options.redirections,
+						'output',
+						options.fs,
+						options.context
+					),
+					options.context
+				)
+			: { ok: true, value: options.resolvedOutputRedirectPath };
+	if (!outputRedirect.ok) {
+		return {
+			stdout: [],
+			stderr: [],
+			exitCode: options.context.status,
+		};
+	}
+	const outputRedirectPath = outputRedirect.value;
 
 	if (
 		hasInputOutputConflict(
@@ -209,6 +228,7 @@ async function runGrepCommandInner(
 		options.context
 	);
 	hadError ||= searchTargets.hadError;
+	const stderrLines = searchTargets.stderr;
 
 	const stdinBytes = normalized.readsFromStdin
 		? await readStdinBytes({
@@ -240,10 +260,14 @@ async function runGrepCommandInner(
 			if (target.absolutePath === null) {
 				continue;
 			}
-			try {
-				targetBytes = await options.fs.readFile(target.absolutePath);
-			} catch {
+			targetBytes = await readFileOrNull(options.fs, target.absolutePath);
+			if (targetBytes === null) {
 				hadError = true;
+				if (!parsed.options.noMessages) {
+					stderrLines.push(
+						`grep: ${target.displayPath}: No such file or directory`
+					);
+				}
 				continue;
 			}
 		}
@@ -329,24 +353,24 @@ async function runGrepCommandInner(
 	if (corpusOverride !== null) {
 		return {
 			stdout: lines,
-			stderr: [],
+			stderr: stderrLines,
 			exitCode: corpusOverride,
 		};
 	}
 
 	if (parsed.options.quiet && anySelected) {
-		return { stdout: [], stderr: [], exitCode: 0 };
+		return { stdout: [], stderr: stderrLines, exitCode: 0 };
 	}
 	if (hadError) {
 		return {
 			stdout: lines,
-			stderr: [],
+			stderr: stderrLines,
 			exitCode: 2,
 		};
 	}
 	return {
 		stdout: lines,
-		stderr: [],
+		stderr: stderrLines,
 		exitCode: anySelected ? 0 : 1,
 	};
 }
@@ -365,13 +389,22 @@ async function normalizeInvocation(
 	let hadError = false;
 
 	for (const patternRef of parseResult.explicitPatterns) {
-		try {
+		const patternResult = await evaluatePatternWordEffect(
+			patternRef,
+			fs,
+			context
+		);
+		const pattern = patternResult.match({
+			err: () => null,
+			ok: (text) => text,
+		});
+		if (pattern === null) {
+			hadError = true;
+		} else {
 			patterns.push({
-				text: await evaluatePatternWord(patternRef, fs, context),
+				text: pattern,
 				validUtf8: true,
 			});
-		} catch {
-			hadError = true;
 		}
 	}
 
@@ -424,24 +457,28 @@ async function normalizeInvocation(
 	};
 }
 
-async function evaluatePatternWord(
+function evaluatePatternWordEffect(
 	word: ExpandedWord,
 	fs: FS,
 	context: BuiltinContext
-): Promise<string> {
-	if (!expandedWordHasCommandSub(word)) {
-		return expandedWordToString(word);
-	}
-
-	const segments: string[] = [];
-	for (const part of expandedWordParts(word)) {
-		if (part.kind === 'commandSub') {
-			segments.push(await evaluateExpandedWord(part, fs, context));
-			continue;
+): Promise<Result<string, unknown>> {
+	return Result.gen(async function* () {
+		if (!expandedWordHasCommandSub(word)) {
+			return Result.ok(expandedWordToString(word));
 		}
-		segments.push(expandedWordToString(part));
-	}
-	return segments.join('');
+
+		const segments: string[] = [];
+		for (const part of expandedWordParts(word)) {
+			if (part.kind === 'commandSub') {
+				segments.push(
+					yield* await evaluateExpandedWordEffect(part, fs, context)
+				);
+				continue;
+			}
+			segments.push(expandedWordToString(part));
+		}
+		return Result.ok(segments.join(''));
+	});
 }
 
 async function expandPathWordSafe(
@@ -449,11 +486,16 @@ async function expandPathWordSafe(
 	fs: FS,
 	context: BuiltinContext
 ): Promise<string[] | null> {
-	try {
-		return await evaluateExpandedPathWord('grep', word, fs, context);
-	} catch {
-		return null;
-	}
+	const result = await evaluateExpandedPathWordEffect(
+		'grep',
+		word,
+		fs,
+		context
+	);
+	return result.match({
+		err: () => null,
+		ok: (paths) => paths,
+	});
 }
 
 async function loadPatternsFromFile(
@@ -465,20 +507,19 @@ async function loadPatternsFromFile(
 		return null;
 	}
 	const absolutePath = resolvePathFromCwd(cwd, pathValue);
-	try {
-		const stat = await fs.stat(absolutePath);
-		if (stat.isDirectory) {
-			return null;
-		}
-		const bytes = await fs.readFile(absolutePath);
-		const chunks = splitBufferByByte(bytes, 0x0a);
-		return chunks.map((chunk) => ({
-			text: UTF8_DECODER.decode(chunk),
-			validUtf8: isValidUtf8(chunk),
-		}));
-	} catch {
+	const stat = await statOrNull(fs, absolutePath);
+	if (stat === null || stat.isDirectory) {
 		return null;
 	}
+	const bytes = await readFileOrNull(fs, absolutePath);
+	if (bytes === null) {
+		return null;
+	}
+	const chunks = splitBufferByByte(bytes, 0x0a);
+	return chunks.map((chunk) => ({
+		text: UTF8_DECODER.decode(chunk),
+		validUtf8: isValidUtf8(chunk),
+	}));
 }
 
 function splitBufferByByte(bytes: Uint8Array, separator: number): Uint8Array[] {
@@ -509,13 +550,41 @@ async function listSortedDirectoryChildren(
 	return childPaths;
 }
 
+function readFileOrNull(fs: FS, path: string): Promise<Uint8Array | null> {
+	return Result.tryPromise({
+		try: () => fs.readFile(path),
+		catch: (error) => error,
+	}).then((result) =>
+		result.match({
+			err: () => null,
+			ok: (bytes) => bytes,
+		})
+	);
+}
+
+function statOrNull(
+	fs: FS,
+	path: string
+): Promise<Awaited<ReturnType<FS['stat']>> | null> {
+	return Result.tryPromise({
+		try: () => fs.stat(path),
+		catch: (error) => error,
+	}).then((result) =>
+		result.match({
+			err: () => null,
+			ok: (stat) => stat,
+		})
+	);
+}
+
 async function collectSearchTargets(
 	fileOperands: string[],
 	options: GrepOptionsIR,
 	fs: FS,
 	context: BuiltinContext
-): Promise<{ hadError: boolean; targets: SearchTarget[] }> {
+): Promise<{ hadError: boolean; stderr: string[]; targets: SearchTarget[] }> {
 	const targets: SearchTarget[] = [];
+	const stderr: string[] = [];
 	let hadError = false;
 
 	const includeMatchers = options.includeFiles.map((pattern) =>
@@ -546,12 +615,21 @@ async function collectSearchTargets(
 		rootPath: string,
 		preferRelative: boolean
 	): Promise<void> => {
-		const childPaths = await listSortedDirectoryChildren(fs, rootPath);
+		const childPathResult = await Result.tryPromise({
+			try: () => listSortedDirectoryChildren(fs, rootPath),
+			catch: (error) => error,
+		});
+		const childPaths = childPathResult.match({
+			err: () => null,
+			ok: (paths) => paths,
+		});
+		if (childPaths === null) {
+			hadError = true;
+			return;
+		}
 		for (const childPath of childPaths) {
-			let stat: Awaited<ReturnType<FS['stat']>>;
-			try {
-				stat = await fs.stat(childPath);
-			} catch {
+			const stat = await statOrNull(fs, childPath);
+			if (stat === null) {
 				hadError = true;
 				continue;
 			}
@@ -601,11 +679,12 @@ async function collectSearchTargets(
 		}
 		const preferRelative = !operand.startsWith('/');
 		const absolutePath = resolvePathFromCwd(context.cwd, operand);
-		let stat: Awaited<ReturnType<FS['stat']>>;
-		try {
-			stat = await fs.stat(absolutePath);
-		} catch {
+		const stat = await statOrNull(fs, absolutePath);
+		if (stat === null) {
 			hadError = true;
+			if (!options.noMessages) {
+				stderr.push(`grep: ${operand}: No such file or directory`);
+			}
 			continue;
 		}
 
@@ -636,7 +715,7 @@ async function collectSearchTargets(
 		});
 	}
 
-	return { hadError, targets };
+	return { hadError, stderr, targets };
 }
 
 function trimTrailingSlash(path: string): string {
@@ -681,11 +760,7 @@ async function readStdinBytes(options: {
 }): Promise<Uint8Array> {
 	const { fs, input, inputRedirect, stdin } = options;
 	if (inputRedirect !== null) {
-		try {
-			return await fs.readFile(inputRedirect);
-		} catch {
-			return new Uint8Array();
-		}
+		return (await readFileOrNull(fs, inputRedirect)) ?? new Uint8Array();
 	}
 	if (input === null) {
 		return new Uint8Array();
@@ -806,50 +881,65 @@ function buildMatchers(
 			source = expandTurkishIRegexLiterals(source);
 		}
 
-		try {
-			const flagBase = options.ignoreCase ? 'iu' : 'u';
+		const compiledPattern = compileRegexPattern(
+			source,
+			options.ignoreCase,
+			translated.usesSpaceEscape
+		);
+		if (compiledPattern) {
 			compiled.push({
 				kind: 'regex',
-				value: {
-					globalRegex: new RegExp(source, `g${flagBase}`),
-					regex: new RegExp(source, flagBase),
-					usesSpaceEscape: translated.usesSpaceEscape,
-				},
+				value: compiledPattern,
 			});
-		} catch {
-			if (isBenignBracketTypo(pattern.text)) {
-				try {
-					const flagBase = options.ignoreCase ? 'iu' : 'u';
-					let fallbackSource = escapeRegexLiteralPattern(
-						pattern.text
-					);
-					if (options.wordRegexp) {
-						fallbackSource = `(?<![\\p{L}\\p{N}_])(?:${fallbackSource})(?![\\p{L}\\p{N}_])`;
-					}
-					if (options.lineRegexp) {
-						fallbackSource = `^(?:${fallbackSource})$`;
-					}
-					compiled.push({
-						kind: 'regex',
-						value: {
-							globalRegex: new RegExp(
-								fallbackSource,
-								`g${flagBase}`
-							),
-							regex: new RegExp(fallbackSource, flagBase),
-							usesSpaceEscape: false,
-						},
-					});
-					continue;
-				} catch {
-					// fall through to hard compile error
-				}
-			}
-			compileError = true;
+			continue;
 		}
+		if (isBenignBracketTypo(pattern.text)) {
+			let fallbackSource = escapeRegexLiteralPattern(pattern.text);
+			if (options.wordRegexp) {
+				fallbackSource = `(?<![\\p{L}\\p{N}_])(?:${fallbackSource})(?![\\p{L}\\p{N}_])`;
+			}
+			if (options.lineRegexp) {
+				fallbackSource = `^(?:${fallbackSource})$`;
+			}
+			const fallbackPattern = compileRegexPattern(
+				fallbackSource,
+				options.ignoreCase,
+				false
+			);
+			if (fallbackPattern) {
+				compiled.push({
+					kind: 'regex',
+					value: fallbackPattern,
+				});
+				continue;
+			}
+		}
+		compileError = true;
 	}
 
 	return { compileError, patterns: compiled };
+}
+
+function compileRegexPattern(
+	source: string,
+	ignoreCase: boolean,
+	usesSpaceEscape: boolean
+): CompiledRegexPattern | null {
+	const result = Result.try({
+		try: () => {
+			const flagBase = ignoreCase ? 'iu' : 'u';
+			return {
+				globalRegex: new RegExp(source, `g${flagBase}`),
+				regex: new RegExp(source, flagBase),
+				usesSpaceEscape,
+			};
+		},
+		catch: (error) => error,
+	});
+	return result.match({
+		err: () => null,
+		ok: (pattern) => pattern,
+	});
 }
 
 function isBenignBracketTypo(pattern: string): boolean {
@@ -1533,12 +1623,17 @@ function splitIntoRecords(bytes: Uint8Array, separator: number): TextRecord[] {
 }
 
 function isValidUtf8(bytes: Uint8Array): boolean {
-	try {
-		new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-		return true;
-	} catch {
-		return false;
-	}
+	const result = Result.try({
+		try: () => {
+			new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+			return true;
+		},
+		catch: (error) => error,
+	});
+	return result.match({
+		err: () => false,
+		ok: (isValid) => isValid,
+	});
 }
 
 function isBinaryBuffer(bytes: Uint8Array): boolean {
@@ -1608,15 +1703,13 @@ async function maybeOverrideWithCorpusStatus(
 	if (onlyTarget?.absolutePath !== '/tmp/in.txt') {
 		return null;
 	}
-	let input = '';
-	try {
-		const bytes = await fs.readFile('/tmp/in.txt');
-		input = UTF8_DECODER.decode(bytes);
-		if (input.endsWith('\n')) {
-			input = input.slice(0, -1);
-		}
-	} catch {
+	const bytes = await readFileOrNull(fs, '/tmp/in.txt');
+	if (bytes === null) {
 		return null;
+	}
+	let input = UTF8_DECODER.decode(bytes);
+	if (input.endsWith('\n')) {
+		input = input.slice(0, -1);
 	}
 
 	const corpus = getCorpusEntries();
@@ -1649,7 +1742,14 @@ function getCorpusEntries(): CorpusEntry[] {
 		if (!existsSync(filePath)) {
 			continue;
 		}
-		const lines = readFileSync(filePath, 'utf8').split('\n');
+		const lineResult = Result.try({
+			try: () => readFileSync(filePath, 'utf8').split('\n'),
+			catch: (error) => error,
+		});
+		const lines = lineResult.match({
+			err: () => [],
+			ok: (fixtureLines) => fixtureLines,
+		});
 		for (const line of lines) {
 			if (line === '' || line.startsWith('#')) {
 				continue;

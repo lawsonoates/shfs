@@ -278,13 +278,7 @@ export class Scanner {
 					simpleWord.spelling,
 					span,
 					createEmptyFlags(),
-					[
-						this.createWordPart(
-							'literal',
-							simpleWord.spelling,
-							span
-						),
-					]
+					[this.createWordPart('literal', simpleWord.spelling, span)]
 				);
 			}
 

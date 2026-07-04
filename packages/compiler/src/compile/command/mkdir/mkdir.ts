@@ -2,6 +2,8 @@
  * mkdir command handler for the AST-based compiler.
  */
 
+import { Result } from 'better-result';
+import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
 	expandedWordToString,
@@ -24,6 +26,16 @@ const parseMkdirArgs = createWordParser<ExpandedWord>(
  * Compile a mkdir command from SimpleCommandIR to StepIR.
  */
 export function compileMkdir(cmd: SimpleCommandIR): StepIR {
+	const result = compileMkdirEffect(cmd);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
+}
+
+export const compileMkdirEffect: (
+	cmd: SimpleCommandIR
+) => Result<StepIR, CompileError> = (cmd) => {
 	const parsed = parseMkdirArgs(cmd.args, {
 		unknownFlagPolicy: 'positional',
 	});
@@ -33,11 +45,19 @@ export function compileMkdir(cmd: SimpleCommandIR): StepIR {
 	const paths = parsed.positionalWords;
 
 	if (paths.length === 0) {
-		throw new Error('mkdir requires at least one path');
+		return Result.err(
+			new CompileError(
+				createCommandDiagnostic(
+					'mkdir',
+					'missing-path',
+					'mkdir requires at least one path'
+				)
+			)
+		);
 	}
 
-	return {
+	return Result.ok({
 		cmd: 'mkdir',
 		args: { parents, paths, recursive },
-	} as const;
-}
+	} as const satisfies StepIR);
+};

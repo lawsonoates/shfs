@@ -1,16 +1,9 @@
-import {
-	compile,
-	ParseSyntaxError,
-	parse,
-	type ScriptIR,
-} from '@shfs/compiler';
+import { compile, parse, type ScriptIR } from '@shfs/compiler';
+import { Result } from 'better-result';
 
-import { collect } from '../consumer/consumer';
-import {
-	isShellDiagnosticError,
-	writeDiagnosticsToStderr,
-} from '../diagnostics';
-import { type ExecuteResult, execute } from '../execute/execute';
+import { isShellFailure, reportShellFailure } from '../diagnostics';
+import { execute } from '../execute/execute';
+import { collectRecordStream } from '../execute/record-stream';
 import type { FS } from '../fs/fs';
 import {
 	type OutputChannels,
@@ -18,12 +11,7 @@ import {
 	ShellOutput,
 } from '../output-channels';
 import { formatRecord, type Record } from '../record';
-import {
-	BufferedOutputStream,
-	formatStderr,
-	type OutputStream,
-} from '../stderr';
-import { lazy } from '../util/lazy';
+import { BufferedOutputStream, formatStderr } from '../stderr';
 
 const ROOT_DIRECTORY = '/';
 const MULTIPLE_SLASH_REGEX = /\/+/g;
@@ -89,14 +77,6 @@ function normalizeCwd(cwd: string): string {
 	const normalized = normalizeAbsolutePath(cwd);
 	const trimmed = normalized.replace(TRAILING_SLASH_REGEX, '');
 	return trimmed === '' ? ROOT_DIRECTORY : trimmed;
-}
-
-async function collectStdoutRecords(result: ExecuteResult): Promise<Record[]> {
-	if (result.kind === 'sink') {
-		await result.value;
-		return [];
-	}
-	return collect<Record>()(result.value);
 }
 
 function buildStdoutText(records: readonly Record[]): string {
@@ -257,10 +237,17 @@ export class Shell {
 	private _exec(strings: TemplateStringsArray, ...exprs: unknown[]) {
 		const source = String.raw(strings, ...exprs);
 		const fs = this.fs;
-		const ir = lazy<ScriptIR>(() => {
-			const ast = parse(source);
-			return compile(ast);
-		});
+		const parseCommand = () =>
+			Result.gen(function* () {
+				const ast = yield* Result.try({
+					try: () => parse(source),
+					catch: (error) => error,
+				});
+				return Result.try({
+					try: () => compile(ast),
+					catch: (error) => error,
+				});
+			});
 
 		return createShellCommand(
 			new ShellPromise(async (cwdOverride) => {
@@ -275,15 +262,29 @@ export class Shell {
 					localVars: new Map<string, string>(),
 				};
 				try {
-					return {
-						stdout: await collectStdoutRecords(
-							execute(ir(), fs, context)
-						),
-						stderr: context.stderr.snapshot(),
-						exitCode: context.status,
-					};
-				} catch (error) {
-					handleDiagnosticFailure(error, context);
+					const runCommand = await Result.gen(async function* () {
+						const script: ScriptIR = yield* parseCommand();
+						const stdout: Record[] =
+							yield* await collectRecordStream(
+								execute(script, fs, context)
+							);
+						return Result.ok({
+							stdout,
+							stderr: context.stderr.snapshot(),
+							exitCode: context.status,
+						});
+					});
+					if (Result.isOk(runCommand)) {
+						return runCommand.value;
+					}
+					const error = runCommand.error;
+					if (!isShellFailure(error)) {
+						// Unknown errors are bugs; surface them to the caller
+						// like a plain throw would.
+						context.status = 1;
+						throw error;
+					}
+					reportShellFailure(context, error);
 					return {
 						stdout: [],
 						stderr: context.stderr.snapshot(),
@@ -301,25 +302,4 @@ export class Shell {
 			})
 		);
 	}
-}
-
-function handleDiagnosticFailure(
-	error: unknown,
-	context: {
-		status?: number;
-		stderr: OutputStream;
-	}
-): void {
-	if (error instanceof ParseSyntaxError) {
-		context.status = 1;
-		writeDiagnosticsToStderr(context, [error.diagnostic]);
-		return;
-	}
-	if (isShellDiagnosticError(error)) {
-		context.status = error.exitCode;
-		writeDiagnosticsToStderr(context, error.diagnostics);
-		return;
-	}
-	context.status = 1;
-	throw error;
 }

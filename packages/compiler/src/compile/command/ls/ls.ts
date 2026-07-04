@@ -8,7 +8,7 @@ import {
 	literal,
 	type SimpleCommandIR,
 	type StepIR,
-} from '@/ir';
+} from '../../../ir';
 import type { Flag } from '../arg/flag';
 import { createWordParser } from '../arg/parse';
 

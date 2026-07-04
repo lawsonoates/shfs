@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { Parser, parse } from '#compiler/parser/parser';
+import { Parser, parse, parseEffect } from '#compiler/parser/parser';
 import { ParseSyntaxError } from '#compiler/parser/syntax-error';
 
 test('parse supports newline-separated statements', () => {
@@ -168,44 +168,56 @@ test('parse records chain metadata for and/or statements', () => {
 test('unexpected token syntax failures surface through shared parse diagnostics', () => {
 	const parser = new Parser('echo )');
 
+	let error: unknown = null;
 	try {
 		parser.parse();
-		throw new Error('Expected parse failure');
-	} catch (error) {
-		if (!(error instanceof ParseSyntaxError)) {
-			throw error;
-		}
-
-		expect(error.diagnostic).toMatchObject({
-			code: 'unexpected-token',
-			message: "Unexpected token ')', expected newline or ;",
-			phase: 'parse',
-			severity: 'error',
-		});
-		expect(error.diagnostic.location.span?.start.line).toBe(1);
-		expect(parser.getErrorReporter().getDiagnostics()[0]).toMatchObject({
-			code: 'unexpected-token',
-			phase: 'parse',
-		});
+	} catch (cause) {
+		error = cause;
 	}
+	expect(error).toBeInstanceOf(ParseSyntaxError);
+	if (!(error instanceof ParseSyntaxError)) {
+		return;
+	}
+
+	expect(error.diagnostic).toMatchObject({
+		code: 'unexpected-token',
+		message: "Unexpected token ')', expected newline or ;",
+		phase: 'parse',
+		severity: 'error',
+	});
+	expect(error.diagnostic.location.span?.start.line).toBe(1);
+	expect(parser.getErrorReporter().getDiagnostics()[0]).toMatchObject({
+		code: 'unexpected-token',
+		phase: 'parse',
+	});
 });
 
 test('unexpected EOF syntax failures surface through shared parse diagnostics', () => {
 	const parser = new Parser('cat <');
 
+	let error: unknown = null;
 	try {
 		parser.parse();
-		throw new Error('Expected parse failure');
-	} catch (error) {
-		if (!(error instanceof ParseSyntaxError)) {
-			throw error;
-		}
+	} catch (cause) {
+		error = cause;
+	}
+	expect(error).toBeInstanceOf(ParseSyntaxError);
+	if (!(error instanceof ParseSyntaxError)) {
+		return;
+	}
 
-		expect(error.diagnostic).toMatchObject({
-			code: 'unexpected-eof',
-			phase: 'parse',
-			severity: 'error',
-		});
-		expect(error.diagnostic.message).toContain('Unexpected end of input');
+	expect(error.diagnostic).toMatchObject({
+		code: 'unexpected-eof',
+		phase: 'parse',
+		severity: 'error',
+	});
+	expect(error.diagnostic.message).toContain('Unexpected end of input');
+});
+
+test('parseEffect yields syntax failures on the result error channel', () => {
+	const result = parseEffect('cat <');
+	expect(result.isErr()).toBeTrue();
+	if (result.isErr()) {
+		expect(result.error).toBeInstanceOf(ParseSyntaxError);
 	}
 });

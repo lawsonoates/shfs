@@ -46,6 +46,9 @@
     },
     "packages/compiler": {
       "name": "@shfs/compiler",
+      "dependencies": {
+        "better-result": "^2.9.2",
+      },
       "devDependencies": {
         "@tsconfig/bun": "catalog:",
         "@types/bun": "catalog:",
@@ -59,16 +62,15 @@
     },
     "packages/shfs": {
       "name": "shfs",
-      "version": "0.3.1",
-      "dependencies": {
-        "picomatch": "^4.0.3",
-      },
+      "version": "0.3.5",
       "devDependencies": {
         "@shfs/compiler": "workspace:*",
         "@tsconfig/bun": "catalog:",
         "@types/bun": "catalog:",
         "@types/picomatch": "^4.0.2",
         "@typescript/native-preview": "catalog:",
+        "better-result": "^2.9.2",
+        "picomatch": "^4.0.3",
         "tsdown": "catalog:",
         "typescript": "^5.0.0",
       },
@@ -78,7 +80,7 @@
     },
     "packages/web": {
       "name": "@shfs/web",
-      "version": "0.3.1",
+      "version": "0.3.5",
       "dependencies": {
         "bun-plugin-tailwind": "^0.1.2",
         "picomatch": "^4.0.3",
@@ -622,6 +624,8 @@
     "base64-js": ["base64-js@1.5.1", "", {}, "sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA=="],
 
     "before-after-hook": ["before-after-hook@3.0.2", "", {}, "sha512-Nik3Sc0ncrMK4UUdXQmAnRtzmNQTAAXmXIopizwZ1W1t8QmfJj+zL4OA2I7XPTPW5z5TDqv4hRo/JzouDJnX3A=="],
+
+    "better-result": ["better-result@2.9.2", "", {}, "sha512-WIFoBPCdnTOdk9inkE1ZRvCZ4P0CpSkAiLlchC65N7n9DcjZ3NhqkBOlafzpOVnO8ixyi37kicmSJ3ENhPZl7Q=="],
 
     "birpc": ["birpc@4.0.0", "", {}, "sha512-LShSxJP0KTmd101b6DRyGBj57LZxSDYWKitQNW/mi8GRMvZb078Uf9+pveax1DrVL89vm7mWe+TovdI/UDOuPw=="],
 

@@ -48,7 +48,10 @@ export class StatementParser {
 		while (this.parser.currentToken.kind !== TokenKind.EOF) {
 			const statement = this.parseStatement();
 			if (!statement) {
-				this.parser.syntacticError('Expected command', 'command');
+				return this.parser.syntacticError(
+					'Expected command',
+					'command'
+				);
 			}
 
 			statements.push(statement);
@@ -59,7 +62,7 @@ export class StatementParser {
 					TokenKind.EOF &&
 				!sawSeparator
 			) {
-				this.parser.syntacticError(
+				return this.parser.syntacticError(
 					'Expected statement separator',
 					'newline or ;'
 				);
@@ -132,7 +135,7 @@ export class StatementParser {
 				tokenAfterPipe.kind === TokenKind.WORD &&
 				tokenAfterPipe.spelling === '&'
 			) {
-				this.parser.syntacticError(
+				return this.parser.syntacticError(
 					'Invalid fish pipeline operator',
 					'command after | (|& is unsupported; use &|)'
 				);
@@ -140,11 +143,10 @@ export class StatementParser {
 
 			const command = this.commandParser.parseCommand();
 			if (!command) {
-				this.parser.syntacticError(
+				return this.parser.syntacticError(
 					'Expected command after |',
 					'command'
 				);
-				break;
 			}
 
 			commands.push(command);

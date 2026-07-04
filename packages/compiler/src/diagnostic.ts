@@ -1,3 +1,4 @@
+import { TaggedError } from 'better-result';
 import type { SourceSpan } from './lexer/position';
 
 export type DiagnosticPhase = 'compile' | 'expansion' | 'parse' | 'runtime';
@@ -17,6 +18,28 @@ export interface ShellDiagnostic {
 	message: string;
 	phase: DiagnosticPhase;
 	severity: DiagnosticSeverity;
+}
+
+export class CompileError extends TaggedError('CompileError')<{
+	diagnostic: ShellDiagnostic;
+	message: string;
+}>() {
+	constructor(diagnostic: ShellDiagnostic) {
+		super({
+			diagnostic,
+			message: diagnostic.message,
+		});
+	}
+}
+
+export function isCompileError(error: unknown): error is CompileError {
+	return (
+		error instanceof CompileError ||
+		(typeof error === 'object' &&
+			error !== null &&
+			'_tag' in error &&
+			error._tag === 'CompileError')
+	);
 }
 
 interface CreateDiagnosticOptions {

@@ -2,6 +2,8 @@
  * touch command handler for the AST-based compiler.
  */
 
+import { Result } from 'better-result';
+import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
 	expandedWordToString,
@@ -25,6 +27,16 @@ const parseTouchArgs = createWordParser<ExpandedWord>(
  * Compile a touch command from SimpleCommandIR to StepIR.
  */
 export function compileTouch(cmd: SimpleCommandIR): StepIR {
+	const result = compileTouchEffect(cmd);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
+}
+
+export const compileTouchEffect: (
+	cmd: SimpleCommandIR
+) => Result<StepIR, CompileError> = (cmd) => {
 	const parsed = parseTouchArgs(cmd.args, {
 		unknownFlagPolicy: 'positional',
 	});
@@ -36,11 +48,19 @@ export function compileTouch(cmd: SimpleCommandIR): StepIR {
 	});
 
 	if (files.length === 0) {
-		throw new Error('touch requires at least one file');
+		return Result.err(
+			new CompileError(
+				createCommandDiagnostic(
+					'touch',
+					'missing-file',
+					'touch requires at least one file'
+				)
+			)
+		);
 	}
 
-	return {
+	return Result.ok({
 		cmd: 'touch',
 		args: { accessTimeOnly, files, modificationTimeOnly },
-	} as const;
-}
+	} as const satisfies StepIR);
+};

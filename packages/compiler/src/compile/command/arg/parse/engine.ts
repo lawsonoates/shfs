@@ -1,9 +1,14 @@
+import { Result } from 'better-result';
 import {
 	isNegativeNumberToken,
 	startsWithLongPrefix,
 	startsWithShortPrefix,
 } from '../utils';
-import { createParseDiagnostic, isUnknownFlagError } from './diagnostics';
+import {
+	createParseDiagnostic,
+	isArgParseError,
+	isUnknownFlagError,
+} from './diagnostics';
 import { getNegativeNumberValueEntry, normalizeOptions } from './options';
 import {
 	appendPositional,
@@ -16,6 +21,7 @@ import {
 import { parseLongToken } from './token/long';
 import { parseShortToken } from './token/short';
 import type {
+	ArgParseError,
 	ConsumedValueIndices,
 	ConsumedValueSources,
 	FlagIndex,
@@ -58,8 +64,9 @@ export function parseArgsWithIndex(
 			continue;
 		}
 
+		let processed: ProcessTokenResult;
 		try {
-			const result = processToken({
+			processed = processToken({
 				args,
 				consumedValueIndices,
 				consumedValueSources,
@@ -77,13 +84,6 @@ export function parseArgsWithIndex(
 				token,
 				unknownFlagPolicy: normalizedOptions.unknownFlagPolicy,
 			});
-			consumedValueIndices = result.consumedValueIndices;
-			consumedValueSources = result.consumedValueSources;
-			endOfFlags = result.endOfFlags;
-			flagOccurrenceOrder = result.flagOccurrenceOrder;
-			flags = result.flags;
-			i = result.newIndex;
-			nextFlagOrder = result.nextFlagOrder;
 		} catch (error) {
 			if (normalizedOptions.errorPolicy !== 'diagnostic') {
 				throw error;
@@ -91,7 +91,16 @@ export function parseArgsWithIndex(
 			diagnostics.push(
 				createParseDiagnostic('parse-error', token, i, error)
 			);
+			continue;
 		}
+
+		consumedValueIndices = processed.consumedValueIndices;
+		consumedValueSources = processed.consumedValueSources;
+		endOfFlags = processed.endOfFlags;
+		flagOccurrenceOrder = processed.flagOccurrenceOrder;
+		flags = processed.flags;
+		i = processed.newIndex;
+		nextFlagOrder = processed.nextFlagOrder;
 	}
 
 	return {
@@ -103,6 +112,21 @@ export function parseArgsWithIndex(
 		positional,
 		positionalIndices,
 	};
+}
+
+export function parseArgsWithIndexEffect(
+	args: readonly string[],
+	index: FlagIndex,
+	options?: ParseOptions
+): Result<ParseResult, ArgParseError> {
+	try {
+		return Result.ok(parseArgsWithIndex(args, index, options));
+	} catch (error) {
+		if (isArgParseError(error)) {
+			return Result.err(error);
+		}
+		throw error;
+	}
 }
 
 function processToken(params: {
@@ -330,8 +354,9 @@ function parsePotentialFlagToken(
 	const orderState: ParseOrderState = {
 		nextFlagOrder: currentNextFlagOrder,
 	};
+	let newIndex: number;
 	try {
-		const newIndex = parser(
+		newIndex = parser(
 			args,
 			index,
 			token,
@@ -342,20 +367,20 @@ function parsePotentialFlagToken(
 			candidateFlagOccurrenceOrder,
 			orderState
 		);
-		return {
-			consumedValueIndices: candidateConsumedValueIndices,
-			consumedValueSources: candidateConsumedValueSources,
-			flagOccurrenceOrder: candidateFlagOccurrenceOrder,
-			flags: candidateFlags,
-			newIndex,
-			nextFlagOrder: orderState.nextFlagOrder,
-		};
 	} catch (error) {
 		if (isUnknownFlagError(error) && unknownFlagPolicy !== 'error') {
 			return null;
 		}
 		throw error;
 	}
+	return {
+		consumedValueIndices: candidateConsumedValueIndices,
+		consumedValueSources: candidateConsumedValueSources,
+		flagOccurrenceOrder: candidateFlagOccurrenceOrder,
+		flags: candidateFlags,
+		newIndex,
+		nextFlagOrder: orderState.nextFlagOrder,
+	};
 }
 
 function handleUnrecognizedToken(

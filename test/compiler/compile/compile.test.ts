@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test';
-import { compile } from '#compiler/compile/compile';
+
+import { compile, compileEffect } from '#compiler/compile/compile';
+import { CompileError } from '#compiler/diagnostic';
 import { commandSub, compound, glob, literal } from '#compiler/ir';
 import { parse } from '#compiler/parser/parser';
 
@@ -146,4 +148,12 @@ test('compile preserves and/or chain metadata', () => {
 		'and',
 		'or',
 	]);
+});
+
+test('compileEffect yields compile failures on the result error channel', () => {
+	const result = compileEffect(parse('definitely-not-a-command'));
+	expect(result.isErr()).toBeTrue();
+	if (result.isErr()) {
+		expect(result.error).toBeInstanceOf(CompileError);
+	}
 });

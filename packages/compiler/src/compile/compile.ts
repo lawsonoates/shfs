@@ -10,6 +10,8 @@
  * - Preserves word structure for runtime expansion
  */
 
+import { Result } from 'better-result';
+import { CompileError, createCommandDiagnostic } from '../diagnostic';
 import {
 	commandSub,
 	compound,
@@ -45,9 +47,19 @@ import { CommandHandler } from './command/handler';
  * @returns The compiled ScriptIR
  */
 export function compile(program: Program): ScriptIR {
+	const result = compileEffect(program);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
+}
+
+export const compileEffect: (
+	program: Program
+) => Result<ScriptIR, CompileError> = (program) => {
 	const compiler = new ProgramCompiler();
 	return compiler.compileProgram(program);
-}
+};
 
 /**
  * Compiler that traverses the AST to produce IR.
@@ -60,64 +72,79 @@ class ProgramCompiler {
 	/**
 	 * Compile a Program to a ScriptIR.
 	 */
-	compileProgram(node: Program): ScriptIR {
-		const statements = new Array<ScriptStatementIR>(node.statements.length);
-		for (let index = 0; index < node.statements.length; index++) {
-			const statement = node.statements[index];
-			if (statement) {
-				statements[index] = this.compileStatement(statement);
+	compileProgram(node: Program): Result<ScriptIR, CompileError> {
+		const compiler = this;
+		return Result.gen(function* () {
+			const statements = new Array<ScriptStatementIR>(
+				node.statements.length
+			);
+			for (let index = 0; index < node.statements.length; index++) {
+				const statement = node.statements[index];
+				if (statement) {
+					statements[index] =
+						yield* compiler.compileStatement(statement);
+				}
 			}
-		}
-		return { statements };
+			return Result.ok({ statements });
+		});
 	}
 
 	/**
 	 * Compile a script statement to ScriptStatementIR.
 	 */
-	compileStatement(node: Statement): ScriptStatementIR {
-		return {
-			chainMode: node.chainMode,
-			pipeline: this.compilePipeline(node.pipeline),
-		};
+	compileStatement(node: Statement): Result<ScriptStatementIR, CompileError> {
+		const compiler = this;
+		return Result.gen(function* () {
+			return Result.ok({
+				chainMode: node.chainMode,
+				pipeline: yield* compiler.compilePipeline(node.pipeline),
+			});
+		});
 	}
 
 	/**
 	 * Compile a Pipeline to a PipelineIR.
 	 */
-	compilePipeline(node: Pipeline): PipelineIR {
-		const commands = new Array<SimpleCommandIR>(node.commands.length);
-		for (let index = 0; index < node.commands.length; index++) {
-			const command = node.commands[index];
-			if (command) {
-				commands[index] = this.compileSimpleCommand(command);
+	compilePipeline(node: Pipeline): Result<PipelineIR, CompileError> {
+		const compiler = this;
+		return Result.gen(function* () {
+			const commands = new Array<SimpleCommandIR>(node.commands.length);
+			for (let index = 0; index < node.commands.length; index++) {
+				const command = node.commands[index];
+				if (command) {
+					commands[index] = compiler.compileSimpleCommand(command);
+				}
 			}
-		}
 
-		if (commands.length === 0) {
-			throw new Error('Pipeline must contain at least one command');
-		}
-
-		// First command determines the source
-		const firstCmd = commands[0];
-		if (!firstCmd) {
-			throw new Error('Pipeline must contain at least one command');
-		}
-		const source = this.determineSource(firstCmd);
-
-		// Compile each command to a step
-		const steps = new Array<StepIR>(commands.length);
-		for (let index = 0; index < commands.length; index++) {
-			const command = commands[index];
-			if (command) {
-				steps[index] = this.compileCommandToStep(command);
+			// First command determines the source
+			const firstCmd = commands[0];
+			if (!firstCmd) {
+				return yield* new CompileError(
+					createCommandDiagnostic(
+						'<pipeline>',
+						'empty-pipeline',
+						'Pipeline must contain at least one command'
+					)
+				);
 			}
-		}
+			const source = compiler.determineSource(firstCmd);
 
-		return {
-			source,
-			steps,
-			firstCommand: firstCmd,
-		};
+			// Compile each command to a step
+			const steps = new Array<StepIR>(commands.length);
+			for (let index = 0; index < commands.length; index++) {
+				const command = commands[index];
+				if (command) {
+					steps[index] =
+						yield* compiler.compileCommandToStep(command);
+				}
+			}
+
+			return Result.ok({
+				source,
+				steps,
+				firstCommand: firstCmd,
+			});
+		});
 	}
 
 	/**
@@ -246,18 +273,29 @@ class ProgramCompiler {
 	/**
 	 * Compile a SimpleCommandIR to a StepIR.
 	 */
-	private compileCommandToStep(cmd: SimpleCommandIR): StepIR {
-		const cmdName = this.extractLiteralString(cmd.name);
-		if (!cmdName) {
-			throw new Error('Command name must be a literal string');
-		}
+	private compileCommandToStep(
+		cmd: SimpleCommandIR
+	): Result<StepIR, CompileError> {
+		const compiler = this;
+		return Result.gen(function* () {
+			const cmdName = compiler.extractLiteralString(cmd.name);
+			if (!cmdName) {
+				return yield* new CompileError(
+					createCommandDiagnostic(
+						'<command>',
+						'command-name-not-literal',
+						'Command name must be a literal string'
+					)
+				);
+			}
 
-		const handler = CommandHandler.get(cmdName);
-		const step = handler(cmd);
-		return {
-			...step,
-			redirections: cmd.redirections,
-		};
+			const handler = yield* CommandHandler.get(cmdName);
+			const step = yield* handler(cmd);
+			return Result.ok({
+				...step,
+				redirections: cmd.redirections,
+			});
+		});
 	}
 
 	/**

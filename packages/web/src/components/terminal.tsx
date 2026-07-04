@@ -65,10 +65,16 @@ export const Terminal = () => {
 			if (combinedLines.length > 0) {
 				setHistoryLines((previous) => [...previous, ...combinedLines]);
 			}
+		} catch {
+			// Unknown shell failures still leave the prompt usable.
 		} finally {
-			const pwdResult = await shell.$`pwd`;
-			const currentPath = pwdResult.stdout.toString('utf8');
-			setPath(currentPath || '~');
+			try {
+				const pwdResult = await shell.$`pwd`.nothrow();
+				const currentPath = pwdResult.stdout.toString('utf8');
+				setPath(currentPath || '~');
+			} catch {
+				// Keep the previous path if pwd fails.
+			}
 			setIsRunning(false);
 		}
 	};

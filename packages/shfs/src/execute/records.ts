@@ -1,3 +1,5 @@
+import { Result } from 'better-result';
+
 import type { FS } from '../fs/fs';
 import {
 	type FileRecord,
@@ -74,11 +76,14 @@ export async function isDirectoryRecord(
 		return record.isDirectory;
 	}
 
-	try {
-		return (await fs.stat(record.path)).isDirectory;
-	} catch {
-		return false;
-	}
+	const result = await Result.tryPromise({
+		try: () => fs.stat(record.path),
+		catch: (error) => error,
+	});
+	return result.match({
+		err: () => false,
+		ok: (stat) => stat.isDirectory,
+	});
 }
 
 export function formatRecord(record: ShellRecord): string {

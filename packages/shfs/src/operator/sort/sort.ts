@@ -1,4 +1,5 @@
 import type { SortArgsIR, SortKeyIR } from '@shfs/compiler';
+import { Result } from 'better-result';
 
 import type { BuiltinContext } from '../../builtin/types';
 import { createShellInput, type ShellInput } from '../../execute/io';
@@ -145,11 +146,14 @@ async function checkStdinLines(
 	stdinReader: StdinLineReader,
 	args: SortArgsIR
 ): Promise<RunSortCommandResult> {
-	try {
-		return await checkSortedLines(stdinReader.read(), args);
-	} catch {
-		return createStdinCheckReadError(stdinReader.displayPath);
-	}
+	const result = await Result.tryPromise({
+		try: () => checkSortedLines(stdinReader.read(), args),
+		catch: (error) => error,
+	});
+	return result.match({
+		err: () => createStdinCheckReadError(stdinReader.displayPath),
+		ok: (value) => value,
+	});
 }
 
 async function checkPathLines(
@@ -158,17 +162,20 @@ async function checkPathLines(
 	displayPath: string,
 	args: SortArgsIR
 ): Promise<RunSortCommandResult> {
-	try {
-		return await checkSortedLines(fs.readLines(path), args);
-	} catch {
-		return {
+	const result = await Result.tryPromise({
+		try: () => checkSortedLines(fs.readLines(path), args),
+		catch: (error) => error,
+	});
+	return result.match({
+		err: () => ({
 			exitCode: 2,
 			stderr: [
 				`sort: cannot read: ${displayPath}: No such file or directory`,
 			],
 			stdout: [],
-		};
-	}
+		}),
+		ok: (value) => value,
+	});
 }
 
 async function checkSortedLines(
@@ -255,12 +262,17 @@ async function collectPathLines(
 	path: string,
 	displayPath: string
 ): Promise<SortInputResult> {
-	const lines: string[] = [];
-	try {
-		for await (const line of fs.readLines(path)) {
-			lines.push(line);
-		}
-	} catch {
+	const result = await Result.tryPromise({
+		try: async () => {
+			const lines: string[] = [];
+			for await (const line of fs.readLines(path)) {
+				lines.push(line);
+			}
+			return lines;
+		},
+		catch: (error) => error,
+	});
+	if (Result.isError(result)) {
 		return {
 			exitCode: 2,
 			lines: [],
@@ -269,7 +281,7 @@ async function collectPathLines(
 			],
 		};
 	}
-	return { exitCode: 0, lines, stderr: [] };
+	return { exitCode: 0, lines: result.value, stderr: [] };
 }
 
 function createStdinLineReader(
@@ -295,15 +307,20 @@ function createStdinLineReader(
 async function collectStdinLinesToArray(
 	stdinReader: StdinLineReader
 ): Promise<SortInputResult> {
-	const lines: string[] = [];
-	try {
-		for await (const line of stdinReader.read()) {
-			lines.push(line);
-		}
-	} catch {
-		return createStdinInputReadError(stdinReader.displayPath);
-	}
-	return { exitCode: 0, lines, stderr: [] };
+	const result = await Result.tryPromise({
+		try: async () => {
+			const lines: string[] = [];
+			for await (const line of stdinReader.read()) {
+				lines.push(line);
+			}
+			return lines;
+		},
+		catch: (error) => error,
+	});
+	return result.match({
+		err: () => createStdinInputReadError(stdinReader.displayPath),
+		ok: (lines) => ({ exitCode: 0, lines, stderr: [] }),
+	});
 }
 
 async function* emptyLines(): AsyncIterable<string> {

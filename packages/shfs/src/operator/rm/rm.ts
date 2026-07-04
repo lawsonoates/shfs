@@ -1,5 +1,7 @@
+import { Result } from 'better-result';
+import { ShellRuntimeError } from '../../diagnostics';
 import type { FS } from '../../fs/fs';
-import type { Effect } from '../types';
+import type { ActionEffect } from '../types';
 
 export interface RmArgs {
 	path: string;
@@ -8,30 +10,67 @@ export interface RmArgs {
 	interactive?: boolean;
 }
 
-export function rm(fs: FS): Effect<RmArgs> {
-	return async ({ path, recursive, force = false, interactive = false }) => {
-		if (interactive) {
-			throw new Error(`rm: interactive mode is not supported: ${path}`);
-		}
-
-		let stat: Awaited<ReturnType<FS['stat']>> | null = null;
-		try {
-			stat = await fs.stat(path);
-		} catch {
-			if (force) {
-				return;
+export function rm(fs: FS): ActionEffect<RmArgs> {
+	return ({ path, recursive, force = false, interactive = false }) =>
+		Result.gen(async function* () {
+			if (interactive) {
+				return yield* new ShellRuntimeError({
+					exitCode: 1,
+					message: `rm: interactive mode is not supported: ${path}`,
+				});
 			}
-			throw new Error(`File not found: ${path}`);
-		}
 
-		if (!stat.isDirectory) {
-			await fs.deleteFile(path);
-			return;
-		}
+			const statResult = await Result.tryPromise({
+				try: () => fs.stat(path),
+				catch: (cause) =>
+					new ShellRuntimeError({
+						cause,
+						exitCode: force ? 0 : 1,
+						message: force ? '' : `File not found: ${path}`,
+					}),
+			});
+			if (Result.isError(statResult)) {
+				if (force) {
+					return Result.ok();
+				}
+				return yield* statResult;
+			}
 
-		if (!recursive) {
-			throw new Error(`rm: cannot remove '${path}': Is a directory`);
-		}
-		await fs.deleteDirectory(path, true);
-	};
+			const stat = statResult.value;
+			if (!stat.isDirectory) {
+				yield* await Result.tryPromise({
+					try: () => fs.deleteFile(path),
+					catch: (cause) =>
+						new ShellRuntimeError({
+							cause,
+							exitCode: 1,
+							message:
+								cause instanceof Error
+									? cause.message
+									: String(cause),
+						}),
+				});
+				return Result.ok();
+			}
+
+			if (!recursive) {
+				return yield* new ShellRuntimeError({
+					exitCode: 1,
+					message: `rm: cannot remove '${path}': Is a directory`,
+				});
+			}
+			yield* await Result.tryPromise({
+				try: () => fs.deleteDirectory(path, true),
+				catch: (cause) =>
+					new ShellRuntimeError({
+						cause,
+						exitCode: 1,
+						message:
+							cause instanceof Error
+								? cause.message
+								: String(cause),
+					}),
+			});
+			return Result.ok();
+		});
 }

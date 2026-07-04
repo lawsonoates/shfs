@@ -1,4 +1,4 @@
-import { throwUnknownFlag } from '../diagnostics';
+import { argParseError, unknownFlagError } from '../diagnostics';
 import { isShortFlagCharacter } from '../flag-index';
 import { setBoolean, setValue } from '../state';
 import type { FlagEntry, TokenParser } from '../types';
@@ -14,7 +14,7 @@ export const parseShortToken: TokenParser = (
 	consumedValueSources,
 	flagOccurrenceOrder,
 	orderState
-): number => {
+): ReturnType<TokenParser> => {
 	if (token.length >= 3 && token[2] === '=') {
 		return parseShortEqualsToken(
 			index,
@@ -242,7 +242,7 @@ function getRequiredShortEntry(
 ): FlagEntry {
 	const entry = flagsIndex.short.get(name);
 	if (!entry) {
-		throwUnknownFlag(name);
+		throw unknownFlagError(name);
 	}
 	return entry;
 }
@@ -251,8 +251,10 @@ function assertValidShortCharacter(token: string, ch: string): void {
 	if (isShortFlagCharacter(ch)) {
 		return;
 	}
-	throw new Error(
-		`Invalid short flag character "${ch}" in "${token}". Short flags must be letters.`
+	throw argParseError(
+		'invalid-flag',
+		`Invalid short flag character "${ch}" in "${token}". Short flags must be letters.`,
+		token
 	);
 }
 
@@ -260,7 +262,11 @@ function assertTakesValue(entry: FlagEntry, token: string): void {
 	if (entry.def.takesValue) {
 		return;
 	}
-	throw new Error(`Flag ${token} does not take a value.`);
+	throw argParseError(
+		'invalid-flag',
+		`Flag ${token} does not take a value.`,
+		token
+	);
 }
 
 function assertNotAmbiguousShortValue(
@@ -278,8 +284,10 @@ function assertNotAmbiguousShortValue(
 	if (!(isShortFlagCharacter(first) && flagsIndex.short.has(`-${first}`))) {
 		return;
 	}
-	throw new Error(
+	throw argParseError(
+		'ambiguous-short-value',
 		`Ambiguous short flag cluster "${token}": ${name} takes a value, but "${rest}" begins with "-${first}" which is also a flag. ` +
-			`Use "${name}=${rest}" or pass the value as a separate argument.`
+			`Use "${name}=${rest}" or pass the value as a separate argument.`,
+		token
 	);
 }

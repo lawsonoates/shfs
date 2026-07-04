@@ -135,19 +135,20 @@ test('shell throws Bun-like ShellError by default for non-zero exits', async () 
 	await fs.mkdir('/workspace/b', true);
 	const shell = new Shell(fs, { cwd: '/workspace' });
 
+	let error: unknown = null;
 	try {
 		await shell.$`echo hello > *`;
-		throw new Error('expected command to throw');
-	} catch (error) {
-		expect(error).toBeInstanceOf(ShellError);
-		if (!(error instanceof ShellError)) {
-			throw error;
-		}
-		expect(error.exitCode).toBe(1);
-		expect(error.stderr.toString()).toContain(
-			'error[expansion:invalid-path-count]'
-		);
+	} catch (cause) {
+		error = cause;
 	}
+	expect(error).toBeInstanceOf(ShellError);
+	if (!(error instanceof ShellError)) {
+		return;
+	}
+	expect(error.exitCode).toBe(1);
+	expect(error.stderr.toString()).toContain(
+		'error[expansion:invalid-path-count]'
+	);
 });
 
 test('shell preserves deterministic non-zero status for diagnostics', async () => {

@@ -1,3 +1,4 @@
+import { argParseError } from './diagnostics';
 import type {
 	FlagEntry,
 	FlagIndex,
@@ -25,20 +26,23 @@ export function getNegativeNumberValueEntry(
 	}
 
 	if (!options.negativeNumberFlag) {
-		throw new Error(
+		throw argParseError(
+			'invalid-option',
 			'negativeNumberFlag is required when negativeNumberPolicy is "value".'
 		);
 	}
 
 	const entry = index.canonical.get(options.negativeNumberFlag);
 	if (!entry) {
-		throw new Error(
+		throw argParseError(
+			'invalid-option',
 			`Unknown negativeNumberFlag: "${options.negativeNumberFlag}".`
 		);
 	}
 
 	if (!entry.def.takesValue) {
-		throw new Error(
+		throw argParseError(
+			'invalid-option',
 			`negativeNumberFlag "${options.negativeNumberFlag}" must reference a flag that takes a value.`
 		);
 	}

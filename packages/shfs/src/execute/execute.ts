@@ -6,30 +6,38 @@ import {
 	type StatementChainModeIR,
 	type StepIR,
 } from '@shfs/compiler';
+import { Result } from 'better-result';
+import {
+	runOrReport,
+	type ShellErrorCause,
+	type ShellResult,
+	ShellRuntimeError,
+} from '../diagnostics';
 import type { FS } from '../fs/fs';
 import { formatRecord, type Record as ShellRecord } from '../record';
 import { BufferedOutputStream, type OutputStream } from '../stderr';
 import type { Stream } from '../stream';
 import {
-	evaluateExpandedSinglePath,
+	evaluateExpandedSinglePathEffect,
 	normalizeCwd,
 	resolvePathFromCwd,
 } from './path';
 import {
+	collectRecordStream,
+	fromRecordGenerator,
+	type RecordStream,
+} from './record-stream';
+import {
 	ensureNoclobberWritable,
 	getRedirectionMode,
-	hasRedirect,
 	isNullDevicePath,
-	type ExecuteResult as RedirectExecuteResult,
 	writeTextToFile,
 } from './redirection';
 import {
+	type ActionStep,
 	CommandRegistry,
-	type EffectStep,
 	type ExecuteStepContext,
 } from './registry';
-
-export type { ExecuteResult } from './redirection';
 
 export interface ExecuteContext {
 	cwd: string;
@@ -71,10 +79,6 @@ interface ExecutedStepResult extends RoutedOutput {
 const ROOT_DIRECTORY = '/';
 const FD_TARGET_REGEX = /^&[0-9]+$/;
 
-async function* emptyStream<T>(): Stream<T> {
-	// no records
-}
-
 function isScriptIR(ir: PipelineIR | ScriptIR): ir is ScriptIR {
 	return 'statements' in ir;
 }
@@ -107,102 +111,18 @@ export function execute(
 	ir: PipelineIR | ScriptIR,
 	fs: FS,
 	context: ExecuteContext = { cwd: ROOT_DIRECTORY }
-): RedirectExecuteResult {
+): RecordStream {
 	const normalizedContext = normalizeContext(context);
 	const scriptIR = isScriptIR(ir) ? ir : toScriptIR(ir);
 	return executeScript(scriptIR, fs, normalizedContext);
-}
-
-function isPipelineSink(pipeline: PipelineIR): boolean {
-	if (hasMidPipelineStdoutBypass(pipeline.steps)) {
-		return false;
-	}
-	const finalStep = pipeline.steps.at(-1);
-	if (!finalStep) {
-		return false;
-	}
-	return (
-		CommandRegistry.isEffectStep(finalStep) ||
-		hasRedirect(finalStep.redirections, 'output')
-	);
-}
-
-function hasMidPipelineStdoutBypass(steps: StepIR[]): boolean {
-	for (const [index, step] of steps.entries()) {
-		if (index === steps.length - 1) {
-			continue;
-		}
-		const redirections = step.redirections ?? [];
-		const hasNonStdoutPipe = redirections.some((redirection) => {
-			return (
-				redirection.kind === 'output' &&
-				getSourceFd(redirection) !== 1 &&
-				getRedirectionMode(redirection) === 'pipe'
-			);
-		});
-		if (!hasNonStdoutPipe) {
-			continue;
-		}
-		const hasStdoutPipe = redirections.some((redirection) => {
-			return (
-				redirection.kind === 'output' &&
-				getSourceFd(redirection) === 1 &&
-				getRedirectionMode(redirection) === 'pipe'
-			);
-		});
-		if (!hasStdoutPipe) {
-			return true;
-		}
-	}
-	return false;
 }
 
 function executeScript(
 	script: ScriptIR,
 	fs: FS,
 	context: NormalizedExecuteContext
-): RedirectExecuteResult {
-	if (script.statements.length === 0) {
-		return {
-			kind: 'stream',
-			value: emptyStream<ShellRecord>(),
-		};
-	}
-
-	if (
-		script.statements.every((statement) =>
-			isPipelineSink(statement.pipeline)
-		)
-	) {
-		return {
-			kind: 'sink',
-			value: runScriptToCompletion(script, fs, context),
-		};
-	}
-
-	return {
-		kind: 'stream',
-		value: runScriptToStream(script, fs, context),
-	};
-}
-
-async function runScriptToCompletion(
-	script: ScriptIR,
-	fs: FS,
-	context: NormalizedExecuteContext
-): Promise<void> {
-	for (const statement of script.statements) {
-		if (!shouldExecuteStatement(statement.chainMode, context.status)) {
-			continue;
-		}
-
-		try {
-			await drainStream(runPipeline(statement.pipeline, fs, context));
-		} catch (error) {
-			context.status = 1;
-			throw error;
-		}
-	}
+): RecordStream {
+	return fromRecordGenerator(runScriptToStream(script, fs, context));
 }
 
 async function* runScriptToStream(
@@ -215,18 +135,10 @@ async function* runScriptToStream(
 			continue;
 		}
 
-		try {
-			yield* runPipeline(statement.pipeline, fs, context);
-		} catch (error) {
-			context.status = 1;
-			throw error;
-		}
-	}
-}
-
-async function drainStream(stream: Stream<ShellRecord>): Promise<void> {
-	for await (const _record of stream) {
-		// drain stream output to complete side effects.
+		const records = await collectRecords(
+			runPipeline(statement.pipeline, fs, context)
+		);
+		yield* recordsToStream(records);
 	}
 }
 
@@ -244,13 +156,22 @@ async function* runPipeline(
 
 	for (const [index, step] of pipeline.steps.entries()) {
 		const isLastStep = index === pipeline.steps.length - 1;
-		if (CommandRegistry.isEffectStep(step) && !isLastStep) {
-			throw new Error(
+		if (CommandRegistry.isActionStep(step) && !isLastStep) {
+			context.status = 1;
+			context.stderr.append(
 				`Unsupported pipeline: "${step.cmd}" must be the final command`
 			);
+			return;
 		}
 
-		const plan = await resolveRoutingPlan(step, fs, context, isLastStep);
+		const resolvedPlan = await runOrReport(
+			resolveRoutingPlanEffect(step, fs, context, isLastStep),
+			context
+		);
+		if (!resolvedPlan.ok) {
+			return;
+		}
+		const plan = resolvedPlan.value;
 		const shouldPreserveStatus = shouldPreserveProducerStatus(
 			plan,
 			!isLastStep
@@ -263,57 +184,65 @@ async function* runPipeline(
 			return;
 		}
 
-		const executed: ExecutedStepResult = CommandRegistry.isEffectStep(step)
-			? await executeEffectStep({
-					context,
-					fs,
-					plan,
-					shouldPreserveStatus,
-					step,
-				})
-			: await executeStreamStep({
-					context,
-					fs,
-					hasNextStep: !isLastStep,
-					inputRecords: pipeInputRecords,
-					plan,
-					shouldPreserveStatus,
-					step,
-				});
-		if (executed.preservedStatus !== null) {
-			preservedPipelineStatus = executed.preservedStatus;
+		const stepResult: ExecutedStepResult | null =
+			CommandRegistry.isActionStep(step)
+				? await executeActionStep({
+						context,
+						fs,
+						plan,
+						shouldPreserveStatus,
+						step,
+					})
+				: await executeStreamStep({
+						context,
+						fs,
+						hasNextStep: !isLastStep,
+						inputRecords: pipeInputRecords,
+						plan,
+						shouldPreserveStatus,
+						step,
+					});
+		if (stepResult === null) {
+			return;
 		}
-		if (executed.shellRecords.length > 0) {
-			yield* recordsToStream(executed.shellRecords);
+		if (stepResult.preservedStatus !== null) {
+			preservedPipelineStatus = stepResult.preservedStatus;
 		}
-		pipeInputRecords = executed.pipeRecords;
+		if (stepResult.shellRecords.length > 0) {
+			yield* recordsToStream(stepResult.shellRecords);
+		}
+		pipeInputRecords = stepResult.pipeRecords;
 	}
 	if (preservedPipelineStatus !== null) {
 		context.status = preservedPipelineStatus;
 	}
 }
 
-async function executeEffectStep(params: {
+async function executeActionStep(params: {
 	context: NormalizedExecuteContext;
 	fs: FS;
 	plan: StepRoutingPlan;
 	shouldPreserveStatus: boolean;
-	step: EffectStep;
-}): Promise<ExecutedStepResult> {
+	step: ActionStep;
+}): Promise<ExecutedStepResult | null> {
 	const { context, fs, plan, shouldPreserveStatus, step } = params;
 	const childContext = createChildContext(context);
-	await CommandRegistry.executeStep({
-		step,
-		fs,
-		context: childContext,
-	});
+	await runOrReport(
+		CommandRegistry.executeStep({
+			step,
+			fs,
+			context: childContext,
+		}),
+		childContext
+	);
+	const stderrLines = childContext.stderr.snapshot();
 	propagateChildContext(childContext, context);
 	const routed = await routeStepOutput({
 		context,
 		fs,
 		hasNextStep: false,
 		plan,
-		stderrLines: childContext.stderr.snapshot(),
+		stderrLines,
 		stdoutRecords: [],
 	});
 	return {
@@ -329,8 +258,8 @@ async function executeStreamStep(params: {
 	inputRecords: ShellRecord[] | null;
 	plan: StepRoutingPlan;
 	shouldPreserveStatus: boolean;
-	step: Exclude<StepIR, EffectStep>;
-}): Promise<ExecutedStepResult> {
+	step: Exclude<StepIR, ActionStep>;
+}): Promise<ExecutedStepResult | null> {
 	const {
 		context,
 		fs,
@@ -352,7 +281,11 @@ async function executeStreamStep(params: {
 		context: childContext,
 		resolvedOutputRedirectPath,
 	});
-	const stdoutRecords = await collectRecords(stepOutput);
+	const collected = await runOrReport(
+		collectRecordStream(stepOutput),
+		childContext
+	);
+	const stdoutRecords = collected.ok ? collected.value : [];
 	const stderrLines = childContext.stderr.snapshot();
 	propagateChildContext(childContext, context);
 	const routed = await routeStepOutput({
@@ -438,35 +371,36 @@ function getTargetFd(redirection: RedirectionIR): number | null {
 	return Number(targetText.slice(1));
 }
 
-async function resolveFileDestination(
+function resolveFileDestinationEffect(
 	command: string,
 	redirection: RedirectionIR,
 	fs: FS,
 	context: NormalizedExecuteContext
-): Promise<OutputDestination> {
-	const targetPath = await evaluateExpandedSinglePath(
-		command,
-		'redirection target must expand to exactly 1 path',
-		redirection.target,
-		fs,
-		context
-	);
-	const resolvedPath = resolvePathFromCwd(context.cwd, targetPath);
-	if (isNullDevicePath(resolvedPath)) {
-		return { kind: 'nullDevice' };
-	}
-	return {
-		kind: 'file',
-		append: redirection.append ?? false,
-		noclobber: redirection.noclobber ?? false,
-		path: resolvedPath,
-	};
+): ShellResult<OutputDestination, ShellErrorCause> {
+	return Result.gen(async function* () {
+		const targetPath = yield* await evaluateExpandedSinglePathEffect(
+			command,
+			'redirection target must expand to exactly 1 path',
+			redirection.target,
+			fs,
+			context
+		);
+		const resolvedPath = resolvePathFromCwd(context.cwd, targetPath);
+		if (isNullDevicePath(resolvedPath)) {
+			return Result.ok<OutputDestination>({ kind: 'nullDevice' });
+		}
+		return Result.ok<OutputDestination>({
+			kind: 'file',
+			append: redirection.append ?? false,
+			noclobber: redirection.noclobber ?? false,
+			path: resolvedPath,
+		});
+	});
 }
 
 function destinationForFd(
 	routing: StepRoutingPlan,
-	fd: number,
-	_isLastStep: boolean
+	fd: number
 ): OutputDestination {
 	if (fd === 1) {
 		return routing.fd1;
@@ -491,106 +425,114 @@ function defaultStdoutDestination(
 	return { kind: 'pipe' };
 }
 
-async function resolveOutputRedirectionDestination(params: {
+function resolveOutputRedirectionDestinationEffect(params: {
 	context: NormalizedExecuteContext;
 	fs: FS;
-	isLastStep: boolean;
 	redirection: RedirectionIR;
 	routing: StepRoutingPlan;
 	step: StepIR;
-}): Promise<{ destination: OutputDestination; sourceFd: 1 | 2 } | null> {
-	const { context, fs, isLastStep, redirection, routing, step } = params;
-	if (redirection.kind !== 'output') {
-		return null;
-	}
-	const sourceFd = getSourceFd(redirection);
-	if (sourceFd !== 1 && sourceFd !== 2) {
-		return null;
-	}
-
-	const mode = getRedirectionMode(redirection);
-	let destination: OutputDestination;
-	if (mode === 'close') {
-		destination = { kind: 'closed' };
-	} else if (mode === 'pipe') {
-		destination = { kind: 'pipe' };
-	} else if (mode === 'fd') {
-		const targetFd = getTargetFd(redirection);
-		if (targetFd === null) {
-			throw new Error(
-				`${step.cmd}: invalid file descriptor duplication target`
-			);
+}): ShellResult<
+	{ destination: OutputDestination; sourceFd: 1 | 2 } | null,
+	ShellErrorCause
+> {
+	return Result.gen(async function* () {
+		const { context, fs, redirection, routing, step } = params;
+		if (redirection.kind !== 'output') {
+			return Result.ok(null);
 		}
-		destination = cloneDestination(
-			destinationForFd(routing, targetFd, isLastStep)
-		);
-	} else if (mode === 'file') {
-		destination = await resolveFileDestination(
-			step.cmd,
-			redirection,
-			fs,
-			context
-		);
-	} else {
-		destination = sourceFd === 1 ? routing.fd1 : routing.fd2;
-	}
+		const sourceFd = getSourceFd(redirection);
+		if (sourceFd !== 1 && sourceFd !== 2) {
+			return Result.ok(null);
+		}
+		const outputSourceFd: 1 | 2 = sourceFd;
 
-	return {
-		destination,
-		sourceFd,
-	};
+		const mode = getRedirectionMode(redirection);
+		let destination: OutputDestination;
+		if (mode === 'close') {
+			destination = { kind: 'closed' };
+		} else if (mode === 'pipe') {
+			destination = { kind: 'pipe' };
+		} else if (mode === 'fd') {
+			const targetFd = getTargetFd(redirection);
+			if (targetFd === null) {
+				return yield* new ShellRuntimeError({
+					exitCode: 1,
+					message: `${step.cmd}: invalid file descriptor duplication target`,
+				});
+			}
+			destination = cloneDestination(destinationForFd(routing, targetFd));
+		} else if (mode === 'file') {
+			destination = yield* await resolveFileDestinationEffect(
+				step.cmd,
+				redirection,
+				fs,
+				context
+			);
+		} else {
+			destination = sourceFd === 1 ? routing.fd1 : routing.fd2;
+		}
+
+		return Result.ok({
+			destination,
+			sourceFd: outputSourceFd,
+		});
+	});
 }
 
-async function resolveRoutingPlan(
+function resolveRoutingPlanEffect(
 	step: StepIR,
 	fs: FS,
 	context: NormalizedExecuteContext,
 	isLastStep: boolean
-): Promise<StepRoutingPlan> {
-	const stepRedirections = step.redirections ?? [];
-	const hasNonStdoutPipeRedirect = stepRedirections.some((redirection) => {
-		return (
-			redirection.kind === 'output' &&
-			getSourceFd(redirection) !== 1 &&
-			getRedirectionMode(redirection) === 'pipe'
+): ShellResult<StepRoutingPlan, ShellErrorCause> {
+	return Result.gen(async function* () {
+		const stepRedirections = step.redirections ?? [];
+		const hasNonStdoutPipeRedirect = stepRedirections.some(
+			(redirection) => {
+				return (
+					redirection.kind === 'output' &&
+					getSourceFd(redirection) !== 1 &&
+					getRedirectionMode(redirection) === 'pipe'
+				);
+			}
 		);
-	});
-	const hasStdoutPipeRedirect = stepRedirections.some((redirection) => {
-		return (
-			redirection.kind === 'output' &&
-			getSourceFd(redirection) === 1 &&
-			getRedirectionMode(redirection) === 'pipe'
-		);
-	});
-	const routing: StepRoutingPlan = {
-		fd1: defaultStdoutDestination(
-			isLastStep,
-			hasNonStdoutPipeRedirect,
-			hasStdoutPipeRedirect
-		),
-		fd2: { kind: 'shellStderr' },
-	};
-
-	for (const redirection of stepRedirections) {
-		const resolved = await resolveOutputRedirectionDestination({
-			context,
-			fs,
-			isLastStep,
-			redirection,
-			routing,
-			step,
+		const hasStdoutPipeRedirect = stepRedirections.some((redirection) => {
+			return (
+				redirection.kind === 'output' &&
+				getSourceFd(redirection) === 1 &&
+				getRedirectionMode(redirection) === 'pipe'
+			);
 		});
-		if (!resolved) {
-			continue;
-		}
-		if (resolved.sourceFd === 1) {
-			routing.fd1 = resolved.destination;
-			continue;
-		}
-		routing.fd2 = resolved.destination;
-	}
+		const routing: StepRoutingPlan = {
+			fd1: defaultStdoutDestination(
+				isLastStep,
+				hasNonStdoutPipeRedirect,
+				hasStdoutPipeRedirect
+			),
+			fd2: { kind: 'shellStderr' },
+		};
 
-	return routing;
+		for (const redirection of stepRedirections) {
+			const resolved =
+				yield* await resolveOutputRedirectionDestinationEffect({
+					context,
+					fs,
+					redirection,
+					routing,
+					step,
+				});
+			if (!resolved) {
+				continue;
+			}
+			if (resolved.sourceFd === 1) {
+				routing.fd1 = resolved.destination;
+				continue;
+			}
+			routing.fd2 = resolved.destination;
+		}
+
+		return Result.ok(routing);
+	});
 }
 
 async function preflightNoclobber(
@@ -625,10 +567,6 @@ function recordsToText(records: readonly ShellRecord[]): string {
 	return records.map((record) => formatRecord(record)).join('\n');
 }
 
-function linesToText(lines: readonly string[]): string {
-	return lines.join('\n');
-}
-
 function mergeChannelText(stdoutText: string, stderrText: string): string {
 	if (stdoutText === '') {
 		return stderrText;
@@ -637,13 +575,6 @@ function mergeChannelText(stdoutText: string, stderrText: string): string {
 		return stdoutText;
 	}
 	return `${stdoutText}\n${stderrText}`;
-}
-
-function toErrorMessage(error: unknown): string {
-	if (error instanceof Error) {
-		return error.message;
-	}
-	return String(error);
 }
 
 async function writeToFileOrReport(params: {
@@ -658,7 +589,9 @@ async function writeToFileOrReport(params: {
 		await writeTextToFile(fs, path, content, { append });
 	} catch (error) {
 		context.status = 1;
-		context.stderr.append(toErrorMessage(error));
+		context.stderr.append(
+			error instanceof Error ? error.message : String(error)
+		);
 	}
 }
 
@@ -700,7 +633,7 @@ async function routeStepOutput(params: {
 	if (writesToSameFile) {
 		const mergedText = mergeChannelText(
 			recordsToText(stdoutRecords),
-			linesToText(stderrLines)
+			stderrLines.join('\n')
 		);
 		await writeToFileOrReport({
 			append: stdoutDestination.append && stderrDestination.append,
@@ -821,7 +754,7 @@ async function routeStderr(
 		case 'file':
 			await writeToFileOrReport({
 				append: destination.append,
-				content: linesToText(stderrLines),
+				content: stderrLines.join('\n'),
 				context,
 				fs,
 				path: destination.path,

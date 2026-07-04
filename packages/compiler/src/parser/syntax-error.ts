@@ -4,19 +4,19 @@
  * Includes position information for error reporting.
  */
 
+import { TaggedError } from 'better-result';
 import { createParserDiagnostic, type ShellDiagnostic } from '../diagnostic';
 import type { SourceSpan } from '../lexer/position';
 
 /**
  * Exception thrown when a syntax error is encountered during parsing.
  */
-export class ParseSyntaxError extends Error {
-	readonly diagnostic: ShellDiagnostic;
-	/** The source span where the error occurred */
-	readonly span: SourceSpan;
-	/** Additional context about the error */
-	readonly context?: string;
-
+export class ParseSyntaxError extends TaggedError('ParseSyntaxError')<{
+	context?: string;
+	diagnostic: ShellDiagnostic;
+	message: string;
+	span: SourceSpan;
+}>() {
 	constructor(
 		message: string,
 		span: SourceSpan,
@@ -25,13 +25,19 @@ export class ParseSyntaxError extends Error {
 			context?: string;
 		} = {}
 	) {
-		super(ParseSyntaxError.formatMessage(message, span, options.context));
-		this.name = 'ParseSyntaxError';
-		this.diagnostic = createParserDiagnostic(message, span, {
+		const diagnostic = createParserDiagnostic(message, span, {
 			code: options.code,
 		});
-		this.span = span;
-		this.context = options.context;
+		super({
+			context: options.context,
+			diagnostic,
+			message: ParseSyntaxError.formatMessage(
+				message,
+				span,
+				options.context
+			),
+			span,
+		});
 
 		// Maintain proper stack trace in V8 environments
 		if (Error.captureStackTrace) {
@@ -67,6 +73,16 @@ export class ParseSyntaxError extends Error {
 	}
 }
 
+export function isParseSyntaxError(error: unknown): error is ParseSyntaxError {
+	return (
+		error instanceof ParseSyntaxError ||
+		(typeof error === 'object' &&
+			error !== null &&
+			'_tag' in error &&
+			error._tag === 'ParseSyntaxError')
+	);
+}
+
 /**
  * Exception thrown when the parser encounters an unexpected end of input.
  */
@@ -75,7 +91,6 @@ export class UnexpectedEOFError extends ParseSyntaxError {
 		super(`Unexpected end of input, expected ${expected}`, span, {
 			code: 'unexpected-eof',
 		});
-		this.name = 'UnexpectedEOFError';
 	}
 }
 
@@ -90,7 +105,6 @@ export class UnexpectedTokenError extends ParseSyntaxError {
 		super(`Unexpected token '${found}', expected ${expected}`, span, {
 			code: 'unexpected-token',
 		});
-		this.name = 'UnexpectedTokenError';
 		this.found = found;
 		this.expected = expected;
 	}
@@ -104,7 +118,6 @@ export class UnmatchedParenError extends ParseSyntaxError {
 		super('Unmatched parenthesis', span, {
 			code: 'unmatched-parenthesis',
 		});
-		this.name = 'UnmatchedParenError';
 	}
 }
 
@@ -122,7 +135,6 @@ export class UnterminatedQuoteError extends ParseSyntaxError {
 				code: 'unterminated-quote',
 			}
 		);
-		this.name = 'UnterminatedQuoteError';
 		this.quoteChar = quoteChar;
 	}
 }

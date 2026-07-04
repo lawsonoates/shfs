@@ -154,7 +154,10 @@ export class CommandParser {
 
 		const target = this.wordParser.parseWord();
 		if (!target) {
-			this.parser.syntacticError('Expected filename after >', 'word');
+			return this.parser.syntacticError(
+				'Expected filename after >',
+				'word'
+			);
 		}
 		const fdMode = this.parseFdMode(target, '>&N or >&-');
 		const endPos = this.parser.previousTokenPosition;
@@ -180,11 +183,17 @@ export class CommandParser {
 		}
 	}
 
-	private parseInputTargetAfterLess(): { optional: boolean; target: Word } {
+	private parseInputTargetAfterLess(): {
+		optional: boolean;
+		target: Word;
+	} {
 		let optional = false;
 		let target = this.wordParser.parseWord();
 		if (!target) {
-			this.parser.syntacticError('Expected filename after <', 'word');
+			return this.parser.syntacticError(
+				'Expected filename after <',
+				'word'
+			);
 		}
 		const targetLiteral = target.literalValue;
 		if (!targetLiteral?.startsWith('?')) {
@@ -194,7 +203,7 @@ export class CommandParser {
 		if (targetLiteral === '?') {
 			const explicitTarget = this.wordParser.parseWord();
 			if (!explicitTarget) {
-				this.parser.syntacticError(
+				return this.parser.syntacticError(
 					'Expected filename after <?',
 					'word'
 				);
@@ -241,7 +250,7 @@ export class CommandParser {
 		if (DIGITS_ONLY_REGEX.test(fdTarget)) {
 			return { mode: 'fd', targetFd: Number(fdTarget) };
 		}
-		this.parser.syntacticError(
+		return this.parser.syntacticError(
 			'Invalid file descriptor duplication target',
 			expected
 		);

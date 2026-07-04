@@ -2,6 +2,8 @@
  * head command handler for the AST-based compiler.
  */
 
+import { Result } from 'better-result';
+import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
 import {
 	type ExpandedWord,
 	expandedWordToString,
@@ -9,85 +11,129 @@ import {
 	type StepIR,
 } from '../../../ir';
 import {
-	createWordParser,
+	createWordParserEffect,
 	type FlagDef,
 	type ParsedFlagValue,
+	type ParseWordsResult,
 } from '../arg/parse';
 
 const DEFAULT_LINE_COUNT = 10;
 const flags: Record<string, FlagDef> = {
 	lines: { multiple: true, short: 'n', takesValue: true },
 };
-const parseHeadArgs = createWordParser<ExpandedWord>(
+const parseHeadArgs = createWordParserEffect<ExpandedWord>(
 	flags,
 	expandedWordToString
 );
-const MISSING_N_VALUE_PREFIX = 'Flag -n requires a value';
-const UNKNOWN_FLAG_PREFIX = 'Unknown flag:';
 
 /**
  * Compile a head command from SimpleCommandIR to StepIR.
  */
 export function compileHead(cmd: SimpleCommandIR): StepIR {
-	const parsed = parseHeadArgsOrThrow(cmd.args);
-
-	const n = parseHeadCount(parsed.flags.lines);
-	const files = parsed.positionalWords;
-
-	return {
-		cmd: 'head',
-		args: { files, n },
-	} as const;
+	const result = compileHeadEffect(cmd);
+	if (Result.isError(result)) {
+		throw result.error;
+	}
+	return result.value;
 }
 
-function parseHeadCount(value: ParsedFlagValue | undefined): number {
-	const lastValue = getLastValueToken(value);
-	if (lastValue === undefined) {
-		return DEFAULT_LINE_COUNT;
-	}
+export const compileHeadEffect: (
+	cmd: SimpleCommandIR
+) => Result<StepIR, CompileError> = (cmd) =>
+	Result.gen(function* () {
+		const parsed = yield* parseHeadArgsEffect(cmd.args);
 
-	const parsedValue = Number(lastValue);
-	if (!Number.isFinite(parsedValue)) {
-		throw new Error('Invalid head count');
-	}
+		const n = yield* parseHeadCount(parsed.flags.lines);
+		const files = parsed.positionalWords;
 
-	return parsedValue;
+		return Result.ok({
+			cmd: 'head',
+			args: { files, n },
+		} as const satisfies StepIR);
+	});
+
+function parseHeadCount(
+	value: ParsedFlagValue | undefined
+): Result<number, CompileError> {
+	return Result.gen(function* () {
+		const lastValue = yield* getLastValueToken(value);
+		if (lastValue === undefined) {
+			return Result.ok(DEFAULT_LINE_COUNT);
+		}
+
+		const parsedValue = Number(lastValue);
+		if (!Number.isFinite(parsedValue)) {
+			return yield* new CompileError(
+				createCommandDiagnostic(
+					'head',
+					'invalid-count',
+					'Invalid head count'
+				)
+			);
+		}
+
+		return Result.ok(parsedValue);
+	});
 }
 
 function getLastValueToken(
 	value: ParsedFlagValue | undefined
-): string | undefined {
+): Result<string | undefined, CompileError> {
 	if (value === undefined) {
-		return undefined;
+		return Result.ok(undefined);
 	}
 	if (typeof value === 'string') {
-		return value;
+		return Result.ok(value);
 	}
 	if (Array.isArray(value)) {
-		const lastValue = value.at(-1);
-		return lastValue;
+		return Result.ok(value.at(-1));
 	}
-	throw new Error('Invalid head count');
+	return Result.err(
+		new CompileError(
+			createCommandDiagnostic(
+				'head',
+				'invalid-count',
+				'Invalid head count'
+			)
+		)
+	);
 }
 
-function parseHeadArgsOrThrow(
+function parseHeadArgsEffect(
 	args: readonly ExpandedWord[]
-): ReturnType<typeof parseHeadArgs> {
-	try {
-		return parseHeadArgs(args, {
+): Result<ParseWordsResult<ExpandedWord>, CompileError> {
+	return Result.mapError(
+		parseHeadArgs(args, {
 			negativeNumberFlag: 'lines',
 			negativeNumberPolicy: 'value',
-		});
-	} catch (error) {
-		if (!(error instanceof Error)) {
-			throw new Error('Unknown head option');
-		}
-		if (error.message.startsWith(MISSING_N_VALUE_PREFIX)) {
-			throw new Error('head -n requires a number');
-		}
-		if (error.message.startsWith(UNKNOWN_FLAG_PREFIX)) {
-			throw new Error('Unknown head option');
-		}
-		throw error;
+		}),
+		normalizeHeadParseError
+	);
+}
+
+function normalizeHeadParseError(cause: {
+	readonly code: string;
+	readonly message: string;
+}): CompileError {
+	if (cause.code === 'missing-value') {
+		return new CompileError(
+			createCommandDiagnostic(
+				'head',
+				'missing-count',
+				'head -n requires a number'
+			)
+		);
 	}
+	if (cause.code === 'unknown-flag') {
+		return new CompileError(
+			createCommandDiagnostic(
+				'head',
+				'unknown-option',
+				'Unknown head option'
+			)
+		);
+	}
+	return new CompileError(
+		createCommandDiagnostic('head', 'invalid-option', cause.message)
+	);
 }

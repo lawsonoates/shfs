@@ -18,6 +18,7 @@ import {
 	type WordPart,
 } from './ast';
 import type { Parser } from './parser';
+import { ParseSyntaxError } from './syntax-error';
 
 /**
  * Parser for words and word parts.
@@ -69,9 +70,6 @@ export class WordParser {
 		return new Word(span, parts, quoted);
 	}
 
-	/**
-	 * Parse ordered word parts from token metadata.
-	 */
 	private parseWordParts(token: Token): WordPart[] {
 		const tokenWordParts =
 			token.wordParts.length > 0
@@ -86,12 +84,13 @@ export class WordParser {
 						},
 					];
 
-		return tokenWordParts.map((part) => this.parseTokenWordPart(part));
+		const parts: WordPart[] = [];
+		for (const part of tokenWordParts) {
+			parts.push(this.parseTokenWordPart(part));
+		}
+		return parts;
 	}
 
-	/**
-	 * Parse a single token word part into an AST part.
-	 */
 	private parseTokenWordPart(part: TokenWordPart): WordPart {
 		switch (part.kind) {
 			case 'literal':
@@ -102,17 +101,15 @@ export class WordParser {
 				return this.parseCommandSubstitution(part.text, part.span);
 			default: {
 				const _exhaustive: never = part;
-				throw new Error(
-					`Unknown token word part: ${JSON.stringify(_exhaustive)}`
+				throw new ParseSyntaxError(
+					`Unknown token word part: ${JSON.stringify(_exhaustive)}`,
+					this.parser.currentToken.span,
+					{ code: 'unknown-word-part' }
 				);
 			}
 		}
 	}
 
-	/**
-	 * Parse a command substitution from token part metadata.
-	 * The part text contains the full (...) content.
-	 */
 	private parseCommandSubstitution(
 		spelling: string,
 		span: SourceSpan

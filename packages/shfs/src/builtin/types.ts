@@ -1,3 +1,4 @@
+import type { ShellErrorCause, ShellResult } from '../diagnostics';
 import type { ShellInput, ShellIo } from '../execute/io';
 import type { FS } from '../fs/fs';
 import type { Record as ShellRecord } from '../record';
@@ -25,7 +26,7 @@ export type Builtin<A = void> = (
 	args: A
 ) => Stream<ShellRecord>;
 
-export type EffectBuiltin<A = void> = (
+export type ActionBuiltin<A = void> = (
 	runtime: BuiltinRuntime,
 	args: A
-) => Promise<void>;
+) => ShellResult<void, ShellErrorCause>;

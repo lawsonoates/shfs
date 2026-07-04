@@ -1,30 +1,119 @@
-import type { DiagnosticLocation, ShellDiagnostic } from '@shfs/compiler';
+import {
+	type CompileError,
+	type DiagnosticLocation,
+	isCompileError,
+	isParseSyntaxError,
+	type ParseSyntaxError,
+	type ShellDiagnostic,
+} from '@shfs/compiler';
+import { Result, TaggedError } from 'better-result';
 
 import { appendStderrLines, type StderrSink } from './stderr';
 
 const FIRST_ARGUMENT_NUMBER = 1;
 
-export class ShellDiagnosticError extends Error {
-	readonly diagnostics: readonly ShellDiagnostic[];
-	readonly exitCode: number;
-
+export class ShellDiagnosticError extends TaggedError('ShellDiagnosticError')<{
+	diagnostics: readonly ShellDiagnostic[];
+	exitCode: number;
+	message: string;
+}>() {
 	constructor(
 		diagnostics: readonly ShellDiagnostic[],
 		exitCode = exitCodeForDiagnostics(diagnostics)
 	) {
-		super(
-			diagnostics
+		super({
+			diagnostics,
+			exitCode,
+			message: diagnostics
 				.map((diagnostic) => toErrorMessage(diagnostic))
-				.join('\n')
-		);
-		this.name = 'ShellDiagnosticError';
-		this.diagnostics = diagnostics;
-		this.exitCode = exitCode;
+				.join('\n'),
+		});
 	}
 
 	get status(): number {
 		return this.exitCode;
 	}
+}
+
+export class ShellRuntimeError extends TaggedError('ShellRuntimeError')<{
+	cause?: unknown;
+	exitCode: number;
+	message: string;
+}>() {}
+
+export type ShellErrorCause = ShellDiagnosticError | ShellRuntimeError;
+
+/**
+ * Every typed failure the shell knows how to render as status + stderr.
+ * This is the boundary contract between Effect error channels and the
+ * shell's context-based reporting.
+ */
+export type ShellFailure = CompileError | ParseSyntaxError | ShellErrorCause;
+
+export type ShellResult<T, E = ShellFailure> =
+	| Result<T, E>
+	| Promise<Result<T, E>>;
+
+export interface FailureContext extends StderrSink {
+	status?: number;
+}
+
+export function isShellFailure(error: unknown): error is ShellFailure {
+	return (
+		isParseSyntaxError(error) ||
+		isCompileError(error) ||
+		isShellDiagnosticError(error) ||
+		isShellRuntimeError(error)
+	);
+}
+
+/**
+ * Adapt a typed shell failure into exit status and stderr lines on the
+ * execution context.
+ */
+export function reportShellFailure(
+	context: FailureContext,
+	failure: ShellFailure
+): void {
+	switch (failure._tag) {
+		case 'ParseSyntaxError':
+		case 'CompileError':
+			context.status = 1;
+			writeDiagnosticsToStderr(context, [failure.diagnostic]);
+			return;
+		case 'ShellDiagnosticError':
+			context.status = failure.exitCode;
+			writeDiagnosticsToStderr(context, failure.diagnostics);
+			return;
+		case 'ShellRuntimeError':
+			context.status = failure.exitCode;
+			if (failure.message !== '') {
+				context.stderr.append(failure.message);
+			}
+			return;
+		default: {
+			const _exhaustive: never = failure;
+			throw new Error(
+				`Unknown shell failure: ${JSON.stringify(_exhaustive)}`
+			);
+		}
+	}
+}
+
+/**
+ * Run a result at an async-generator (stream) boundary. Failures are
+ * reported to the execution context instead of escaping as rejections.
+ */
+export async function runOrReport<T>(
+	result: ShellResult<T>,
+	context: FailureContext
+): Promise<{ ok: false } | { ok: true; value: T }> {
+	const settled = await result;
+	if (Result.isError(settled)) {
+		reportShellFailure(context, settled.error);
+		return { ok: false };
+	}
+	return { ok: true, value: settled.value };
 }
 
 export function createDiagnosticError(
@@ -49,23 +138,35 @@ export function formatDiagnostics(
 	return diagnostics.map((diagnostic) => formatDiagnostic(diagnostic));
 }
 
-export function diagnosticsToStderrLines(
-	diagnostics: readonly ShellDiagnostic[]
-): string[] {
-	return formatDiagnostics(diagnostics);
-}
-
 export function writeDiagnosticsToStderr(
 	context: StderrSink,
 	diagnostics: readonly ShellDiagnostic[]
 ): void {
-	appendStderrLines(context, diagnosticsToStderrLines(diagnostics));
+	appendStderrLines(context, formatDiagnostics(diagnostics));
 }
 
 export function isShellDiagnosticError(
 	error: unknown
 ): error is ShellDiagnosticError {
-	return error instanceof ShellDiagnosticError;
+	return (
+		error instanceof ShellDiagnosticError ||
+		(typeof error === 'object' &&
+			error !== null &&
+			'_tag' in error &&
+			error._tag === 'ShellDiagnosticError')
+	);
+}
+
+export function isShellRuntimeError(
+	error: unknown
+): error is ShellRuntimeError {
+	return (
+		error instanceof ShellRuntimeError ||
+		(typeof error === 'object' &&
+			error !== null &&
+			'_tag' in error &&
+			error._tag === 'ShellRuntimeError')
+	);
 }
 
 export function exitCodeForDiagnostics(
@@ -80,8 +181,6 @@ export function exitCodeForDiagnostics(
 	}
 	return exitCode;
 }
-
-export const statusForDiagnostics = exitCodeForDiagnostics;
 
 function formatLocation(location: DiagnosticLocation): string {
 	const segments: string[] = [];

@@ -1,3 +1,4 @@
+import { argParseError } from '../diagnostics';
 import type { FlagEntry, FlagIndex } from '../types';
 
 export function consumeValue(
@@ -9,20 +10,36 @@ export function consumeValue(
 ): { value: string; newIndex: number; valueIndex: number } {
 	const nextIndex = index + 1;
 	if (nextIndex >= args.length) {
-		throw new Error(`Flag ${flagToken} requires a value.`);
+		throw argParseError(
+			'missing-value',
+			`Flag ${flagToken} requires a value.`,
+			flagToken
+		);
 	}
 
 	const next = args[nextIndex];
 	if (next === undefined) {
-		throw new Error(`Flag ${flagToken} requires a value.`);
+		throw argParseError(
+			'missing-value',
+			`Flag ${flagToken} requires a value.`,
+			flagToken
+		);
 	}
 
 	if (next === '--') {
-		throw new Error(`Flag ${flagToken} requires a value (got "--").`);
+		throw argParseError(
+			'missing-value',
+			`Flag ${flagToken} requires a value (got "--").`,
+			flagToken
+		);
 	}
 
 	if (!entry.def.allowFlagLikeValue && flagsIndex.isFlagToken(next)) {
-		throw new Error(`Flag ${flagToken} requires a value (got "${next}").`);
+		throw argParseError(
+			'missing-value',
+			`Flag ${flagToken} requires a value (got "${next}").`,
+			flagToken
+		);
 	}
 
 	return { value: next, newIndex: nextIndex, valueIndex: nextIndex };

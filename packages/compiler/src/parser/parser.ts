@@ -26,6 +26,7 @@
  * - Background jobs (&)
  */
 
+import { Result } from 'better-result';
 import { type SourcePosition, SourceSpan } from '../lexer/position';
 import { Scanner } from '../lexer/scanner';
 import { Token, TokenKind } from '../lexer/token';
@@ -34,6 +35,7 @@ import { CommandParser } from './command';
 import { ErrorReporter } from './error-reporter';
 import { StatementParser } from './statement';
 import {
+	isParseSyntaxError,
 	ParseSyntaxError,
 	UnexpectedEOFError,
 	UnexpectedTokenError,
@@ -97,7 +99,7 @@ export class Parser {
 	 * @throws SyntaxError if the input is invalid
 	 */
 	parse(): Program {
-		return this.parseProgram();
+		return this.statementParser.parseScript();
 	}
 
 	/**
@@ -148,12 +150,12 @@ export class Parser {
 		if (this._currentToken.kind === expected) {
 			this._previousTokenPosition = this._currentToken.span.end;
 			this._currentToken = this.scanner.getToken();
-		} else {
-			this.syntacticError(
-				`Expected ${Token.kindName(expected)}`,
-				Token.kindName(expected)
-			);
+			return;
 		}
+		this.syntacticError(
+			`Expected ${Token.kindName(expected)}`,
+			Token.kindName(expected)
+		);
 	}
 
 	/**
@@ -235,20 +237,6 @@ export class Parser {
 		throw new UnexpectedTokenError(found, expected, span);
 	}
 
-	// ─────────────────────────────────────────────────────────
-	// Program Parsing
-	// ─────────────────────────────────────────────────────────
-
-	/**
-	 * Parse a complete program.
-	 *
-	 * Grammar:
-	 *   program ::= (statement separator*)? statement (separator+ statement)* separator*
-	 */
-	private parseProgram(): Program {
-		return this.statementParser.parseScript();
-	}
-
 	/**
 	 * Parse a command substitution (inner program).
 	 * Called recursively when parsing (...) content.
@@ -257,7 +245,6 @@ export class Parser {
 	 * @returns The parsed program
 	 */
 	parseSubstitution(input: string): Program {
-		// Check recursion depth
 		if (this.substitutionDepth >= Parser.MAX_SUBSTITUTION_DEPTH) {
 			throw new ParseSyntaxError(
 				'Maximum command substitution depth exceeded',
@@ -268,7 +255,6 @@ export class Parser {
 			);
 		}
 
-		// Create a new parser for the inner content
 		const innerParser = new Parser(
 			input,
 			this.errorReporter,
@@ -294,3 +280,15 @@ export function parse(input: string): Program {
 	const parser = new Parser(input);
 	return parser.parse();
 }
+
+export const parseEffect: (input: string) => Result<Program, ParseSyntaxError> =
+	(input: string) => {
+		try {
+			return Result.ok(new Parser(input).parse());
+		} catch (error) {
+			if (isParseSyntaxError(error)) {
+				return Result.err(error);
+			}
+			throw error;
+		}
+	};
