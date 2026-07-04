@@ -22,8 +22,8 @@ test('cp copies file from source to destination', async () => {
 
 test('cp recursively copies nested directory contents', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/source', true);
-	await fs.mkdir('/source/nested', true);
+	await fs.makeDirectory('/source', { recursive: true });
+	await fs.makeDirectory('/source/nested', { recursive: true });
 	fs.setFile('/source/root.txt', 'root');
 	fs.setFile('/source/nested/leaf.txt', 'leaf');
 

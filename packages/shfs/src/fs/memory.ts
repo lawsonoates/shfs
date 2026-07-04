@@ -1,8 +1,19 @@
 import type { Stream } from '../stream';
 import { normalizePath } from '../util/path';
-import type { FS } from './fs';
+import {
+	AlreadyExistsError,
+	DirectoryNotEmptyError,
+	InvalidOperationError,
+	IsADirectoryError,
+	NotADirectoryError,
+	NotFoundError,
+} from './errors';
+import type { FS, FsInfo } from './fs';
 
 export type { FS } from './fs';
+
+const FILE_MODE = 0o644;
+const DIRECTORY_MODE = 0o755;
 
 export class MemoryFS implements FS {
 	private readonly files = new Map<string, Uint8Array>();
@@ -24,7 +35,7 @@ export class MemoryFS implements FS {
 	setFile(path: string, content: string | Uint8Array): void {
 		const normalizedPath = normalizePath(path);
 		if (this.directories.has(normalizedPath)) {
-			throw new Error(`Is a directory: ${path}`);
+			throw new IsADirectoryError(path, `Is a directory: ${path}`);
 		}
 		this.ensureParentDirectories(normalizedPath);
 		const encoded =
@@ -43,7 +54,7 @@ export class MemoryFS implements FS {
 		const normalizedPath = normalizePath(path);
 		const content = this.files.get(normalizedPath);
 		if (!content) {
-			throw new Error(`File not found: ${path}`);
+			throw new NotFoundError(path, `File not found: ${path}`);
 		}
 		return content;
 	}
@@ -52,7 +63,7 @@ export class MemoryFS implements FS {
 		const normalizedPath = normalizePath(path);
 		const content = this.files.get(normalizedPath);
 		if (!content) {
-			throw new Error(`File not found: ${path}`);
+			throw new NotFoundError(path, `File not found: ${path}`);
 		}
 		const text = new TextDecoder().decode(content);
 		const lines = text
@@ -61,10 +72,15 @@ export class MemoryFS implements FS {
 		yield* lines;
 	}
 
-	async writeFile(path: string, content: Uint8Array): Promise<void> {
+	async writeFile(
+		path: string,
+		content: Uint8Array,
+		// `flag`/`mode` are accepted for interface parity but not yet honored.
+		_options?: { flag?: string; mode?: number }
+	): Promise<void> {
 		const normalizedPath = normalizePath(path);
 		if (this.directories.has(normalizedPath)) {
-			throw new Error(`Is a directory: ${path}`);
+			throw new IsADirectoryError(path, `Is a directory: ${path}`);
 		}
 		this.ensureParentDirectories(normalizedPath);
 		this.files.set(normalizedPath, content);
@@ -80,13 +96,13 @@ export class MemoryFS implements FS {
 		const normalizedDestinationPath = normalizePath(dest);
 
 		if (normalizedSourcePath === '/' || normalizedDestinationPath === '/') {
-			throw new Error('Cannot rename the root path');
+			throw new InvalidOperationError('/', 'Cannot rename the root path');
 		}
 
 		const sourceIsDirectory = this.directories.has(normalizedSourcePath);
 		const sourceIsFile = this.files.has(normalizedSourcePath);
 		if (!(sourceIsDirectory || sourceIsFile)) {
-			throw new Error(`No such file or directory: ${src}`);
+			throw new NotFoundError(src, `No such file or directory: ${src}`);
 		}
 
 		if (normalizedSourcePath === normalizedDestinationPath) {
@@ -102,7 +118,10 @@ export class MemoryFS implements FS {
 			sourceIsDirectory &&
 			normalizedDestinationPath.startsWith(`${normalizedSourcePath}/`)
 		) {
-			throw new Error(`Cannot rename a directory into itself: ${dest}`);
+			throw new InvalidOperationError(
+				dest,
+				`Cannot rename a directory into itself: ${dest}`
+			);
 		}
 
 		this.assertDestinationCanBeReplaced(
@@ -121,23 +140,32 @@ export class MemoryFS implements FS {
 		this.renameFile(normalizedSourcePath, normalizedDestinationPath);
 	}
 
-	async deleteFile(path: string): Promise<void> {
+	async remove(
+		path: string,
+		options?: { recursive?: boolean; force?: boolean }
+	): Promise<void> {
+		const recursive = options?.recursive ?? false;
+		const force = options?.force ?? false;
 		const normalizedPath = normalizePath(path);
-		if (!this.files.has(normalizedPath)) {
-			throw new Error(`File not found: ${path}`);
-		}
-		this.files.delete(normalizedPath);
-		this.untrackChild(normalizedPath);
-		this.fileMetadata.delete(normalizedPath);
-	}
 
-	async deleteDirectory(path: string, recursive = false): Promise<void> {
-		const normalizedPath = normalizePath(path);
-		if (normalizedPath === '/') {
-			throw new Error("rm: cannot remove '/'");
+		const isFile = this.files.has(normalizedPath);
+		const isDirectory = this.directories.has(normalizedPath);
+		if (!(isFile || isDirectory)) {
+			if (force) {
+				return;
+			}
+			throw new NotFoundError(path, `No such file or directory: ${path}`);
 		}
-		if (!this.directories.has(normalizedPath)) {
-			throw new Error(`No such file or directory: ${path}`);
+
+		if (isFile) {
+			this.files.delete(normalizedPath);
+			this.untrackChild(normalizedPath);
+			this.fileMetadata.delete(normalizedPath);
+			return;
+		}
+
+		if (normalizedPath === '/') {
+			throw new InvalidOperationError('/', "rm: cannot remove '/'");
 		}
 
 		const childPrefix = `${normalizedPath}/`;
@@ -145,7 +173,10 @@ export class MemoryFS implements FS {
 			(this.directoryChildren.get(normalizedPath)?.size ?? 0) > 0;
 
 		if (!recursive && hasChildren) {
-			throw new Error(`Directory not empty: ${path}`);
+			throw new DirectoryNotEmptyError(
+				path,
+				`Directory not empty: ${path}`
+			);
 		}
 
 		for (const filePath of Array.from(this.files.keys())) {
@@ -173,30 +204,38 @@ export class MemoryFS implements FS {
 		this.rebuildDirectoryChildren();
 	}
 
-	async *readdir(path: string): Stream<string> {
+	async *readDirectory(
+		path: string,
+		options?: { recursive?: boolean }
+	): Stream<string> {
 		const normalizedDirectoryPath = normalizePath(path);
 		if (this.files.has(normalizedDirectoryPath)) {
-			throw new Error(`Not a directory: ${path}`);
+			throw new NotADirectoryError(path, `Not a directory: ${path}`);
 		}
 		if (!this.directories.has(normalizedDirectoryPath)) {
-			throw new Error(`No such file or directory: ${path}`);
+			throw new NotFoundError(path, `No such file or directory: ${path}`);
 		}
 
-		const immediateChildren = this.listImmediateChildren(
-			normalizedDirectoryPath
+		yield* this.listChildren(
+			normalizedDirectoryPath,
+			options?.recursive ?? false
 		);
-		for (const childPath of immediateChildren) {
-			yield childPath;
-		}
 	}
 
-	async mkdir(path: string, recursive = false): Promise<void> {
+	async makeDirectory(
+		path: string,
+		options?: { recursive?: boolean; mode?: number }
+	): Promise<void> {
+		const recursive = options?.recursive ?? false;
 		const normalizedPath = normalizePath(path);
 		if (
 			this.directories.has(normalizedPath) ||
 			this.files.has(normalizedPath)
 		) {
-			throw new Error(`Directory already exists: ${path}`);
+			throw new AlreadyExistsError(
+				path,
+				`Directory already exists: ${path}`
+			);
 		}
 
 		if (recursive) {
@@ -221,35 +260,38 @@ export class MemoryFS implements FS {
 		}
 	}
 
-	async stat(
-		path: string
-	): Promise<{ isDirectory: boolean; size: number; mtime: Date }> {
+	async stat(path: string): Promise<FsInfo> {
 		// Normalize path by removing trailing slash
 		const normalizedPath = normalizePath(path);
 
 		if (this.directories.has(normalizedPath)) {
 			return {
-				isDirectory: true,
+				type: 'Directory',
 				size: 0,
+				mode: DIRECTORY_MODE,
 				mtime:
-					this.fileMetadata.get(normalizedPath)?.mtime || new Date(),
+					this.fileMetadata.get(normalizedPath)?.mtime ?? new Date(),
 			};
 		}
 
 		if (this.files.has(normalizedPath)) {
 			const content = this.files.get(normalizedPath);
 			if (content === undefined) {
-				throw new Error(`No such file or directory: ${path}`);
+				throw new NotFoundError(
+					path,
+					`No such file or directory: ${path}`
+				);
 			}
 			return {
-				isDirectory: false,
+				type: 'File',
 				size: content.byteLength,
+				mode: FILE_MODE,
 				mtime:
-					this.fileMetadata.get(normalizedPath)?.mtime || new Date(),
+					this.fileMetadata.get(normalizedPath)?.mtime ?? new Date(),
 			};
 		}
 
-		throw new Error(`No such file or directory: ${path}`);
+		throw new NotFoundError(path, `No such file or directory: ${path}`);
 	}
 
 	async exists(path: string): Promise<boolean> {
@@ -257,6 +299,22 @@ export class MemoryFS implements FS {
 		return (
 			this.files.has(normalizedPath) ||
 			this.directories.has(normalizedPath)
+		);
+	}
+
+	// Symlink stubs — no link storage yet. See notes/symlink-support.md.
+	async readLink(path: string): Promise<string> {
+		throw new InvalidOperationError(path, `Not a symlink: ${path}`);
+	}
+
+	async realPath(path: string): Promise<string> {
+		return normalizePath(path);
+	}
+
+	async symlink(_target: string, path: string): Promise<void> {
+		throw new InvalidOperationError(
+			path,
+			`Symlinks are not supported: ${path}`
 		);
 	}
 
@@ -279,7 +337,8 @@ export class MemoryFS implements FS {
 				continue;
 			}
 			if (this.files.has(directoryPath)) {
-				throw new Error(
+				throw new NotADirectoryError(
+					directoryPath,
 					`Parent path is not a directory: ${directoryPath}`
 				);
 			}
@@ -291,7 +350,10 @@ export class MemoryFS implements FS {
 		const content = this.files.get(sourcePath);
 		const metadata = this.fileMetadata.get(sourcePath);
 		if (!(content && metadata)) {
-			throw new Error(`No such file or directory: ${sourcePath}`);
+			throw new NotFoundError(
+				sourcePath,
+				`No such file or directory: ${sourcePath}`
+			);
 		}
 
 		this.files.delete(sourcePath);
@@ -331,7 +393,10 @@ export class MemoryFS implements FS {
 				const content = this.files.get(filePath);
 				const metadata = this.fileMetadata.get(filePath);
 				if (!(content && metadata)) {
-					throw new Error(`No such file or directory: ${filePath}`);
+					throw new NotFoundError(
+						filePath,
+						`No such file or directory: ${filePath}`
+					);
 				}
 				return {
 					path: filePath,
@@ -377,9 +442,15 @@ export class MemoryFS implements FS {
 			return;
 		}
 		if (this.files.has(directoryPath)) {
-			throw new Error(`Parent path is not a directory: ${directoryPath}`);
+			throw new NotADirectoryError(
+				directoryPath,
+				`Parent path is not a directory: ${directoryPath}`
+			);
 		}
-		throw new Error(`No such file or directory: ${directoryPath}`);
+		throw new NotFoundError(
+			directoryPath,
+			`No such file or directory: ${directoryPath}`
+		);
 	}
 
 	private assertDestinationCanBeReplaced(
@@ -390,13 +461,17 @@ export class MemoryFS implements FS {
 			if (!sourceIsDirectory) {
 				return;
 			}
-			throw new Error(
+			throw new InvalidOperationError(
+				destinationPath,
 				`Cannot replace file with directory: ${destinationPath}`
 			);
 		}
 
 		if (this.directories.has(destinationPath)) {
-			throw new Error(`Cannot replace directory: ${destinationPath}`);
+			throw new InvalidOperationError(
+				destinationPath,
+				`Cannot replace directory: ${destinationPath}`
+			);
 		}
 	}
 
@@ -417,6 +492,18 @@ export class MemoryFS implements FS {
 
 	private getParentPath(path: string): string {
 		return path.slice(0, path.lastIndexOf('/')) || '/';
+	}
+
+	private *listChildren(
+		directoryPath: string,
+		recursive: boolean
+	): Iterable<string> {
+		for (const childPath of this.listImmediateChildren(directoryPath)) {
+			yield childPath;
+			if (recursive && this.directories.has(childPath)) {
+				yield* this.listChildren(childPath, true);
+			}
+		}
 	}
 
 	private listImmediateChildren(directoryPath: string): string[] {

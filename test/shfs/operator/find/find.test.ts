@@ -28,7 +28,7 @@ const runWithStatus = async (command: string): Promise<CommandResult> => {
 const setTextFile = async (path: string, content: string): Promise<void> => {
 	const parent = dirname(path);
 	if (!(await fs.exists(parent))) {
-		await fs.mkdir(parent, true);
+		await fs.makeDirectory(parent, { recursive: true });
 	}
 	fs.setFile(path, content);
 };
@@ -41,7 +41,7 @@ const sortedLines = (text: string): string => {
 };
 
 test('-wholename is an alias of -path', async () => {
-	await fs.mkdir('/tmp/top/one/two', true);
+	await fs.makeDirectory('/tmp/top/one/two', { recursive: true });
 
 	const pathResult = await runWithStatus(
 		'find tmp/top -path tmp/top/one -print'
@@ -56,7 +56,7 @@ test('-wholename is an alias of -path', async () => {
 });
 
 test('-iwholename is an alias of -ipath', async () => {
-	await fs.mkdir('/tmp/top/one/two', true);
+	await fs.makeDirectory('/tmp/top/one/two', { recursive: true });
 
 	const ipathResult = await runWithStatus(
 		'find tmp/top -ipath TmP/ToP/OnE -print'
@@ -71,7 +71,7 @@ test('-iwholename is an alias of -ipath', async () => {
 });
 
 test('-iname is case-insensitive while -name remains case-sensitive', async () => {
-	await fs.mkdir('/tmp/fred', true);
+	await fs.makeDirectory('/tmp/fred', { recursive: true });
 
 	const nameResult = await runWithStatus('find tmp -name FrEd -print');
 	const inameResult = await runWithStatus('find tmp -iname FrEd -print');
@@ -92,7 +92,7 @@ test('-iname matches basenames, not full paths', async () => {
 });
 
 test('-true matches the same set as no predicate', async () => {
-	await fs.mkdir('/tmp/fred/jim', true);
+	await fs.makeDirectory('/tmp/fred/jim', { recursive: true });
 	await setTextFile('/tmp/fred/file.txt', 'content');
 
 	const baseline = await runWithStatus('find tmp -depth');
@@ -104,7 +104,7 @@ test('-true matches the same set as no predicate', async () => {
 });
 
 test('-false alone matches nothing and exits successfully', async () => {
-	await fs.mkdir('/tmp/fred/jim', true);
+	await fs.makeDirectory('/tmp/fred/jim', { recursive: true });
 
 	const result = await runWithStatus('find tmp -false');
 
@@ -113,7 +113,7 @@ test('-false alone matches nothing and exits successfully', async () => {
 });
 
 test('-false can be used with -o to select only the right branch', async () => {
-	await fs.mkdir('/tmp/fred/jim', true);
+	await fs.makeDirectory('/tmp/fred/jim', { recursive: true });
 
 	const result = await runWithStatus('find tmp -depth -false -o -name jim');
 
@@ -122,8 +122,8 @@ test('-false can be used with -o to select only the right branch', async () => {
 });
 
 test('-empty matches only empty files and empty directories', async () => {
-	await fs.mkdir('/tmp/empty-dir', true);
-	await fs.mkdir('/tmp/nonempty-dir', true);
+	await fs.makeDirectory('/tmp/empty-dir', { recursive: true });
+	await fs.makeDirectory('/tmp/nonempty-dir', { recursive: true });
 	await setTextFile('/tmp/empty-file', '');
 	await setTextFile('/tmp/nonempty-file', 'x');
 	await setTextFile('/tmp/nonempty-dir/child', 'x');
@@ -137,7 +137,7 @@ test('-empty matches only empty files and empty directories', async () => {
 });
 
 test('-regex matches the whole display path, not a substring', async () => {
-	await fs.mkdir('/tmp/d/d', true);
+	await fs.makeDirectory('/tmp/d/d', { recursive: true });
 
 	const result = await runWithStatus("find tmp -regex 'tmp/d'");
 
@@ -146,7 +146,7 @@ test('-regex matches the whole display path, not a substring', async () => {
 });
 
 test('-iregex is case-insensitive while -regex remains case-sensitive', async () => {
-	await fs.mkdir('/tmp/d', true);
+	await fs.makeDirectory('/tmp/d', { recursive: true });
 
 	const regexResult = await runWithStatus("find tmp -regex 'TMP/D'");
 	const iregexResult = await runWithStatus("find tmp -iregex 'TMP/D'");

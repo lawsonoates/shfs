@@ -5,7 +5,7 @@ import { createBuiltinRuntime } from '#shfs/builtin/test-runtime';
 
 test('cd updates cwd for existing directory', async () => {
 	const runtime = createBuiltinRuntime({ cwd: '/workspace' });
-	await runtime.fs.mkdir('/workspace/projects', true);
+	await runtime.fs.makeDirectory('/workspace/projects', { recursive: true });
 
 	(await cd(runtime, { path: literal('projects') })).unwrap();
 

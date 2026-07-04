@@ -17,11 +17,11 @@ async function readTextFile(fs: MemoryFS, path: string): Promise<string> {
 
 test('readdir returns immediate absolute children for root', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/docs/sub', true);
+	await fs.makeDirectory('/docs/sub', { recursive: true });
 	fs.setFile('/alpha.txt', 'a');
 	fs.setFile('/docs/readme.md', 'r');
 
-	expect(await collectPaths(fs.readdir('/'))).toEqual([
+	expect(await collectPaths(fs.readDirectory('/'))).toEqual([
 		'/alpha.txt',
 		'/docs',
 	]);
@@ -29,15 +29,15 @@ test('readdir returns immediate absolute children for root', async () => {
 
 test('readdir returns immediate absolute children for nested directories', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/docs/sub', true);
+	await fs.makeDirectory('/docs/sub', { recursive: true });
 	fs.setFile('/docs/readme.md', 'r');
 	fs.setFile('/docs/sub/notes.md', 'n');
 
-	expect(await collectPaths(fs.readdir('/docs'))).toEqual([
+	expect(await collectPaths(fs.readDirectory('/docs'))).toEqual([
 		'/docs/readme.md',
 		'/docs/sub',
 	]);
-	expect(await collectPaths(fs.readdir('/docs/'))).toEqual([
+	expect(await collectPaths(fs.readDirectory('/docs/'))).toEqual([
 		'/docs/readme.md',
 		'/docs/sub',
 	]);
@@ -47,7 +47,7 @@ test('readdir throws when path is a file', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/alpha.txt', 'a');
 
-	await expect(collectPaths(fs.readdir('/alpha.txt'))).rejects.toThrow(
+	await expect(collectPaths(fs.readDirectory('/alpha.txt'))).rejects.toThrow(
 		'Not a directory: /alpha.txt'
 	);
 });
@@ -56,17 +56,17 @@ test('readdir throws for non-directory paths and glob-like strings', async () =>
 	const fs = new MemoryFS();
 	fs.setFile('/alpha.txt', 'a');
 
-	await expect(collectPaths(fs.readdir('/missing'))).rejects.toThrow(
+	await expect(collectPaths(fs.readDirectory('/missing'))).rejects.toThrow(
 		'No such file or directory: /missing'
 	);
-	await expect(collectPaths(fs.readdir('/**/*'))).rejects.toThrow(
+	await expect(collectPaths(fs.readDirectory('/**/*'))).rejects.toThrow(
 		'No such file or directory: /**/*'
 	);
 });
 
 test('writeFile rejects existing directory paths', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/docs', true);
+	await fs.makeDirectory('/docs', { recursive: true });
 
 	await expect(
 		fs.writeFile('/docs', new TextEncoder().encode('content'))
@@ -77,10 +77,10 @@ test('mkdir rejects file parents', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/docs/readme.md', 'guide');
 
-	await expect(fs.mkdir('/docs/readme.md/nested')).rejects.toThrow(
+	await expect(fs.makeDirectory('/docs/readme.md/nested')).rejects.toThrow(
 		'Parent path is not a directory: /docs/readme.md'
 	);
-	expect(await collectPaths(fs.readdir('/docs'))).toEqual([
+	expect(await collectPaths(fs.readDirectory('/docs'))).toEqual([
 		'/docs/readme.md',
 	]);
 });
@@ -97,7 +97,7 @@ test('rename moves a file to a new path', async () => {
 
 test('rename moves a directory subtree under normalized paths', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/docs/sub', true);
+	await fs.makeDirectory('/docs/sub', { recursive: true });
 	fs.setFile('/docs/readme.md', 'guide');
 	fs.setFile('/docs/sub/notes.md', 'notes');
 
@@ -109,7 +109,7 @@ test('rename moves a directory subtree under normalized paths', async () => {
 	expect(await fs.exists('/guides/sub')).toBeTrue();
 	expect(await readTextFile(fs, '/guides/readme.md')).toBe('guide');
 	expect(await readTextFile(fs, '/guides/sub/notes.md')).toBe('notes');
-	expect(await collectPaths(fs.readdir('/guides'))).toEqual([
+	expect(await collectPaths(fs.readDirectory('/guides'))).toEqual([
 		'/guides/readme.md',
 		'/guides/sub',
 	]);
@@ -160,7 +160,7 @@ test('rename rejects root paths', async () => {
 test('rename rejects replacing a destination directory', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/source.txt', 'source');
-	await fs.mkdir('/docs/sub', true);
+	await fs.makeDirectory('/docs/sub', { recursive: true });
 	fs.setFile('/docs/sub/notes.md', 'notes');
 
 	await expect(fs.rename('/source.txt', '/docs')).rejects.toThrow(

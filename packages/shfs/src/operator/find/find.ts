@@ -141,7 +141,7 @@ export async function* find(
 			{
 				...startPath,
 				depth: 0,
-				isDirectory: startStat.isDirectory,
+				isDirectory: startStat.type === 'Directory',
 				size: startStat.size,
 			},
 			args,
@@ -234,7 +234,7 @@ async function* walkEntry(
 						basename(childAbsolutePath)
 					),
 					depth: entry.depth + 1,
-					isDirectory: childStat.isDirectory,
+					isDirectory: childStat.type === 'Directory',
 					size: childStat.size,
 				},
 				args,
@@ -568,7 +568,7 @@ function escapeJsRegexLiteralChar(char: string): string {
 
 async function readChildren(fs: FS, path: string): Promise<string[]> {
 	const children: string[] = [];
-	for await (const childPath of fs.readdir(path)) {
+	for await (const childPath of fs.readDirectory(path)) {
 		children.push(childPath);
 	}
 	return children;

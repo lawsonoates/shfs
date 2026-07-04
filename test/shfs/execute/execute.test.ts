@@ -19,23 +19,25 @@ const textDecoder = new TextDecoder();
 function createReadonlyFs(backingFs: FS): FS {
 	const readonlyError = new Error('readonly filesystem');
 	return {
-		deleteDirectory: async () => {
-			throw readonlyError;
-		},
-		deleteFile: async () => {
-			throw readonlyError;
-		},
 		exists: backingFs.exists.bind(backingFs),
-		mkdir: async () => {
+		makeDirectory: async () => {
 			throw readonlyError;
 		},
 		readFile: backingFs.readFile.bind(backingFs),
 		readLines: backingFs.readLines.bind(backingFs),
-		readdir: backingFs.readdir.bind(backingFs),
+		readDirectory: backingFs.readDirectory.bind(backingFs),
+		readLink: backingFs.readLink.bind(backingFs),
+		realPath: backingFs.realPath.bind(backingFs),
+		remove: async () => {
+			throw readonlyError;
+		},
 		rename: async () => {
 			throw readonlyError;
 		},
 		stat: backingFs.stat.bind(backingFs),
+		symlink: async () => {
+			throw readonlyError;
+		},
 		writeFile: async () => {
 			throw readonlyError;
 		},
@@ -262,8 +264,8 @@ test('command substitution can produce an output redirection target', async () =
 
 test('redirect target expansion failures stop sink commands before side effects', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace/dir-a', true);
-	await fs.mkdir('/workspace/dir-b', true);
+	await fs.makeDirectory('/workspace/dir-a', { recursive: true });
+	await fs.makeDirectory('/workspace/dir-b', { recursive: true });
 	const context: ExecuteContext = {
 		cwd: '/workspace',
 		stderr: new BufferedOutputStream(),
@@ -284,7 +286,7 @@ test('redirect target expansion failures stop sink commands before side effects'
 
 test('empty-expanded redirect targets fail before resolving cwd', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace', true);
+	await fs.makeDirectory('/workspace', { recursive: true });
 	const context: ExecuteContext = {
 		cwd: '/workspace',
 		stderr: new BufferedOutputStream(),
@@ -300,10 +302,10 @@ test('empty-expanded redirect targets fail before resolving cwd', async () => {
 	expect(context.stderr.snapshot().join('\n')).toContain(
 		'echo: redirection target must expand to exactly 1 path, got empty path'
 	);
-	expect((await fs.stat('/workspace')).isDirectory).toBe(true);
+	expect((await fs.stat('/workspace')).type === 'Directory').toBe(true);
 
 	const workspaceEntries: string[] = [];
-	for await (const entry of fs.readdir('/workspace')) {
+	for await (const entry of fs.readDirectory('/workspace')) {
 		workspaceEntries.push(entry);
 	}
 	expect(workspaceEntries).toEqual([]);
@@ -744,7 +746,7 @@ test('wires mkdir through execute', async () => {
 	(await collectRecordStream(result)).unwrap();
 
 	const stat = await fs.stat('/newdir');
-	expect(stat.isDirectory).toBe(true);
+	expect(stat.type === 'Directory').toBe(true);
 });
 
 test('wires mv force flag through execute', async () => {
@@ -876,7 +878,7 @@ test('ls with dot path does not recurse into nested paths', async () => {
 
 test('ls with dot path uses execution context cwd', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace', true);
+	await fs.makeDirectory('/workspace', { recursive: true });
 	fs.setFile('/workspace/file.txt', 'content');
 	fs.setFile('/other.txt', 'other');
 
@@ -967,7 +969,7 @@ test('pwd uses execution context cwd', async () => {
 
 test('cd updates execution context cwd for absolute paths', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace');
+	await fs.makeDirectory('/workspace');
 	const context = { cwd: '/' };
 
 	const ir: PipelineIR = {
@@ -993,7 +995,7 @@ test('cd updates execution context cwd for absolute paths', async () => {
 
 test('cd resolves relative and parent paths against cwd', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace/project', true);
+	await fs.makeDirectory('/workspace/project', { recursive: true });
 	const context = { cwd: '/workspace' };
 
 	const ir: PipelineIR = {
@@ -1080,7 +1082,7 @@ test('cd reports an error when target is a file', async () => {
 
 test('executes script statements in deterministic order', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace', true);
+	await fs.makeDirectory('/workspace', { recursive: true });
 	const context = { cwd: '/' };
 
 	const script: ScriptIR = {
@@ -1168,7 +1170,7 @@ test('executes script statements in deterministic order', async () => {
 
 test('script execution reuses shared context across statements', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace/project', true);
+	await fs.makeDirectory('/workspace/project', { recursive: true });
 	const context = { cwd: '/' };
 
 	const script: ScriptIR = {
@@ -1237,7 +1239,7 @@ test('and/or chain modes gate statements based on prior status', async () => {
 
 test('expanded command substitution can feed path-taking commands', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace/subdir', true);
+	await fs.makeDirectory('/workspace/subdir', { recursive: true });
 	const context = {
 		cwd: '/workspace',
 		status: 0,

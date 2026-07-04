@@ -44,7 +44,7 @@ function isDirectory(fs: FS, path: string) {
 	}).then((result) =>
 		result.match({
 			err: () => Result.ok(false),
-			ok: (stat) => Result.ok(stat.isDirectory),
+			ok: (stat) => Result.ok(stat.type === 'Directory'),
 		})
 	);
 }
@@ -117,7 +117,7 @@ export function mv(fs: FS): ActionEffect<MvArgs> {
 									: String(cause),
 						}),
 				});
-				if (sourceStat.isDirectory) {
+				if (sourceStat.type === 'Directory') {
 					return yield* new ShellRuntimeError({
 						exitCode: 1,
 						message: `mv: directory moves are not supported: ${src}`,

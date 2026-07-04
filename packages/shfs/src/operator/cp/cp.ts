@@ -48,7 +48,7 @@ function isDirectory(fs: FS, path: string) {
 	}).then((result) =>
 		result.match({
 			err: () => Result.ok(false),
-			ok: (stat) => Result.ok(stat.isDirectory),
+			ok: (stat) => Result.ok(stat.type === 'Directory'),
 		})
 	);
 }
@@ -135,7 +135,7 @@ function copyDirectoryRecursive(
 				const children: string[] = [];
 				yield* await Result.tryPromise({
 					try: async () => {
-						for await (const childPath of fs.readdir(
+						for await (const childPath of fs.readDirectory(
 							directoryPath
 						)) {
 							children.push(childPath);
@@ -170,7 +170,7 @@ function copyDirectoryRecursive(
 						}),
 				});
 				if (Result.isOk(stat)) {
-					if (stat.value.isDirectory) {
+					if (stat.value.type === 'Directory') {
 						return Result.ok();
 					}
 					return yield* new ShellRuntimeError({
@@ -179,7 +179,7 @@ function copyDirectoryRecursive(
 					});
 				}
 				yield* await Result.tryPromise({
-					try: () => fs.mkdir(path, true),
+					try: () => fs.makeDirectory(path, { recursive: true }),
 					catch: (cause) =>
 						new ShellRuntimeError({
 							cause,
@@ -227,7 +227,7 @@ function copyDirectoryRecursive(
 									: String(cause),
 						}),
 				});
-				if (sourceStat.isDirectory) {
+				if (sourceStat.type === 'Directory') {
 					yield* await ensureDirectory(targetPath);
 					stack.push({
 						sourcePath: childPath,
@@ -285,7 +285,7 @@ export function cp(fs: FS): ActionEffect<CpArgs> {
 						? joinPath(dest, basename(src))
 						: dest;
 
-				if (srcStat.isDirectory) {
+				if (srcStat.type === 'Directory') {
 					if (!recursive) {
 						return yield* new ShellRuntimeError({
 							exitCode: 1,

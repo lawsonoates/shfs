@@ -91,7 +91,7 @@ export async function runTreeCommand(
 			depth: 0,
 			forceIncludeAll: false,
 			fs,
-			isDirectory: stat.isDirectory,
+			isDirectory: stat.type === 'Directory',
 			path: resolvedPath,
 			rootDisplayPath: path,
 		});
@@ -228,7 +228,7 @@ async function buildChildEntries({
 			depth: childDepth,
 			forceIncludeAll,
 			fs,
-			isDirectory: stat.isDirectory,
+			isDirectory: stat.type === 'Directory',
 			path: childPath,
 			rootDisplayPath: childPath,
 		});
@@ -241,7 +241,7 @@ async function buildChildEntries({
 
 async function readSortedChildren(fs: FS, path: string): Promise<string[]> {
 	const children: string[] = [];
-	for await (const childPath of fs.readdir(path)) {
+	for await (const childPath of fs.readDirectory(path)) {
 		children.push(childPath);
 	}
 	children.sort((left, right) =>

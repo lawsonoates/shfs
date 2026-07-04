@@ -37,9 +37,9 @@ export function rm(fs: FS): ActionEffect<RmArgs> {
 			}
 
 			const stat = statResult.value;
-			if (!stat.isDirectory) {
+			if (stat.type !== 'Directory') {
 				yield* await Result.tryPromise({
-					try: () => fs.deleteFile(path),
+					try: () => fs.remove(path),
 					catch: (cause) =>
 						new ShellRuntimeError({
 							cause,
@@ -60,7 +60,7 @@ export function rm(fs: FS): ActionEffect<RmArgs> {
 				});
 			}
 			yield* await Result.tryPromise({
-				try: () => fs.deleteDirectory(path, true),
+				try: () => fs.remove(path, { recursive: true }),
 				catch: (cause) =>
 					new ShellRuntimeError({
 						cause,

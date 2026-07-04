@@ -135,7 +135,7 @@ async function readDirectoryPaths(
 	directoryPath: string
 ): Promise<string[]> {
 	const children: string[] = [];
-	for await (const childPath of fs.readdir(directoryPath)) {
+	for await (const childPath of fs.readDirectory(directoryPath)) {
 		children.push(childPath);
 	}
 	children.sort((left, right) => left.localeCompare(right));
@@ -152,7 +152,7 @@ function walkFilesystemEntriesEffect(
 			try: () => fs.stat(normalizedRoot),
 			catch: toShellErrorCause,
 		});
-		if (!rootStat.isDirectory) {
+		if (rootStat.type !== 'Directory') {
 			return yield* new ShellRuntimeError({
 				exitCode: 1,
 				message: `Not a directory: ${normalizedRoot}`,
@@ -179,9 +179,9 @@ function walkFilesystemEntriesEffect(
 				});
 				entries.push({
 					path: childPath,
-					isDirectory: stat.isDirectory,
+					isDirectory: stat.type === 'Directory',
 				});
-				if (stat.isDirectory) {
+				if (stat.type === 'Directory') {
 					pendingDirectories.push(childPath);
 				}
 			}

@@ -1,5 +1,5 @@
 import { AgentFS } from 'agentfs-sdk';
-import type { FS } from 'shfs/fs';
+import type { FS, FsInfo } from 'shfs/fs';
 import { normalizePath } from 'shfs/util/path';
 
 export class TursoAgentFS implements FS {
@@ -40,19 +40,35 @@ export class TursoAgentFS implements FS {
 		await this.agent.fs.rename(src, dest);
 	}
 
-	async deleteFile(path: string): Promise<void> {
-		await this.agent.fs.deleteFile(path);
-	}
-
-	async deleteDirectory(path: string, recursive = false): Promise<void> {
-		if (recursive) {
-			await this.agent.fs.rm(path, { recursive: true });
-			return;
+	async remove(
+		path: string,
+		options?: { recursive?: boolean; force?: boolean }
+	): Promise<void> {
+		const recursive = options?.recursive ?? false;
+		const force = options?.force ?? false;
+		try {
+			const stats = await this.agent.fs.stat(path);
+			if (stats.isDirectory()) {
+				if (recursive) {
+					await this.agent.fs.rm(path, { recursive: true });
+				} else {
+					await this.agent.fs.rmdir(path);
+				}
+				return;
+			}
+			await this.agent.fs.deleteFile(path);
+		} catch (error) {
+			if (force) {
+				return;
+			}
+			throw error;
 		}
-		await this.agent.fs.rmdir(path);
 	}
 
-	async *readdir(path: string): AsyncIterable<string> {
+	async *readDirectory(
+		path: string,
+		_options?: { recursive?: boolean }
+	): AsyncIterable<string> {
 		const normalizedDirectoryPath = normalizePath(path);
 		const entries = await this.agent.fs.readdir(path);
 		for (const entry of entries) {
@@ -63,8 +79,11 @@ export class TursoAgentFS implements FS {
 		}
 	}
 
-	async mkdir(path: string, recursive = false): Promise<void> {
-		if (recursive) {
+	async makeDirectory(
+		path: string,
+		options?: { recursive?: boolean; mode?: number }
+	): Promise<void> {
+		if (options?.recursive) {
 			// Create all parent directories
 			const parts = path.split('/').filter(Boolean);
 			let current = '';
@@ -81,13 +100,18 @@ export class TursoAgentFS implements FS {
 		}
 	}
 
-	async stat(
-		path: string
-	): Promise<{ isDirectory: boolean; size: number; mtime: Date }> {
+	async stat(path: string): Promise<FsInfo> {
 		const stats = await this.agent.fs.stat(path);
+		let type: FsInfo['type'] = 'Unknown';
+		if (stats.isDirectory()) {
+			type = 'Directory';
+		} else if (stats.isFile()) {
+			type = 'File';
+		}
 		return {
-			isDirectory: stats.isDirectory(),
+			type,
 			size: stats.size,
+			mode: type === 'Directory' ? 0o755 : 0o644,
 			mtime: new Date(stats.mtime * 1000),
 		};
 	}
@@ -107,5 +131,18 @@ export class TursoAgentFS implements FS {
 			// This mirrors MemoryFS.exists behavior used by shfs.
 			return false;
 		}
+	}
+
+	// Symlinks are not supported by this backing store. See notes/symlink-support.md.
+	async readLink(path: string): Promise<string> {
+		throw new Error(`readLink is not supported: ${path}`);
+	}
+
+	async realPath(path: string): Promise<string> {
+		return normalizePath(path);
+	}
+
+	async symlink(target: string, path: string): Promise<void> {
+		throw new Error(`symlink is not supported: ${target} -> ${path}`);
 	}
 }

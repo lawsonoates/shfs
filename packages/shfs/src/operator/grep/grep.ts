@@ -508,7 +508,7 @@ async function loadPatternsFromFile(
 	}
 	const absolutePath = resolvePathFromCwd(cwd, pathValue);
 	const stat = await statOrNull(fs, absolutePath);
-	if (stat === null || stat.isDirectory) {
+	if (stat === null || stat.type === 'Directory') {
 		return null;
 	}
 	const bytes = await readFileOrNull(fs, absolutePath);
@@ -543,7 +543,7 @@ async function listSortedDirectoryChildren(
 	directoryPath: string
 ): Promise<string[]> {
 	const childPaths: string[] = [];
-	for await (const childPath of fs.readdir(directoryPath)) {
+	for await (const childPath of fs.readDirectory(directoryPath)) {
 		childPaths.push(childPath);
 	}
 	childPaths.sort((left, right) => left.localeCompare(right));
@@ -633,7 +633,7 @@ async function collectSearchTargets(
 				hadError = true;
 				continue;
 			}
-			if (stat.isDirectory) {
+			if (stat.type === 'Directory') {
 				const childName = basename(childPath);
 				if (excludeDirMatchers.some((matcher) => matcher(childName))) {
 					continue;
@@ -688,7 +688,7 @@ async function collectSearchTargets(
 			continue;
 		}
 
-		if (stat.isDirectory) {
+		if (stat.type === 'Directory') {
 			if (!options.recursive) {
 				if (options.directories === 'skip') {
 					continue;

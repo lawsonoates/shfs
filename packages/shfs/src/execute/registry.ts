@@ -291,7 +291,7 @@ function formatLongListing(
 	path: string,
 	stat: Awaited<ReturnType<FS['stat']>>
 ): string {
-	const mode = stat.isDirectory ? 'd' : '-';
+	const mode = stat.type === 'Directory' ? 'd' : '-';
 	const size = String(stat.size).padStart(8, ' ');
 	return `${mode} ${size} ${stat.mtime.toISOString()} ${path}`;
 }

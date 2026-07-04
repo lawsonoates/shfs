@@ -100,7 +100,7 @@ export namespace Harness {
 			if (await fs.exists(path)) {
 				return;
 			}
-			await fs.mkdir(path, true);
+			await fs.makeDirectory(path, { recursive: true });
 		};
 
 		const setFile = async (

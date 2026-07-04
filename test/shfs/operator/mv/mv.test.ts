@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import type { FS } from '#shfs/fs/fs';
+import type { FS, FsInfo } from '#shfs/fs/fs';
 import { mv } from '#shfs/operator/mv/mv';
 import type { Stream } from '#shfs/stream';
 import { normalizePath } from '#shfs/util/path';
@@ -49,37 +49,39 @@ class RecordingFS implements FS {
 		this.files.add(normalizedDestinationPath);
 	}
 
-	async deleteFile(path: string): Promise<void> {
-		throw new Error(`deleteFile should not be called: ${path}`);
+	async remove(
+		path: string,
+		_options?: { recursive?: boolean; force?: boolean }
+	): Promise<void> {
+		throw new Error(`remove should not be called: ${path}`);
 	}
 
-	async deleteDirectory(path: string, _recursive?: boolean): Promise<void> {
-		throw new Error(`deleteDirectory should not be called: ${path}`);
+	readDirectory(path: string): Stream<string> {
+		throw new Error(`readDirectory should not be called: ${path}`);
 	}
 
-	readdir(path: string): Stream<string> {
-		throw new Error(`readdir should not be called: ${path}`);
-	}
-
-	async mkdir(path: string, _recursive?: boolean): Promise<void> {
+	async makeDirectory(
+		path: string,
+		_options?: { recursive?: boolean; mode?: number }
+	): Promise<void> {
 		this.directories.add(normalizePath(path));
 	}
 
-	async stat(
-		path: string
-	): Promise<{ isDirectory: boolean; size: number; mtime: Date }> {
+	async stat(path: string): Promise<FsInfo> {
 		const normalizedPath = normalizePath(path);
 		if (this.directories.has(normalizedPath)) {
 			return {
-				isDirectory: true,
+				type: 'Directory',
 				size: 0,
+				mode: 0o755,
 				mtime: new Date(0),
 			};
 		}
 		if (this.files.has(normalizedPath)) {
 			return {
-				isDirectory: false,
+				type: 'File',
 				size: 1,
+				mode: 0o644,
 				mtime: new Date(0),
 			};
 		}
@@ -92,6 +94,18 @@ class RecordingFS implements FS {
 			this.files.has(normalizedPath) ||
 			this.directories.has(normalizedPath)
 		);
+	}
+
+	async readLink(path: string): Promise<string> {
+		throw new Error(`readLink should not be called: ${path}`);
+	}
+
+	async realPath(path: string): Promise<string> {
+		return normalizePath(path);
+	}
+
+	async symlink(target: string, path: string): Promise<void> {
+		throw new Error(`symlink should not be called: ${target} -> ${path}`);
 	}
 }
 

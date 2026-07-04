@@ -36,7 +36,7 @@ export async function* tailFiles(
 			onMissingFile(entry.displayPath);
 			continue;
 		}
-		if (stat.value.isDirectory) {
+		if (stat.value.type === 'Directory') {
 			continue;
 		}
 		const buf: LineRecord[] = [];

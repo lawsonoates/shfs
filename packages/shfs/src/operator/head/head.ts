@@ -63,7 +63,7 @@ export async function* headFiles(
 			onMissingFile(entry.displayPath);
 			continue;
 		}
-		if (stat.value.isDirectory) {
+		if (stat.value.type === 'Directory') {
 			continue;
 		}
 		if (printHeaders) {

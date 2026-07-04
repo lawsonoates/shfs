@@ -38,7 +38,7 @@ export const cd: ActionBuiltin<CdStep['args']> = (runtime, args) => {
 				}),
 		});
 
-		if (!stat.isDirectory) {
+		if (stat.type !== 'Directory') {
 			return yield* new ShellRuntimeError({
 				exitCode: 1,
 				message: `cd: not a directory: ${requestedPath}`,
