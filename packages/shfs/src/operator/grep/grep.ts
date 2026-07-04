@@ -43,6 +43,17 @@ interface SearchTarget {
 	stdin: boolean;
 }
 
+type PathMatcher = (value: string) => boolean;
+
+interface SearchTargetCollector {
+	context: BuiltinContext;
+	excludeDirMatchers: PathMatcher[];
+	fs: FS;
+	options: GrepOptionsIR;
+	shouldIncludeFile: (filePath: string) => boolean;
+	targets: SearchTarget[];
+}
+
 interface TextRecord {
 	byteOffset: number;
 	invalidUtf8: boolean;
@@ -577,6 +588,30 @@ function statOrNull(
 	);
 }
 
+function readLinkOrNull(fs: FS, path: string): Promise<string | null> {
+	return Result.tryPromise({
+		try: () => fs.readLink(path),
+		catch: (error) => error,
+	}).then((result) =>
+		result.match({
+			err: () => null,
+			ok: (target) => target,
+		})
+	);
+}
+
+function realPathOrNull(fs: FS, path: string): Promise<string | null> {
+	return Result.tryPromise({
+		try: () => fs.realPath(path),
+		catch: (error) => error,
+	}).then((result) =>
+		result.match({
+			err: () => null,
+			ok: (realPath) => realPath,
+		})
+	);
+}
+
 async function collectSearchTargets(
 	fileOperands: string[],
 	options: GrepOptionsIR,
@@ -596,126 +631,239 @@ async function collectSearchTargets(
 	const excludeDirMatchers = options.excludeDir.map((pattern) =>
 		picomatch(pattern, { dot: true })
 	);
-
-	const shouldIncludeFile = (filePath: string): boolean => {
-		const name = basename(filePath);
-		if (excludeMatchers.some((matcher) => matcher(name))) {
-			return false;
-		}
-		if (
-			includeMatchers.length > 0 &&
-			!includeMatchers.some((matcher) => matcher(name))
-		) {
-			return false;
-		}
-		return true;
-	};
-
-	const walkDirectory = async (
-		rootPath: string,
-		preferRelative: boolean
-	): Promise<void> => {
-		const childPathResult = await Result.tryPromise({
-			try: () => listSortedDirectoryChildren(fs, rootPath),
-			catch: (error) => error,
-		});
-		const childPaths = childPathResult.match({
-			err: () => null,
-			ok: (paths) => paths,
-		});
-		if (childPaths === null) {
-			hadError = true;
-			return;
-		}
-		for (const childPath of childPaths) {
-			const stat = await statOrNull(fs, childPath);
-			if (stat === null) {
-				hadError = true;
-				continue;
-			}
-			if (stat.type === 'Directory') {
-				const childName = basename(childPath);
-				if (excludeDirMatchers.some((matcher) => matcher(childName))) {
-					continue;
-				}
-				await walkDirectory(childPath, preferRelative);
-				continue;
-			}
-			if (!shouldIncludeFile(childPath)) {
-				continue;
-			}
-			targets.push({
-				absolutePath: childPath,
-				displayPath: toDisplayPath(
-					childPath,
-					context.cwd,
-					preferRelative
-				),
-				preferRelative,
-				stdin: false,
-			});
-		}
+	const collector: SearchTargetCollector = {
+		context,
+		excludeDirMatchers,
+		fs,
+		options,
+		shouldIncludeFile: createFileMatcher(includeMatchers, excludeMatchers),
+		targets,
 	};
 
 	const normalizedOperands =
 		options.recursive && fileOperands.length === 0 ? ['.'] : fileOperands;
 	if (!options.recursive && normalizedOperands.length === 0) {
-		targets.push({
-			absolutePath: null,
-			displayPath: '-',
-			preferRelative: true,
-			stdin: true,
-		});
+		pushStdinTarget(targets);
 	}
 	for (const operand of normalizedOperands) {
-		if (operand === '-' || operand === '') {
-			targets.push({
-				absolutePath: null,
-				displayPath: '-',
-				preferRelative: true,
-				stdin: true,
-			});
-			continue;
-		}
-		const preferRelative = !operand.startsWith('/');
-		const absolutePath = resolvePathFromCwd(context.cwd, operand);
-		const stat = await statOrNull(fs, absolutePath);
-		if (stat === null) {
-			hadError = true;
-			if (!options.noMessages) {
-				stderr.push(`grep: ${operand}: No such file or directory`);
-			}
-			continue;
-		}
-
-		if (stat.type === 'Directory') {
-			if (!options.recursive) {
-				if (options.directories === 'skip') {
-					continue;
-				}
-				hadError = true;
-				continue;
-			}
-			await walkDirectory(absolutePath, preferRelative);
-			continue;
-		}
-
-		if (!shouldIncludeFile(absolutePath)) {
-			continue;
-		}
-		targets.push({
-			absolutePath,
-			displayPath: toDisplayPath(
-				absolutePath,
-				context.cwd,
-				preferRelative
-			),
-			preferRelative,
-			stdin: false,
+		const operandHadError = await collectSearchOperand({
+			collector,
+			operand,
+			stderr,
 		});
+		hadError ||= operandHadError;
 	}
 
 	return { hadError, stderr, targets };
+}
+
+function createFileMatcher(
+	includeMatchers: PathMatcher[],
+	excludeMatchers: PathMatcher[]
+): (filePath: string) => boolean {
+	return (filePath) => {
+		const name = basename(filePath);
+		if (excludeMatchers.some((matcher) => matcher(name))) {
+			return false;
+		}
+		if (includeMatchers.length === 0) {
+			return true;
+		}
+		return includeMatchers.some((matcher) => matcher(name));
+	};
+}
+
+async function collectSearchOperand(options: {
+	collector: SearchTargetCollector;
+	operand: string;
+	stderr: string[];
+}): Promise<boolean> {
+	const { collector, operand, stderr } = options;
+	if (operand === '-' || operand === '') {
+		pushStdinTarget(collector.targets);
+		return false;
+	}
+
+	const preferRelative = !operand.startsWith('/');
+	const absolutePath = resolvePathFromCwd(collector.context.cwd, operand);
+	const stat = await statOrNull(collector.fs, absolutePath);
+	if (stat === null) {
+		if (!collector.options.noMessages) {
+			stderr.push(`grep: ${operand}: No such file or directory`);
+		}
+		return true;
+	}
+
+	if (stat.type === 'Directory') {
+		return await collectDirectoryOperand(
+			collector,
+			absolutePath,
+			preferRelative
+		);
+	}
+
+	if (collector.shouldIncludeFile(absolutePath)) {
+		pushFileTarget(collector, absolutePath, preferRelative);
+	}
+	return false;
+}
+
+async function collectDirectoryOperand(
+	collector: SearchTargetCollector,
+	absolutePath: string,
+	preferRelative: boolean
+): Promise<boolean> {
+	if (!collector.options.recursive) {
+		return collector.options.directories !== 'skip';
+	}
+
+	const realRootPath = await realPathOrNull(collector.fs, absolutePath);
+	if (realRootPath === null) {
+		return true;
+	}
+	return await walkSearchDirectory({
+		ancestorRealPaths: new Set([realRootPath]),
+		collector,
+		preferRelative,
+		rootPath: absolutePath,
+	});
+}
+
+async function walkSearchDirectory(options: {
+	ancestorRealPaths: Set<string>;
+	collector: SearchTargetCollector;
+	preferRelative: boolean;
+	rootPath: string;
+}): Promise<boolean> {
+	const childPaths = await listDirectoryChildrenOrNull(
+		options.collector.fs,
+		options.rootPath
+	);
+	if (childPaths === null) {
+		return true;
+	}
+
+	let hadError = false;
+	for (const childPath of childPaths) {
+		const childHadError = await collectDirectoryChild(options, childPath);
+		hadError ||= childHadError;
+	}
+	return hadError;
+}
+
+async function collectDirectoryChild(
+	options: {
+		ancestorRealPaths: Set<string>;
+		collector: SearchTargetCollector;
+		preferRelative: boolean;
+		rootPath: string;
+	},
+	childPath: string
+): Promise<boolean> {
+	const logicalChildPath = appendPath(options.rootPath, basename(childPath));
+	const linkTarget = await readLinkOrNull(
+		options.collector.fs,
+		logicalChildPath
+	);
+	const stat = await statOrNull(options.collector.fs, logicalChildPath);
+	if (stat === null) {
+		return linkTarget === null;
+	}
+	if (
+		linkTarget !== null &&
+		!options.collector.options.dereferenceRecursive
+	) {
+		return false;
+	}
+	if (stat.type === 'Directory') {
+		return await collectSubdirectoryChild(options, logicalChildPath);
+	}
+	if (options.collector.shouldIncludeFile(logicalChildPath)) {
+		pushFileTarget(
+			options.collector,
+			logicalChildPath,
+			options.preferRelative
+		);
+	}
+	return false;
+}
+
+async function collectSubdirectoryChild(
+	options: {
+		ancestorRealPaths: Set<string>;
+		collector: SearchTargetCollector;
+		preferRelative: boolean;
+	},
+	logicalChildPath: string
+): Promise<boolean> {
+	const childName = basename(logicalChildPath);
+	if (
+		options.collector.excludeDirMatchers.some((matcher) =>
+			matcher(childName)
+		)
+	) {
+		return false;
+	}
+
+	const realChildPath = await realPathOrNull(
+		options.collector.fs,
+		logicalChildPath
+	);
+	if (
+		realChildPath === null ||
+		options.ancestorRealPaths.has(realChildPath)
+	) {
+		return false;
+	}
+	return await walkSearchDirectory({
+		ancestorRealPaths: new Set([
+			...options.ancestorRealPaths,
+			realChildPath,
+		]),
+		collector: options.collector,
+		preferRelative: options.preferRelative,
+		rootPath: logicalChildPath,
+	});
+}
+
+async function listDirectoryChildrenOrNull(
+	fs: FS,
+	path: string
+): Promise<string[] | null> {
+	const childPathResult = await Result.tryPromise({
+		try: () => listSortedDirectoryChildren(fs, path),
+		catch: (error) => error,
+	});
+	return childPathResult.match({
+		err: () => null,
+		ok: (paths) => paths,
+	});
+}
+
+function pushStdinTarget(targets: SearchTarget[]): void {
+	targets.push({
+		absolutePath: null,
+		displayPath: '-',
+		preferRelative: true,
+		stdin: true,
+	});
+}
+
+function pushFileTarget(
+	collector: SearchTargetCollector,
+	absolutePath: string,
+	preferRelative: boolean
+): void {
+	collector.targets.push({
+		absolutePath,
+		displayPath: toDisplayPath(
+			absolutePath,
+			collector.context.cwd,
+			preferRelative
+		),
+		preferRelative,
+		stdin: false,
+	});
 }
 
 function trimTrailingSlash(path: string): string {
@@ -723,6 +871,13 @@ function trimTrailingSlash(path: string): string {
 		return path;
 	}
 	return path.replace(/\/+$/g, '');
+}
+
+function appendPath(parentPath: string, childName: string): string {
+	if (parentPath === '/') {
+		return `/${childName}`;
+	}
+	return `${parentPath}/${childName}`;
 }
 
 function basename(path: string): string {
@@ -821,10 +976,7 @@ function shouldDisplayFilename(
 	const concreteFiles = fileOperands.filter(
 		(operand) => operand !== '' && operand !== '-'
 	);
-	if (concreteFiles.length <= 1) {
-		return false;
-	}
-	return concreteFiles.some((operand) => operand.includes('/'));
+	return concreteFiles.length > 1;
 }
 
 function buildMatchers(

@@ -29,6 +29,7 @@ const DEFAULT_TRAVERSAL: FindTraversalIR = {
 	depth: false,
 	maxdepth: null,
 	mindepth: 0,
+	symlinkMode: 'physical',
 };
 
 const NON_NEGATIVE_INTEGER_REGEX = /^\d+$/;
@@ -83,8 +84,15 @@ export function parseFindArgs(argv: ExpandedWord[]): FindArgsIR {
 		sawOr: false,
 		traversal: { ...DEFAULT_TRAVERSAL },
 	};
-	const predicateStartIndex = findPredicateStartIndex(argv);
-	const explicitStartPaths = argv.slice(0, predicateStartIndex);
+	const startPathStartIndex = parseLeadingOptions(argv, state);
+	const predicateStartIndex = findPredicateStartIndex(
+		argv,
+		startPathStartIndex
+	);
+	const explicitStartPaths = argv.slice(
+		startPathStartIndex,
+		predicateStartIndex
+	);
 	const startPaths =
 		explicitStartPaths.length > 0 ? explicitStartPaths : [literal('.')];
 
@@ -143,8 +151,50 @@ function createMissingExpressionDiagnostic(
 	);
 }
 
-function findPredicateStartIndex(argv: ExpandedWord[]): number {
-	for (const [index, word] of argv.entries()) {
+function parseLeadingOptions(
+	argv: ExpandedWord[],
+	state: FindParseState
+): number {
+	let index = 0;
+	while (index < argv.length) {
+		const word = argv[index];
+		if (!word) {
+			break;
+		}
+		const token = expandedWordToString(word);
+		if (!parseSymlinkModeOption(token, state)) {
+			break;
+		}
+		index += 1;
+	}
+	return index;
+}
+
+function parseSymlinkModeOption(token: string, state: FindParseState): boolean {
+	if (token === '-H') {
+		state.traversal.symlinkMode = 'command-line';
+		return true;
+	}
+	if (token === '-L') {
+		state.traversal.symlinkMode = 'logical';
+		return true;
+	}
+	if (token === '-P') {
+		state.traversal.symlinkMode = 'physical';
+		return true;
+	}
+	return false;
+}
+
+function findPredicateStartIndex(
+	argv: ExpandedWord[],
+	startIndex: number
+): number {
+	for (let index = startIndex; index < argv.length; index += 1) {
+		const word = argv[index];
+		if (!word) {
+			continue;
+		}
 		if (expandedWordToString(word).startsWith('-')) {
 			return index;
 		}
@@ -162,7 +212,14 @@ function parseFindToken(
 		return parsePatternPredicate(argv, index, token, state);
 	}
 	if (token === '-type') {
-		return parseTypePredicate(argv, index, state);
+		return parseTypePredicate(argv, index, '-type', state);
+	}
+	if (token === '-xtype') {
+		return parseTypePredicate(argv, index, '-xtype', state);
+	}
+	if (parseSymlinkModeOption(token, state)) {
+		state.currentSideAllowsEmptyBranch = true;
+		return index + 1;
 	}
 	if (token === '-true' || token === '-false') {
 		state.currentBranch.push({
@@ -308,20 +365,21 @@ function parsePatternPredicate(
 function parseTypePredicate(
 	argv: ExpandedWord[],
 	index: number,
+	token: '-type' | '-xtype',
 	state: FindParseState
 ): number {
 	const valueWord = argv[index + 1];
 	if (!valueWord) {
-		state.diagnostics.push(createMissingValueDiagnostic('-type', index));
+		state.diagnostics.push(createMissingValueDiagnostic(token, index));
 		return index + 1;
 	}
 
-	const parsedType = parseFindTypeValue(valueWord, index + 1);
+	const parsedType = parseFindTypeValue(token, valueWord, index + 1);
 	if ('diagnostic' in parsedType) {
 		state.diagnostics.push(parsedType.diagnostic);
 	} else {
 		state.currentBranch.push({
-			kind: 'type',
+			kind: token === '-type' ? 'type' : 'xtype',
 			types: parsedType.types,
 		});
 	}
@@ -375,6 +433,7 @@ function parseTraversalOption(
 }
 
 function parseFindTypeValue(
+	token: '-type' | '-xtype',
 	word: ExpandedWord,
 	tokenIndex: number
 ): { diagnostic: FindDiagnosticIR } | { types: FindTypeIR[] } {
@@ -385,7 +444,7 @@ function parseFindTypeValue(
 				'invalid-value',
 				rawValue,
 				tokenIndex,
-				'find: Arguments to -type should contain at least one letter'
+				`find: Arguments to ${token} should contain at least one letter`
 			),
 		};
 	}
@@ -395,7 +454,7 @@ function parseFindTypeValue(
 				'invalid-value',
 				rawValue,
 				tokenIndex,
-				'find: Last file type in list argument to -type is missing'
+				`find: Last file type in list argument to ${token} is missing`
 			),
 		};
 	}
@@ -407,7 +466,7 @@ function parseFindTypeValue(
 				'invalid-value',
 				rawValue,
 				tokenIndex,
-				'find: File type in list argument to -type is missing'
+				`find: File type in list argument to ${token} is missing`
 			),
 		};
 	}
@@ -425,13 +484,13 @@ function parseFindTypeValue(
 				),
 			};
 		}
-		if (part !== 'd' && part !== 'f') {
+		if (part !== 'd' && part !== 'f' && part !== 'l') {
 			return {
 				diagnostic: createDiagnostic(
 					'invalid-value',
 					rawValue,
 					tokenIndex,
-					`find: Unknown argument to -type: ${part}`
+					`find: Unknown argument to ${token}: ${part}`
 				),
 			};
 		}
@@ -441,7 +500,7 @@ function parseFindTypeValue(
 					'invalid-value',
 					rawValue,
 					tokenIndex,
-					`find: Duplicate file type in list argument to -type: ${part}`
+					`find: Duplicate file type in list argument to ${token}: ${part}`
 				),
 			};
 		}

@@ -7,7 +7,9 @@ test('--prune removes directories made empty by -I exclusions', async () => {
 	const fs = new MemoryFS();
 	const shell = new Shell(fs);
 
-	await fs.makeDirectory('/workspace/empty-after-exclude', { recursive: true });
+	await fs.makeDirectory('/workspace/empty-after-exclude', {
+		recursive: true,
+	});
 	await fs.makeDirectory('/workspace/kept', { recursive: true });
 	fs.setFile('/workspace/empty-after-exclude/hidden.log', '');
 	fs.setFile('/workspace/kept/visible.txt', '');

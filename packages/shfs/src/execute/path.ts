@@ -30,6 +30,11 @@ interface FsEntry {
 	isDirectory: boolean;
 }
 
+interface PendingDirectory {
+	ancestorRealPaths: Set<string>;
+	path: string;
+}
+
 const MULTIPLE_SLASH_REGEX = /\/+/g;
 const ROOT_DIRECTORY = '/';
 const TRAILING_SLASH_REGEX = /\/+$/;
@@ -160,7 +165,16 @@ function walkFilesystemEntriesEffect(
 		}
 
 		const entries: FsEntry[] = [];
-		const pendingDirectories: string[] = [normalizedRoot];
+		const rootRealPath = yield* await Result.tryPromise({
+			try: () => fs.realPath(normalizedRoot),
+			catch: toShellErrorCause,
+		});
+		const pendingDirectories: PendingDirectory[] = [
+			{
+				ancestorRealPaths: new Set([rootRealPath]),
+				path: normalizedRoot,
+			},
+		];
 
 		while (pendingDirectories.length > 0) {
 			const currentDirectory = pendingDirectories.pop();
@@ -169,20 +183,37 @@ function walkFilesystemEntriesEffect(
 			}
 
 			const children = yield* await Result.tryPromise({
-				try: () => readDirectoryPaths(fs, currentDirectory),
+				try: () => readDirectoryPaths(fs, currentDirectory.path),
 				catch: toShellErrorCause,
 			});
 			for (const childPath of children) {
-				const stat = yield* await Result.tryPromise({
-					try: () => fs.stat(childPath),
-					catch: toShellErrorCause,
-				});
+				const logicalChildPath = appendPath(
+					currentDirectory.path,
+					basename(childPath)
+				);
+				const isDirectory = yield* await getDirectoryStatusEffect(
+					fs,
+					logicalChildPath
+				);
 				entries.push({
-					path: childPath,
-					isDirectory: stat.type === 'Directory',
+					path: logicalChildPath,
+					isDirectory,
 				});
-				if (stat.type === 'Directory') {
-					pendingDirectories.push(childPath);
+				if (isDirectory) {
+					const realChildPath = yield* await Result.tryPromise({
+						try: () => fs.realPath(logicalChildPath),
+						catch: toShellErrorCause,
+					});
+					if (currentDirectory.ancestorRealPaths.has(realChildPath)) {
+						continue;
+					}
+					pendingDirectories.push({
+						ancestorRealPaths: new Set([
+							...currentDirectory.ancestorRealPaths,
+							realChildPath,
+						]),
+						path: logicalChildPath,
+					});
 				}
 			}
 		}
@@ -190,6 +221,47 @@ function walkFilesystemEntriesEffect(
 		entries.sort((left, right) => left.path.localeCompare(right.path));
 		return Result.ok(entries);
 	});
+}
+
+function getDirectoryStatusEffect(
+	fs: FS,
+	path: string
+): ShellResult<boolean, ShellErrorCause> {
+	return Result.gen(async function* () {
+		const statResult = await Result.tryPromise({
+			try: () => fs.stat(path),
+			catch: toShellErrorCause,
+		});
+		if (Result.isOk(statResult)) {
+			return Result.ok(statResult.value.type === 'Directory');
+		}
+
+		const linkResult = await Result.tryPromise({
+			try: () => fs.readLink(path),
+			catch: toShellErrorCause,
+		});
+		if (Result.isOk(linkResult)) {
+			return Result.ok(false);
+		}
+
+		return Result.err(statResult.error);
+	});
+}
+
+function appendPath(parentPath: string, childName: string): string {
+	if (parentPath === ROOT_DIRECTORY) {
+		return `${ROOT_DIRECTORY}${childName}`;
+	}
+	return `${parentPath}${ROOT_DIRECTORY}${childName}`;
+}
+
+function basename(path: string): string {
+	const normalized = path.replace(TRAILING_SLASH_REGEX, '');
+	const slashIndex = normalized.lastIndexOf(ROOT_DIRECTORY);
+	if (slashIndex === -1) {
+		return normalized;
+	}
+	return normalized.slice(slashIndex + 1);
 }
 
 function toRelativePathFromCwd(path: string, cwd: string): string | null {

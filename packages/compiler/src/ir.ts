@@ -260,7 +260,9 @@ export interface EchoStep {
 
 export type FindDiagnosticIR = ShellDiagnostic;
 
-export type FindTypeIR = 'd' | 'f';
+export type FindSymlinkModeIR = 'command-line' | 'logical' | 'physical';
+
+export type FindTypeIR = 'd' | 'f' | 'l';
 
 export type FindPredicateIR =
 	| {
@@ -294,6 +296,10 @@ export type FindPredicateIR =
 	| {
 			kind: 'type';
 			types: FindTypeIR[];
+	  }
+	| {
+			kind: 'xtype';
+			types: FindTypeIR[];
 	  };
 
 export interface FindActionIR {
@@ -305,6 +311,7 @@ export interface FindTraversalIR {
 	depth: boolean;
 	maxdepth: number | null;
 	mindepth: number;
+	symlinkMode: FindSymlinkModeIR;
 }
 
 export interface FindArgsIR {
@@ -355,6 +362,7 @@ export interface GrepOptionsIR {
 	nullData: boolean;
 	onlyMatching: boolean;
 	quiet: boolean;
+	dereferenceRecursive: boolean;
 	recursive: boolean;
 	textMode: boolean;
 	version: boolean;

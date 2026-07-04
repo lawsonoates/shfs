@@ -1,8 +1,8 @@
 export {
 	AlreadyExistsError,
 	DirectoryNotEmptyError,
-	type FsErrorCode,
 	FsError,
+	type FsErrorCode,
 	InvalidOperationError,
 	IsADirectoryError,
 	NotADirectoryError,

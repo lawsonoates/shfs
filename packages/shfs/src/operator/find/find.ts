@@ -48,8 +48,14 @@ type ResolvedFindPredicate =
 	  }
 	| {
 			kind: 'type';
-			types: Set<'d' | 'f'>;
+			types: Set<FindEntryType>;
+	  }
+	| {
+			kind: 'xtype';
+			types: Set<FindEntryType>;
 	  };
+
+type FindEntryType = 'd' | 'f' | 'l';
 
 interface FindTraversalState {
 	hadError: boolean;
@@ -64,6 +70,15 @@ interface FindEntry extends FindResolvedPath {
 	depth: number;
 	isDirectory: boolean;
 	size: number;
+	type: FindEntryType;
+	xtype: FindEntryType;
+}
+
+interface FindEntryInfo {
+	isDirectory: boolean;
+	size: number;
+	type: FindEntryType;
+	xtype: FindEntryType;
 }
 
 export async function* find(
@@ -119,8 +134,12 @@ export async function* find(
 	);
 
 	for (const startPath of startPaths) {
-		const startStat = await statOrNull(fs, startPath.absolutePath);
-		if (startStat === null) {
+		const startEntryInfo = await getFindEntryInfo(
+			fs,
+			startPath.absolutePath,
+			args.traversal.symlinkMode !== 'physical'
+		);
+		if (startEntryInfo === null) {
 			state.hadError = true;
 			writeDiagnosticsToStderr(context, [
 				createRuntimeDiagnostic(
@@ -141,8 +160,7 @@ export async function* find(
 			{
 				...startPath,
 				depth: 0,
-				isDirectory: startStat.type === 'Directory',
-				size: startStat.size,
+				...startEntryInfo,
 			},
 			args,
 			resolvedPredicateBranches,
@@ -205,8 +223,12 @@ async function* walkEntry(
 
 	if (shouldRecurse && childPaths !== null) {
 		for (const childAbsolutePath of childPaths) {
-			const childStat = await statOrNull(fs, childAbsolutePath);
-			if (childStat === null) {
+			const childInfo = await getFindEntryInfo(
+				fs,
+				childAbsolutePath,
+				args.traversal.symlinkMode === 'logical'
+			);
+			if (childInfo === null) {
 				state.hadError = true;
 				writeDiagnosticsToStderr(context, [
 					createRuntimeDiagnostic(
@@ -234,8 +256,7 @@ async function* walkEntry(
 						basename(childAbsolutePath)
 					),
 					depth: entry.depth + 1,
-					isDirectory: childStat.type === 'Directory',
-					size: childStat.size,
+					...childInfo,
 				},
 				args,
 				predicateBranches,
@@ -369,6 +390,13 @@ function resolvePredicatesEffect(
 						});
 						break;
 					}
+					case 'xtype': {
+						resolvedBranch.push({
+							kind: 'xtype',
+							types: new Set(predicate.types),
+						});
+						break;
+					}
 					default: {
 						const _exhaustive: never = predicate;
 						return yield* new ShellRuntimeError({
@@ -423,9 +451,8 @@ function matchesPredicates(
 		return true;
 	}
 
-	const entryType = entry.isDirectory ? 'd' : 'f';
 	for (const branch of predicateBranches) {
-		if (matchesBranch(entry, entryType, branch, childPaths)) {
+		if (matchesBranch(entry, branch, childPaths)) {
 			// Stop at the first matching branch to preserve left-to-right OR semantics.
 			return true;
 		}
@@ -435,12 +462,11 @@ function matchesPredicates(
 
 function matchesBranch(
 	entry: FindEntry,
-	entryType: 'd' | 'f',
 	branch: ResolvedFindPredicate[],
 	childPaths: string[] | null
 ): boolean {
 	for (const predicate of branch) {
-		if (!matchesPredicate(entry, entryType, predicate, childPaths)) {
+		if (!matchesPredicate(entry, predicate, childPaths)) {
 			return false;
 		}
 	}
@@ -449,7 +475,6 @@ function matchesBranch(
 
 function matchesPredicate(
 	entry: FindEntry,
-	entryType: 'd' | 'f',
 	predicate: ResolvedFindPredicate,
 	childPaths: string[] | null
 ): boolean {
@@ -466,12 +491,15 @@ function matchesPredicate(
 		return predicate.value;
 	}
 	if (predicate.kind === 'empty') {
-		if (entryType === 'f') {
+		if (entry.type === 'f') {
 			return entry.size === 0;
 		}
 		return childPaths !== null && childPaths.length === 0;
 	}
-	return predicate.types.has(entryType);
+	if (predicate.kind === 'type') {
+		return predicate.types.has(entry.type);
+	}
+	return predicate.types.has(entry.xtype);
 }
 
 function compileFindRegexMatcher(
@@ -587,6 +615,69 @@ function statOrNull(
 			ok: (stat) => stat,
 		})
 	);
+}
+
+async function getFindEntryInfo(
+	fs: FS,
+	path: string,
+	followTerminalSymlink: boolean
+): Promise<FindEntryInfo | null> {
+	const linkTarget = await readLinkOrNull(fs, path);
+	if (linkTarget !== null && !followTerminalSymlink) {
+		const targetStat = await statOrNull(fs, path);
+		return {
+			isDirectory: false,
+			size: 0,
+			type: 'l',
+			xtype:
+				targetStat === null ? 'l' : fsTypeToFindType(targetStat.type),
+		};
+	}
+
+	const stat = await statOrNull(fs, path);
+	if (stat === null) {
+		if (linkTarget !== null) {
+			return {
+				isDirectory: false,
+				size: 0,
+				type: 'l',
+				xtype: 'l',
+			};
+		}
+		return null;
+	}
+
+	const type = fsTypeToFindType(stat.type);
+	return {
+		isDirectory: type === 'd',
+		size: stat.size,
+		type,
+		xtype: type,
+	};
+}
+
+function readLinkOrNull(fs: FS, path: string): Promise<string | null> {
+	return Result.tryPromise({
+		try: () => fs.readLink(path),
+		catch: (error) => error,
+	}).then((result) =>
+		result.match({
+			err: () => null,
+			ok: (target) => target,
+		})
+	);
+}
+
+function fsTypeToFindType(
+	type: Awaited<ReturnType<FS['stat']>>['type']
+): FindEntryType {
+	if (type === 'Directory') {
+		return 'd';
+	}
+	if (type === 'SymbolicLink') {
+		return 'l';
+	}
+	return 'f';
 }
 
 function appendDisplayPath(parentPath: string, childName: string): string {

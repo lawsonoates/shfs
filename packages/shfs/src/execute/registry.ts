@@ -701,12 +701,17 @@ CommandRegistry.register('head', {
 				}
 				if (entries.length > 0) {
 					let hadReadError = false;
-					yield* headFiles(fs, step.args.n, entries, (displayPath) => {
-						hadReadError = true;
-						context.stderr.append(
-							`head: cannot open '${displayPath}' for reading: No such file or directory`
-						);
-					});
+					yield* headFiles(
+						fs,
+						step.args.n,
+						entries,
+						(displayPath) => {
+							hadReadError = true;
+							context.stderr.append(
+								`head: cannot open '${displayPath}' for reading: No such file or directory`
+							);
+						}
+					);
 					context.status = hadReadError ? 1 : 0;
 					return;
 				}
@@ -804,12 +809,17 @@ CommandRegistry.register('tail', {
 				}
 				if (entries.length > 0) {
 					let hadReadError = false;
-					yield* tailFiles(fs, step.args.n, entries, (displayPath) => {
-						hadReadError = true;
-						context.stderr.append(
-							`tail: cannot open '${displayPath}' for reading: No such file or directory`
-						);
-					});
+					yield* tailFiles(
+						fs,
+						step.args.n,
+						entries,
+						(displayPath) => {
+							hadReadError = true;
+							context.stderr.append(
+								`tail: cannot open '${displayPath}' for reading: No such file or directory`
+							);
+						}
+					);
 					context.status = hadReadError ? 1 : 0;
 					return;
 				}

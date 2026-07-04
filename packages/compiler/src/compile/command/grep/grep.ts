@@ -62,6 +62,7 @@ const DEFAULT_OPTIONS: GrepOptionsIR = {
 	nullData: false,
 	onlyMatching: false,
 	quiet: false,
+	dereferenceRecursive: false,
 	recursive: false,
 	textMode: false,
 	version: false,
@@ -224,6 +225,7 @@ function applyBooleanOptions(
 	options.nullData = hasFlag(parsed, 'nullData');
 	options.onlyMatching = hasFlag(parsed, 'onlyMatching');
 	options.quiet = hasFlag(parsed, 'quiet') || hasFlag(parsed, 'silent');
+	options.dereferenceRecursive = hasFlag(parsed, 'dereferenceRecursive');
 	options.recursive =
 		hasFlag(parsed, 'recursive') || hasFlag(parsed, 'dereferenceRecursive');
 	options.textMode = hasFlag(parsed, 'textMode');

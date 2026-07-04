@@ -16,7 +16,10 @@ export interface FS {
 		options?: { flag?: OpenFlag; mode?: number }
 	): Promise<void>;
 	/** Lazily streams the immediate child paths of `path`, sorted. */
-	readDirectory(path: string, options?: { recursive?: boolean }): Stream<string>;
+	readDirectory(
+		path: string,
+		options?: { recursive?: boolean }
+	): Stream<string>;
 	/** Creates a directory. `recursive` creates missing parents and is idempotent. */
 	makeDirectory(
 		path: string,

@@ -142,10 +142,7 @@ export class MemoryFS implements FS {
 		}
 
 		if (sourceIsSymlink) {
-			this.renameSymlink(
-				normalizedSourcePath,
-				normalizedDestinationPath
-			);
+			this.renameSymlink(normalizedSourcePath, normalizedDestinationPath);
 			return;
 		}
 
@@ -326,16 +323,22 @@ export class MemoryFS implements FS {
 	async exists(path: string): Promise<boolean> {
 		// Existence of the entry itself (a dangling symlink still exists).
 		const normalizedPath = normalizePath(path);
-		return (
+		if (
 			this.files.has(normalizedPath) ||
 			this.directories.has(normalizedPath) ||
 			this.symlinks.has(normalizedPath)
+		) {
+			return true;
+		}
+		const resolvedPath = this.resolveSymlink(path);
+		return (
+			this.files.has(resolvedPath) || this.directories.has(resolvedPath)
 		);
 	}
 
 	async readLink(path: string): Promise<string> {
-		const normalizedPath = normalizePath(path);
-		const target = this.symlinks.get(normalizedPath);
+		const symlinkPath = this.resolveParentSymlinks(path);
+		const target = this.symlinks.get(symlinkPath);
 		if (target === undefined) {
 			throw new InvalidOperationError(path, `Not a symlink: ${path}`);
 		}
@@ -365,13 +368,14 @@ export class MemoryFS implements FS {
 		});
 	}
 
-	// Follows a chain of symlinks at the terminal component, with cycle
-	// detection. Intermediate path components are not traversed (nothing creates
-	// such paths yet). A dangling link resolves to its non-existent target.
 	private resolveSymlink(path: string): string {
 		let current = normalizePath(path);
 		let hops = 0;
-		while (this.symlinks.has(current)) {
+		while (true) {
+			const symlink = this.findFirstSymlinkInPath(current);
+			if (!symlink) {
+				return current;
+			}
 			hops += 1;
 			if (hops > MAX_SYMLINK_HOPS) {
 				throw new TooManySymbolicLinksError(
@@ -379,12 +383,54 @@ export class MemoryFS implements FS {
 					`Too many levels of symbolic links: ${path}`
 				);
 			}
-			const target = this.symlinks.get(current) as string;
-			current = target.startsWith('/')
-				? normalizePath(target)
-				: normalizePath(`${this.getParentPath(current)}/${target}`);
+			const targetPath = symlink.target.startsWith('/')
+				? normalizePath(symlink.target)
+				: normalizePath(
+						`${this.getParentPath(symlink.path)}/${symlink.target}`
+					);
+			current =
+				symlink.remainingPath === ''
+					? targetPath
+					: normalizePath(`${targetPath}/${symlink.remainingPath}`);
 		}
-		return current;
+	}
+
+	private findFirstSymlinkInPath(
+		path: string
+	): { path: string; remainingPath: string; target: string } | null {
+		const normalizedPath = normalizePath(path);
+		if (normalizedPath === '/') {
+			return null;
+		}
+
+		const segments = normalizedPath.split('/').filter(Boolean);
+		let currentPath = '';
+		for (const [index, segment] of segments.entries()) {
+			currentPath += `/${segment}`;
+			const target = this.symlinks.get(currentPath);
+			if (target === undefined) {
+				continue;
+			}
+			return {
+				path: currentPath,
+				remainingPath: segments.slice(index + 1).join('/'),
+				target,
+			};
+		}
+		return null;
+	}
+
+	private resolveParentSymlinks(path: string): string {
+		const normalizedPath = normalizePath(path);
+		const parentPath = this.getParentPath(normalizedPath);
+		const entryName = normalizedPath.slice(
+			parentPath === '/' ? 1 : parentPath.length + 1
+		);
+		const resolvedParentPath = this.resolveSymlink(parentPath);
+		if (entryName === '') {
+			return resolvedParentPath;
+		}
+		return normalizePath(`${resolvedParentPath}/${entryName}`);
 	}
 
 	private addDirectory(path: string, mtime: Date): void {
