@@ -146,6 +146,17 @@ test('remove deletes the symlink, not its target', async () => {
 	expect(await fs.exists('/target.txt')).toBeTrue();
 });
 
+test('remove resolves symlinked parent directories', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/real/file.txt', 'hello');
+	await fs.symlink('/real', '/link');
+
+	await fs.remove('/link/file.txt');
+
+	expect(await fs.exists('/real/file.txt')).toBeFalse();
+	expect(await fs.readLink('/link')).toBe('/real');
+});
+
 test('rename moves a symlink and preserves its raw target', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/target.txt', 'hello');

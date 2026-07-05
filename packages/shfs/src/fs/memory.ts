@@ -157,9 +157,16 @@ export class MemoryFS implements FS {
 		const force = options?.force ?? false;
 		const normalizedPath = normalizePath(path);
 
-		const isSymlink = this.symlinks.has(normalizedPath);
-		const isFile = this.files.has(normalizedPath);
-		const isDirectory = this.directories.has(normalizedPath);
+		// Terminal symlinks are removed as links, never followed to targets.
+		if (this.symlinks.has(normalizedPath)) {
+			this.removeFileOrSymlink(normalizedPath);
+			return;
+		}
+
+		const removablePath = this.resolveParentSymlinks(path);
+		const isSymlink = this.symlinks.has(removablePath);
+		const isFile = this.files.has(removablePath);
+		const isDirectory = this.directories.has(removablePath);
 		if (!(isSymlink || isFile || isDirectory)) {
 			if (force) {
 				return;
@@ -167,13 +174,12 @@ export class MemoryFS implements FS {
 			throw new NotFoundError(path, `No such file or directory: ${path}`);
 		}
 
-		// Terminal symlinks are removed as links, never followed to targets.
 		if (isSymlink || isFile) {
-			this.removeFileOrSymlink(normalizedPath);
+			this.removeFileOrSymlink(removablePath);
 			return;
 		}
 
-		this.removeDirectory(normalizedPath, path, recursive);
+		this.removeDirectory(removablePath, path, recursive);
 	}
 
 	private removeDirectory(

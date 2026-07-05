@@ -185,7 +185,7 @@ async function buildTreeEntry({
 		matchesPattern(args.includePatterns, name, path);
 	const childForceIncludeAll = forceIncludeAll || dirMatchesInclude;
 	const children =
-		canDescend(depth, args) && isDirectory
+		canDescend(depth, args) && isDirectory && !isSymlink
 			? await buildChildEntries({
 					args,
 					depth,
