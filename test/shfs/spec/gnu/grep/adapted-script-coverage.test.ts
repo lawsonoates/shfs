@@ -221,19 +221,76 @@ test('gnu grep: unibyte-bracket-expr - bracket literals round-trip for high-byte
 	}
 });
 
-test('gnu grep: symlink - -r and -R traverse regular directory trees consistently', async () => {
-	await harness.run('mkdir -p /tmp/dir/sub');
+async function setupGrepSymlinkFixture(): Promise<void> {
+	await harness.run('mkdir -p /tmp/dir');
 	await harness.setTextFile('/tmp/dir/a', 'a\n');
-	await harness.setTextFile('/tmp/dir/sub/b', 'b\n');
+	await harness.setTextFile('/tmp/dir/b', 'b\n');
+	await harness.fs.symlink('a', '/tmp/dir/c');
+	await harness.fs.symlink('.', '/tmp/dir/d');
+	await harness.fs.symlink('dangling', '/tmp/dir/e');
+	await harness.run('cd /tmp/dir');
+}
 
-	const recursive = await harness.runWithStatus(
-		`grep -r ${Harness.quote('^')} /tmp/dir`
-	);
-	const dereference = await harness.runWithStatus(
-		`grep -R ${Harness.quote('^')} /tmp/dir`
-	);
+test('gnu grep: symlink - explicit glob operands search symlinked files and report dangling links', async () => {
+	await setupGrepSymlinkFixture();
 
-	expect(recursive.status).toBe(0);
-	expect(dereference.status).toBe(0);
-	expect(recursive.output).toBe(dereference.output);
+	const result = await harness.runWithStatus(
+		`grep ${Harness.quote('^')} * < a`
+	);
+	expect(result.status).toBe(2);
+	expect(Harness.sortedLines(result.output)).toBe(
+		['a:a', 'b:b', 'c:a'].join('\n')
+	);
+});
+
+test('gnu grep: symlink - -r skips symlinks discovered during recursive traversal', async () => {
+	await setupGrepSymlinkFixture();
+
+	const result = await harness.runWithStatus(`grep -r ${Harness.quote('^')}`);
+	expect(result.status).toBe(0);
+	expect(Harness.sortedLines(result.output)).toBe(['a:a', 'b:b'].join('\n'));
+});
+
+test('gnu grep: symlink - -r follows explicit symlink directory operands but not links beneath them', async () => {
+	await setupGrepSymlinkFixture();
+
+	const result = await harness.runWithStatus(
+		`grep -r ${Harness.quote('^')} * < a`
+	);
+	expect(result.status).toBe(2);
+	expect(Harness.sortedLines(result.output)).toBe(
+		['a:a', 'b:b', 'c:a', 'd/a:a', 'd/b:b'].join('\n')
+	);
+});
+
+test('gnu grep: symlink - -R follows symlinked files discovered during recursive traversal', async () => {
+	await setupGrepSymlinkFixture();
+
+	const result = await harness.runWithStatus(`grep -R ${Harness.quote('^')}`);
+	expect(result.status).toBe(0);
+	expect(Harness.sortedLines(result.output)).toBe(
+		['a:a', 'b:b', 'c:a'].join('\n')
+	);
+});
+
+test('gnu grep: symlink - -R follows an explicit symlink file operand', async () => {
+	await setupGrepSymlinkFixture();
+
+	const result = await harness.runWithStatus(
+		`grep -R ${Harness.quote('^')} c`
+	);
+	expect(result.status).toBe(0);
+	expect(result.output).toBe('c:a');
+});
+
+test('gnu grep: symlink - -R follows explicit symlink directory operands', async () => {
+	await setupGrepSymlinkFixture();
+
+	const result = await harness.runWithStatus(
+		`grep -R ${Harness.quote('^')} * < a`
+	);
+	expect(result.status).toBe(2);
+	expect(Harness.sortedLines(result.output)).toBe(
+		['a:a', 'b:b', 'c:a', 'd/a:a', 'd/b:b', 'd/c:a'].join('\n')
+	);
 });

@@ -20,6 +20,22 @@ export function rm(fs: FS): ActionEffect<RmArgs> {
 				});
 			}
 
+			if (await isTerminalSymlink(fs, path)) {
+				yield* await Result.tryPromise({
+					try: () => fs.remove(path),
+					catch: (cause) =>
+						new ShellRuntimeError({
+							cause,
+							exitCode: 1,
+							message:
+								cause instanceof Error
+									? cause.message
+									: String(cause),
+						}),
+				});
+				return Result.ok();
+			}
+
 			const statResult = await Result.tryPromise({
 				try: () => fs.stat(path),
 				catch: (cause) =>
@@ -37,9 +53,9 @@ export function rm(fs: FS): ActionEffect<RmArgs> {
 			}
 
 			const stat = statResult.value;
-			if (!stat.isDirectory) {
+			if (stat.type !== 'Directory') {
 				yield* await Result.tryPromise({
-					try: () => fs.deleteFile(path),
+					try: () => fs.remove(path),
 					catch: (cause) =>
 						new ShellRuntimeError({
 							cause,
@@ -60,7 +76,7 @@ export function rm(fs: FS): ActionEffect<RmArgs> {
 				});
 			}
 			yield* await Result.tryPromise({
-				try: () => fs.deleteDirectory(path, true),
+				try: () => fs.remove(path, { recursive: true }),
 				catch: (cause) =>
 					new ShellRuntimeError({
 						cause,
@@ -73,4 +89,16 @@ export function rm(fs: FS): ActionEffect<RmArgs> {
 			});
 			return Result.ok();
 		});
+}
+
+async function isTerminalSymlink(fs: FS, path: string): Promise<boolean> {
+	return Result.tryPromise({
+		try: () => fs.readLink(path),
+		catch: (error) => error,
+	}).then((result) =>
+		result.match({
+			err: () => false,
+			ok: () => true,
+		})
+	);
 }

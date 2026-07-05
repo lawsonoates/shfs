@@ -38,6 +38,7 @@ import {
 	evaluateExpandedPathWordsEffect,
 	evaluateExpandedSinglePathEffect,
 	evaluateExpandedWordsEffect,
+	resolvePathFromCwd,
 	resolvePathsFromCwd,
 } from './path';
 import { files } from './producers';
@@ -75,6 +76,7 @@ interface ExecuteActionStepParams {
 
 const ACTION_COMMANDS = ['cd', 'cp', 'mkdir', 'mv', 'rm', 'touch'] as const;
 const ACTION_COMMAND_SET = new Set<StepIR['cmd']>(ACTION_COMMANDS);
+const TRAILING_SLASH_REGEX = /\/+$/;
 const STREAM_COMMANDS = [
 	'cat',
 	'echo',
@@ -94,6 +96,14 @@ const STREAM_COMMANDS = [
 	'wc',
 ] as const;
 const STREAM_COMMAND_SET = new Set<StepIR['cmd']>(STREAM_COMMANDS);
+
+function resolveCpSourcePath(cwd: string, path: string): string {
+	const resolvedPath = resolvePathFromCwd(cwd, path);
+	if (resolvedPath === '/' || !TRAILING_SLASH_REGEX.test(path)) {
+		return resolvedPath;
+	}
+	return `${resolvedPath}/`;
+}
 const ROOT_DIRECTORY = '/';
 
 function lineRecordsFromPath(fs: FS, path: string): Stream<ShellRecord> {
@@ -291,7 +301,7 @@ function formatLongListing(
 	path: string,
 	stat: Awaited<ReturnType<FS['stat']>>
 ): string {
-	const mode = stat.isDirectory ? 'd' : '-';
+	const mode = stat.type === 'Directory' ? 'd' : '-';
 	const size = String(stat.size).padStart(8, ' ');
 	return `${mode} ${size} ${stat.mtime.toISOString()} ${path}`;
 }
@@ -701,12 +711,17 @@ CommandRegistry.register('head', {
 				}
 				if (entries.length > 0) {
 					let hadReadError = false;
-					yield* headFiles(fs, step.args.n, entries, (displayPath) => {
-						hadReadError = true;
-						context.stderr.append(
-							`head: cannot open '${displayPath}' for reading: No such file or directory`
-						);
-					});
+					yield* headFiles(
+						fs,
+						step.args.n,
+						entries,
+						(displayPath) => {
+							hadReadError = true;
+							context.stderr.append(
+								`head: cannot open '${displayPath}' for reading: No such file or directory`
+							);
+						}
+					);
 					context.status = hadReadError ? 1 : 0;
 					return;
 				}
@@ -804,12 +819,17 @@ CommandRegistry.register('tail', {
 				}
 				if (entries.length > 0) {
 					let hadReadError = false;
-					yield* tailFiles(fs, step.args.n, entries, (displayPath) => {
-						hadReadError = true;
-						context.stderr.append(
-							`tail: cannot open '${displayPath}' for reading: No such file or directory`
-						);
-					});
+					yield* tailFiles(
+						fs,
+						step.args.n,
+						entries,
+						(displayPath) => {
+							hadReadError = true;
+							context.stderr.append(
+								`tail: cannot open '${displayPath}' for reading: No such file or directory`
+							);
+						}
+					);
 					context.status = hadReadError ? 1 : 0;
 					return;
 				}
@@ -923,7 +943,9 @@ CommandRegistry.register('cp', {
 				fs,
 				context
 			);
-			const srcPaths = resolvePathsFromCwd(context.cwd, srcValues);
+			const srcPaths = srcValues.map((src) =>
+				resolveCpSourcePath(context.cwd, src)
+			);
 			const destinationValue =
 				yield* await evaluateExpandedSinglePathEffect(
 					'cp',

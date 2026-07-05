@@ -28,6 +28,7 @@ interface TreeEntry {
 	children: TreeEntry[];
 	displayName: string;
 	isDirectory: boolean;
+	isSymlink: boolean;
 	path: string;
 }
 
@@ -91,7 +92,8 @@ export async function runTreeCommand(
 			depth: 0,
 			forceIncludeAll: false,
 			fs,
-			isDirectory: stat.isDirectory,
+			isDirectory: stat.type === 'Directory',
+			isSymlink: await isSymlink(fs, resolvedPath),
 			path: resolvedPath,
 			rootDisplayPath: path,
 		});
@@ -131,6 +133,7 @@ async function buildTreeEntry({
 	forceIncludeAll,
 	fs,
 	isDirectory,
+	isSymlink,
 	path,
 	rootDisplayPath,
 }: {
@@ -139,14 +142,21 @@ async function buildTreeEntry({
 	forceIncludeAll: boolean;
 	fs: FS;
 	isDirectory: boolean;
+	isSymlink: boolean;
 	path: string;
 	rootDisplayPath: string;
 }): Promise<TreeEntry | null> {
 	const name = basename(path);
 	const isRoot = depth === 0;
 	const displayName = isRoot
-		? formatRootDisplayName(rootDisplayPath, path, args)
-		: formatChildDisplayName(path, isDirectory, args);
+		? formatRootDisplayName(
+				rootDisplayPath,
+				path,
+				isDirectory,
+				isSymlink,
+				args
+			)
+		: formatChildDisplayName(path, isDirectory, isSymlink, args);
 
 	if (!isRoot && shouldHide(name, args)) {
 		return null;
@@ -166,7 +176,7 @@ async function buildTreeEntry({
 		) {
 			return null;
 		}
-		return { children: [], displayName, isDirectory, path };
+		return { children: [], displayName, isDirectory, isSymlink, path };
 	}
 
 	const dirMatchesInclude =
@@ -175,7 +185,7 @@ async function buildTreeEntry({
 		matchesPattern(args.includePatterns, name, path);
 	const childForceIncludeAll = forceIncludeAll || dirMatchesInclude;
 	const children =
-		canDescend(depth, args) && isDirectory
+		canDescend(depth, args) && isDirectory && !isSymlink
 			? await buildChildEntries({
 					args,
 					depth,
@@ -189,7 +199,7 @@ async function buildTreeEntry({
 		return null;
 	}
 
-	return { children, displayName, isDirectory, path };
+	return { children, displayName, isDirectory, isSymlink, path };
 }
 
 async function buildChildEntries({
@@ -223,12 +233,14 @@ async function buildChildEntries({
 		if (stat === null) {
 			continue;
 		}
+		const isChildSymlink = await isSymlink(fs, childPath);
 		const childEntry = await buildTreeEntry({
 			args,
 			depth: childDepth,
 			forceIncludeAll,
 			fs,
-			isDirectory: stat.isDirectory,
+			isDirectory: stat.type === 'Directory',
+			isSymlink: isChildSymlink,
 			path: childPath,
 			rootDisplayPath: childPath,
 		});
@@ -241,7 +253,7 @@ async function buildChildEntries({
 
 async function readSortedChildren(fs: FS, path: string): Promise<string[]> {
 	const children: string[] = [];
-	for await (const childPath of fs.readdir(path)) {
+	for await (const childPath of fs.readDirectory(path)) {
 		children.push(childPath);
 	}
 	children.sort((left, right) =>
@@ -263,6 +275,13 @@ function statOrNull(
 			ok: (stat) => stat,
 		})
 	);
+}
+
+function isSymlink(fs: FS, path: string): Promise<boolean> {
+	return Result.tryPromise({
+		try: () => fs.readLink(path),
+		catch: (error) => error,
+	}).then((result) => Result.isOk(result));
 }
 
 function appendRenderedTree(
@@ -383,11 +402,13 @@ function canDescend(depth: number, args: TreeResolvedArgs): boolean {
 function formatRootDisplayName(
 	displayPath: string,
 	resolvedPath: string,
+	isDirectory: boolean,
+	isSymlink: boolean,
 	args: TreeResolvedArgs
 ): string {
 	const rootName = args.fullPath ? resolvedPath : displayPath;
 	if (args.classify) {
-		return withDirectorySlash(rootName);
+		return classifyDisplayName(rootName, isDirectory, isSymlink);
 	}
 	return rootName;
 }
@@ -395,10 +416,25 @@ function formatRootDisplayName(
 function formatChildDisplayName(
 	path: string,
 	isDirectory: boolean,
+	isSymlink: boolean,
 	args: TreeResolvedArgs
 ): string {
 	const displayName = args.fullPath ? path : basename(path);
-	if (args.classify && isDirectory) {
+	if (args.classify) {
+		return classifyDisplayName(displayName, isDirectory, isSymlink);
+	}
+	return displayName;
+}
+
+function classifyDisplayName(
+	displayName: string,
+	isDirectory: boolean,
+	isSymlink: boolean
+): string {
+	if (isSymlink) {
+		return `${displayName}@`;
+	}
+	if (isDirectory) {
 		return withDirectorySlash(displayName);
 	}
 	return displayName;

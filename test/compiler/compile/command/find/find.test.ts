@@ -36,6 +36,7 @@ test('compileFind defaults to cwd and implicit print action', () => {
 		depth: false,
 		maxdepth: 0,
 		mindepth: 0,
+		symlinkMode: 'physical',
 	});
 	expect(step.args.usageError).toBe(false);
 });
@@ -207,6 +208,7 @@ test('compileFind keeps traversal options global while parsing mixed AND/OR bran
 		depth: false,
 		maxdepth: 1,
 		mindepth: 0,
+		symlinkMode: 'physical',
 	});
 	expect(step.args.usageError).toBe(false);
 });

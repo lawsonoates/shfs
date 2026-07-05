@@ -9,7 +9,7 @@ export async function ensureDir(fs: MemoryFS, path: string): Promise<void> {
 	if (await fs.exists(path)) {
 		return;
 	}
-	await fs.mkdir(path, true);
+	await fs.makeDirectory(path, { recursive: true });
 }
 
 export async function setTextFile(

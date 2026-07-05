@@ -137,7 +137,7 @@ test('gnu grep: word-multi-file - -w over recursive and explicit multi-file inpu
 	const explicit = await harness.runWithStatus('grep -w bb [1-4]');
 	expect(explicit.status).toBe(0);
 	expect(explicit.output).toBe(
-		['aa bb cc', 'bb dd ff', 'bb xx zz'].join('\n')
+		['1:aa bb cc', '2:bb dd ff', '4:bb xx zz'].join('\n')
 	);
 });
 

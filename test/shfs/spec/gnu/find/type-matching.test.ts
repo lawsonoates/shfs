@@ -62,6 +62,9 @@ test('gnu find: type_list.sh - duplicate entries in type list are rejected', asy
 test('gnu find: type_list.sh - -type f matches only regular files', async () => {
 	await harness.setTextFile('/work/dir/reg', '');
 	await harness.ensureDir('/work/dir/subdir');
+	await harness.fs.symlink('reg', '/work/dir/reg-link');
+	await harness.fs.symlink('subdir', '/work/dir/dir-link');
+	await harness.fs.symlink('enoent', '/work/dir/dangling-link');
 
 	const result = await harness.runWithStatus(
 		'find /work/dir -mindepth 1 -type f'
@@ -73,6 +76,9 @@ test('gnu find: type_list.sh - -type f matches only regular files', async () => 
 test('gnu find: type_list.sh - -type d matches only directories', async () => {
 	await harness.setTextFile('/work/dir/reg', '');
 	await harness.ensureDir('/work/dir/subdir');
+	await harness.fs.symlink('reg', '/work/dir/reg-link');
+	await harness.fs.symlink('subdir', '/work/dir/dir-link');
+	await harness.fs.symlink('enoent', '/work/dir/dangling-link');
 
 	const result = await harness.runWithStatus(
 		'find /work/dir -mindepth 1 -type d'
@@ -81,9 +87,32 @@ test('gnu find: type_list.sh - -type d matches only directories', async () => {
 	expect(Harness.sortedLines(result.output)).toBe('/work/dir/subdir');
 });
 
+test('gnu find: type_list.sh - -type l matches symbolic links including dangling links', async () => {
+	await harness.setTextFile('/work/dir/reg', '');
+	await harness.ensureDir('/work/dir/subdir');
+	await harness.fs.symlink('reg', '/work/dir/reg-link');
+	await harness.fs.symlink('subdir', '/work/dir/dir-link');
+	await harness.fs.symlink('enoent', '/work/dir/dangling-link');
+
+	const result = await harness.runWithStatus(
+		'find /work/dir -mindepth 1 -type l'
+	);
+	expect(result.status).toBe(0);
+	expect(Harness.sortedLines(result.output)).toBe(
+		[
+			'/work/dir/dangling-link',
+			'/work/dir/dir-link',
+			'/work/dir/reg-link',
+		].join('\n')
+	);
+});
+
 test('gnu find: type_list.sh - -type f,d matches regular files and directories', async () => {
 	await harness.setTextFile('/work/dir/reg', '');
 	await harness.ensureDir('/work/dir/subdir');
+	await harness.fs.symlink('reg', '/work/dir/reg-link');
+	await harness.fs.symlink('subdir', '/work/dir/dir-link');
+	await harness.fs.symlink('enoent', '/work/dir/dangling-link');
 
 	const result = await harness.runWithStatus(
 		"find /work/dir -mindepth 1 -type 'f,d'"

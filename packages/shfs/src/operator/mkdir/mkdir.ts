@@ -10,7 +10,7 @@ export function mkdir(fs: FS): ActionEffect<{
 	return ({ path, recursive }) =>
 		Result.gen(async function* () {
 			yield* await Result.tryPromise({
-				try: () => fs.mkdir(path, recursive),
+				try: () => fs.makeDirectory(path, { recursive }),
 				catch: (cause) =>
 					new ShellRuntimeError({
 						cause,

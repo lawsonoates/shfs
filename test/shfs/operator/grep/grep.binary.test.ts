@@ -29,7 +29,7 @@ const setFile = async (
 	path: string,
 	content: string | Uint8Array
 ): Promise<void> => {
-	await fs.mkdir(dirname(path), true);
+	await fs.makeDirectory(dirname(path), { recursive: true });
 	fs.setFile(path, content);
 };
 

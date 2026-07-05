@@ -82,7 +82,7 @@ export async function isDirectoryRecord(
 	});
 	return result.match({
 		err: () => false,
-		ok: (stat) => stat.isDirectory,
+		ok: (stat) => stat.type === 'Directory',
 	});
 }
 

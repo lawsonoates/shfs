@@ -16,7 +16,7 @@ test('rm deletes a file', async () => {
 
 test('rm recursively deletes nested files', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/dir/subdir', true);
+	await fs.makeDirectory('/dir/subdir', { recursive: true });
 	fs.setFile('/dir/root.txt', 'root');
 	fs.setFile('/dir/subdir/leaf.txt', 'leaf');
 

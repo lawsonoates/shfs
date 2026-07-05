@@ -11,7 +11,7 @@ test('mkdir creates single directory', async () => {
 
 	// Verify by trying to stat it
 	const stat = await fs.stat('/newdir');
-	expect(stat.isDirectory).toBe(true);
+	expect(stat.type === 'Directory').toBe(true);
 });
 
 test('mkdir with recursive flag creates nested directories', async () => {
@@ -21,7 +21,7 @@ test('mkdir with recursive flag creates nested directories', async () => {
 	(await effect({ path: '/a/b/c', recursive: true })).unwrap();
 
 	const stat = await fs.stat('/a/b/c');
-	expect(stat.isDirectory).toBe(true);
+	expect(stat.type === 'Directory').toBe(true);
 });
 
 test('mkdir without recursive flag fails if parent does not exist', async () => {

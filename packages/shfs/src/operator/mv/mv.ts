@@ -44,7 +44,7 @@ function isDirectory(fs: FS, path: string) {
 	}).then((result) =>
 		result.match({
 			err: () => Result.ok(false),
-			ok: (stat) => Result.ok(stat.isDirectory),
+			ok: (stat) => Result.ok(stat.type === 'Directory'),
 		})
 	);
 }
@@ -105,49 +105,85 @@ export function mv(fs: FS): ActionEffect<MvArgs> {
 			}
 
 			for (const src of srcs) {
-				const sourceStat = yield* await Result.tryPromise({
-					try: () => fs.stat(src),
-					catch: (cause) =>
-						new ShellRuntimeError({
-							cause,
-							exitCode: 1,
-							message:
-								cause instanceof Error
-									? cause.message
-									: String(cause),
-						}),
-				});
-				if (sourceStat.isDirectory) {
-					return yield* new ShellRuntimeError({
-						exitCode: 1,
-						message: `mv: directory moves are not supported: ${src}`,
-					});
-				}
-
 				const targetPath =
 					destinationIsDirectory || srcs.length > 1
 						? joinPath(dest, extractFileName(src))
 						: dest;
-
-				yield* await assertCanMoveToDestination(
+				yield* await moveSource(
 					fs,
+					src,
 					targetPath,
 					force,
 					interactive
 				);
-				yield* await Result.tryPromise({
-					try: () => fs.rename(src, targetPath),
-					catch: (cause) =>
-						new ShellRuntimeError({
-							cause,
-							exitCode: 1,
-							message:
-								cause instanceof Error
-									? cause.message
-									: String(cause),
-						}),
-				});
 			}
 			return Result.ok();
 		});
+}
+
+function moveSource(
+	fs: FS,
+	src: string,
+	targetPath: string,
+	force: boolean,
+	interactive: boolean
+) {
+	return Result.gen(async function* () {
+		yield* await assertSourceCanMove(fs, src);
+		yield* await assertCanMoveToDestination(
+			fs,
+			targetPath,
+			force,
+			interactive
+		);
+		yield* await Result.tryPromise({
+			try: () => fs.rename(src, targetPath),
+			catch: (cause) =>
+				new ShellRuntimeError({
+					cause,
+					exitCode: 1,
+					message:
+						cause instanceof Error ? cause.message : String(cause),
+				}),
+		});
+		return Result.ok();
+	});
+}
+
+function assertSourceCanMove(fs: FS, src: string) {
+	return Result.gen(async function* () {
+		if (await isTerminalSymlink(fs, src)) {
+			return Result.ok();
+		}
+
+		const sourceStat = yield* await Result.tryPromise({
+			try: () => fs.stat(src),
+			catch: (cause) =>
+				new ShellRuntimeError({
+					cause,
+					exitCode: 1,
+					message:
+						cause instanceof Error ? cause.message : String(cause),
+				}),
+		});
+		if (sourceStat.type === 'Directory') {
+			return yield* new ShellRuntimeError({
+				exitCode: 1,
+				message: `mv: directory moves are not supported: ${src}`,
+			});
+		}
+		return Result.ok();
+	});
+}
+
+async function isTerminalSymlink(fs: FS, path: string): Promise<boolean> {
+	return Result.tryPromise({
+		try: () => fs.readLink(path),
+		catch: (error) => error,
+	}).then((result) =>
+		result.match({
+			err: () => false,
+			ok: () => true,
+		})
+	);
 }

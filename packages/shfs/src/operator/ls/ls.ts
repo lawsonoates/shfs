@@ -22,12 +22,12 @@ export async function* ls(
 ): Stream<FileRecord> {
 	const showAll = options?.showAll ?? false;
 	const stat = await fs.stat(path);
-	if (!stat.isDirectory) {
+	if (stat.type !== 'Directory') {
 		yield { kind: 'file', path };
 		return;
 	}
 
-	for await (const childPath of fs.readdir(path)) {
+	for await (const childPath of fs.readDirectory(path)) {
 		if (!showAll && basename(childPath).startsWith('.')) {
 			continue;
 		}

@@ -31,7 +31,7 @@ test('shell command evaluation uses latest cwd state', async () => {
 
 test('shell cd command persists cwd state across commands', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace/project', true);
+	await fs.makeDirectory('/workspace/project', { recursive: true });
 	const shell = new Shell(fs);
 
 	expect(await shell.$`cd /workspace`.text()).toBe('');
@@ -57,7 +57,7 @@ test('cwd override does not mutate shell state when command does not change cwd'
 
 test('cwd override can be used as base for cd and persists resulting cwd', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/tmp/project', true);
+	await fs.makeDirectory('/tmp/project', { recursive: true });
 	const shell = new Shell(fs, { cwd: '/workspace' });
 
 	expect(await shell.$`cd project`.cwd('/tmp').text()).toBe('');
@@ -66,7 +66,7 @@ test('cwd override can be used as base for cd and persists resulting cwd', async
 
 test('shell executes newline-separated statements in one invocation', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace/project', true);
+	await fs.makeDirectory('/workspace/project', { recursive: true });
 	const shell = new Shell(fs);
 
 	const output = await shell.$`cd /workspace
@@ -78,7 +78,7 @@ pwd`.text();
 
 test('shell executes semicolon-separated statements in one invocation', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace/project', true);
+	await fs.makeDirectory('/workspace/project', { recursive: true });
 	const shell = new Shell(fs);
 
 	const output = await shell.$`cd /workspace; cd project; pwd`.text();
@@ -88,8 +88,8 @@ test('shell executes semicolon-separated statements in one invocation', async ()
 
 test('shell formats syntax, usage, and expansion failures through one diagnostic style', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace/a', true);
-	await fs.mkdir('/workspace/b', true);
+	await fs.makeDirectory('/workspace/a', { recursive: true });
+	await fs.makeDirectory('/workspace/b', { recursive: true });
 	const shell = new Shell(fs, { cwd: '/workspace' });
 
 	await expect(shell.$`echo )`.text()).rejects.toBeInstanceOf(ShellError);
@@ -111,8 +111,8 @@ test('shell formats syntax, usage, and expansion failures through one diagnostic
 
 test('shell command await resolves to Bun-like shell output', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace/a', true);
-	await fs.mkdir('/workspace/b', true);
+	await fs.makeDirectory('/workspace/a', { recursive: true });
+	await fs.makeDirectory('/workspace/b', { recursive: true });
 	const shell = new Shell(fs, { cwd: '/workspace' });
 
 	const success = await shell.$`pwd`;
@@ -131,8 +131,8 @@ test('shell command await resolves to Bun-like shell output', async () => {
 
 test('shell throws Bun-like ShellError by default for non-zero exits', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace/a', true);
-	await fs.mkdir('/workspace/b', true);
+	await fs.makeDirectory('/workspace/a', { recursive: true });
+	await fs.makeDirectory('/workspace/b', { recursive: true });
 	const shell = new Shell(fs, { cwd: '/workspace' });
 
 	let error: unknown = null;
@@ -153,8 +153,8 @@ test('shell throws Bun-like ShellError by default for non-zero exits', async () 
 
 test('shell preserves deterministic non-zero status for diagnostics', async () => {
 	const fs = new MemoryFS();
-	await fs.mkdir('/workspace/a', true);
-	await fs.mkdir('/workspace/b', true);
+	await fs.makeDirectory('/workspace/a', { recursive: true });
+	await fs.makeDirectory('/workspace/b', { recursive: true });
 	const shell = new Shell(fs, { cwd: '/workspace' });
 
 	await shell.$`echo |`.nothrow().text();
