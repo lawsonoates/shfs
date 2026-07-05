@@ -2,6 +2,7 @@
 	"author": "Lawson Oates (https://github.com/lawsonoates)",
 	"description": "A library of simulated fish commands",
 	"devDependencies": {
+		"@secure-exec/core": "^0.3.3",
 		"@tsconfig/bun": "catalog:",
 		"@shfs/compiler": "workspace:*",
 		"@types/bun": "catalog:",
@@ -20,6 +21,10 @@
 		"./fs": {
 			"import": "./dist/fs.mjs",
 			"types": "./dist/fs.d.mts"
+		},
+		"./code-mode": {
+			"import": "./dist/code-mode.mjs",
+			"types": "./dist/code-mode.d.mts"
 		},
 		"./util/path": {
 			"import": "./dist/util/path.mjs",
@@ -42,7 +47,13 @@
 	"module": "./dist/index.mjs",
 	"name": "shfs",
 	"peerDependencies": {
+		"@secure-exec/core": "^0.3.3",
 		"typescript": "^5"
+	},
+	"peerDependenciesMeta": {
+		"@secure-exec/core": {
+			"optional": true
+		}
 	},
 	"repository": {
 		"type": "git",
