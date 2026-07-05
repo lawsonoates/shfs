@@ -5,6 +5,7 @@
 - Tree tests come from: https://github.com/peteretelej/tree/tree/main/tests
 - Wc tests come from: https://github.com/coreutils/coreutils/tree/master/tests/wc
 - Sort tests come from: https://github.com/coreutils/coreutils/tree/master/tests/sort
+- Cp tests come from: https://github.com/coreutils/coreutils/tree/master/tests/cp
 - Rm tests come from: https://github.com/coreutils/coreutils/tree/master/tests/rm
 - Mv tests come from: https://github.com/coreutils/coreutils/tree/master/tests/mv
 - Find shell tests come from: https://github.com/jamesyoungman/findutils/tree/master/tests/find
