@@ -3,6 +3,8 @@
 	"extends": "@tsconfig/bun/tsconfig.json",
 	"compilerOptions": {
 		"paths": {
+			"@/*": ["./src/*"],
+			"@test/*": ["./test/*"],
 			"@shfs/compiler": ["../compiler/src/index.ts"]
 		},
 		"strictNullChecks": true,
