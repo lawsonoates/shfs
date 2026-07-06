@@ -2,14 +2,6 @@
 	"$schema": "https://json.schemastore.org/tsconfig",
 	"extends": "@tsconfig/bun/tsconfig.json",
 	"compilerOptions": {
-		"baseUrl": ".",
-		"paths": {
-			"#compiler": ["packages/compiler/src/index.ts"],
-			"#compiler/*": ["packages/compiler/src/*"],
-			"#harness": ["test/harness.ts"],
-			"#shfs": ["packages/shfs/src/index.ts"],
-			"#shfs/*": ["packages/shfs/src/*"]
-		},
 		"strictNullChecks": true
 	},
 	"exclude": ["opensrc"]

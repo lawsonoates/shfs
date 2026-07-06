@@ -6,7 +6,7 @@ shfs (shell filesystem) is a simulated [fish shell](https://github.com/fish-shel
 
 Live demo: [shfs.lawsonoates.com](https://shfs.lawsonoates.com)
 
-shfs is inspired by Bun's `$` shell api and provides a pluggable filesystem interface allowing custom storage.
+shfs is inspired by Bun's `$` shell api and provides a pluggable [filesystem interface](#filesystem-interface) allowing custom storage.
 
 shfs is designed to be used by agents needing a filesystem without having to spin up a sandbox.
 
@@ -37,6 +37,10 @@ const content = await $`cat hello.txt`.text();
 console.log(content);
 ```
 
+## Filesystem Interface
+
+The shell runs over the `FS` interface exported from `shfs/fs`. `MemoryFS` is the built-in implementation; custom backends implement the same interface. See [docs/filesystem-interface.md](docs/filesystem-interface.md).
+
 ## Subset Boundary
 
 shfs is fish-inspired but intentionally not a full fish shell. It targets deterministic behavior over a virtual filesystem.
@@ -50,13 +54,13 @@ Included behavior:
 - script-core builtins (`test`, `echo`, `read`, `string`)
 - core path behavior (`cd`, `pwd`, `.`, `..`, absolute/relative paths)
 - fish-style wildcard expansion (`*`, `?`, `[ ... ]`, `**`)
+- symlink creation, traversal, and command semantics (`find -H`/`-L`/`-P`, `-type l`, `-xtype`, symlink-preserving recursive `cp`)
 - stable, deterministic error contracts
 
 Explicitly out of scope:
 
 - control-flow blocks and function definitions (`if`/`for`/`function` + `end`)
 - `CDPATH`
-- symlink-focused traversal/compat behavior
 - host OS/process emulation and interactive shell UX
 - full fish compatibility or fish-verbatim error text
 
@@ -107,6 +111,12 @@ Script builtins:
 - set
 - string
 - test
+
+Symlink-related command behavior:
+
+- `find` supports the `-H`, `-L`, and `-P` link-following modes, plus the `-type l` and `-xtype` predicates
+- `cp -r` preserves symlinks rather than following them
+- there is no `ln` command; create symlinks via the [filesystem interface](#filesystem-interface)
 
 ## Globbing Semantics
 

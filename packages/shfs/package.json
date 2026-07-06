@@ -60,6 +60,7 @@
 		"url": "https://github.com/lawsonoates/shfs"
 	},
 	"scripts": {
+		"test": "bun test",
 		"typecheck": "tsgo -b --noEmit",
 		"build": "tsdown",
 		"prepublishOnly": "bun run build"

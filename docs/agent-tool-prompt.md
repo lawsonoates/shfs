@@ -11,9 +11,9 @@ Strict fish-inspired subset for filesystem commands. Not POSIX, not full fish. D
 ## Supported
 
 - **Pipelines**: `|` only, left-to-right, stream-based (newline allowed after `|` for line continuation)
-- **find subset**: recursive virtual-FS traversal from explicit paths or cwd; supports `-name`, `-iname`, `-path`, `-type f|d`, `-maxdepth`, `-mindepth`, `-depth`, and default `-print`
+- **find subset**: recursive virtual-FS traversal from explicit paths or cwd; link-following modes `-H`, `-L`, `-P`; tests `-name`/`-iname`, `-path`/`-ipath` (`-wholename`/`-iwholename`), `-regex`/`-iregex`, `-type f|d|l`, `-xtype`, `-empty`, `-true`/`-false`; `-maxdepth`, `-mindepth`, `-depth`, `-o`/`-or`, and default `-print`
 - **tree subset**: deterministic directory rendering; supports `-a`, `-d`, `-f`, `-F`, `-L`, `-A`, `--noreport`, `-P`, `-I`, `--prune`, and `--matchdirs`
-- **grep subset**: supports `-G`, `-E`, `-F`, `-P`, binary handling (`--binary-files=...`, `-a`, `-I`), null-data mode (`-z`/`--null-data`), and deterministic `0`/`1`/`2` status behavior
+- **grep subset**: matchers `-G`, `-E`, `-F`, `-P`; matching flags `-i`, `-v`, `-w`, `-x`, `-e`, `-f`, `-m`; output flags `-n`, `-c`, `-o`, `-q`, `-b`, `-h`/`-H`, `-l`/`-L`, `-s`, context `-A`/`-B`/`-C`; recursive `-r`/`-R` with `--include`/`--exclude`/`--exclude-dir`; binary handling (`--binary-files=...`, `-a`, `-I`), null-data mode (`-z`/`--null-data`), and deterministic `0`/`1`/`2` status behavior
 - **wc subset**: supports byte, character, line, word, and max-line-length counts, plus `--files0-from` and deterministic total modes
 - **sort subset**: C-locale/byte-style line ordering over stdin/files/pipelines; supports `-n`, `-k POS[,POS]`, `-t CHAR`, `-u`, `-c`, and `-C`
 - **xargs subset**: supports `-0`/`--null`, `-d`, `-E`, `-I`, `-L`, `-n`, `-r`/`--no-run-if-empty`; default command is `echo`; `-n`/`-L`/`-I` are mutually exclusive with last-flag-wins behavior
@@ -24,13 +24,15 @@ Strict fish-inspired subset for filesystem commands. Not POSIX, not full fish. D
 - **Globbing**: `*`, `**`, `?`, `[abc]`, `[a-z]`, `[!abc]`, trailing `/` for directory-only (no expansion in quotes, no-match = deterministic error)
 - **Variables**: `$name` expansion, `$status` for last exit code; `set name value` to assign (`-l` local, `-g` global)
 - **Chaining**: `and` (run if previous succeeded), `or` (run if previous failed)
-- **Redirection**: `< file` (input), `> file` (output, overwrites), `>> file` (output, appends), fd forms such as `2>&1` and `2>&-`, stderr pipe `&|`, and combined output forms `&>`/`&>>`
+- **Symlinks**: traversal and command semantics (`find` link modes and predicates, symlink-preserving recursive `cp`); no `ln` command — symlinks are created via the host filesystem API
+- **Redirection**: `< file` (input), `> file` (output, overwrites), `>> file` (output, appends), noclobber forms `>?`/`>>?`, fd forms such as `2>&1` and `2>&-`, stderr pipe `&|`, and combined output forms `&>`/`&>>`
 - **Comments**: `#` to EOL (only at token start)
 
 ## Not Supported
 
 - Brace expansion (`{a,b,c}`)
 - Control flow (`if`, `for`, `while`, `switch`, functions)
-- Symlinks, `CDPATH`, scoped env injection (`env KEY=... cmd`), host OS/process emulation, external binaries, or `$PATH`
+- `ln` (create symlinks through the filesystem API instead)
+- `CDPATH`, scoped env injection (`env KEY=... cmd`), host OS/process emulation, external binaries, or `$PATH`
 - Full GNU/POSIX/fish compatibility beyond the documented subsets
 - Background `&`, `&&`/`||`, `not`, `~`, `$()`, heredocs, process substitution
