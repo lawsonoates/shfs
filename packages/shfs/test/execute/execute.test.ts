@@ -27,6 +27,7 @@ function createReadonlyFs(backingFs: FS): FS {
 	const readonlyError = new Error('readonly filesystem');
 	return {
 		exists: backingFs.exists.bind(backingFs),
+		home: backingFs.home,
 		makeDirectory: async () => {
 			throw readonlyError;
 		},

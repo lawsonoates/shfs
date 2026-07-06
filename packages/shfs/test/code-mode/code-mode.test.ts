@@ -1,18 +1,18 @@
 import { expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 
-import { MemoryFS } from '#shfs/fs/memory';
+import { MemoryFS } from '@/fs/memory';
 
 const secureExecAvailable =
 	existsSync(
 		new URL(
-			'../../../node_modules/@secure-exec/core/package.json',
+			'../../../../node_modules/@secure-exec/core/package.json',
 			import.meta.url
 		)
 	) ||
 	existsSync(
 		new URL(
-			'../../../packages/shfs/node_modules/@secure-exec/core/package.json',
+			'../../node_modules/@secure-exec/core/package.json',
 			import.meta.url
 		)
 	);
@@ -30,7 +30,7 @@ async function names(fs: MemoryFS, path: string): Promise<string[]> {
 test.skipIf(!runSecureExecIntegration)(
 	'code mode rejects a filesystem whose home is the root',
 	async () => {
-		const { createCodeMode } = await import('#shfs/code-mode/index');
+		const { createCodeMode } = await import('@/code-mode/index');
 		expect(createCodeMode(new MemoryFS())).rejects.toThrow(
 			"code mode requires fs.home to be a directory below '/'"
 		);
@@ -40,7 +40,7 @@ test.skipIf(!runSecureExecIntegration)(
 test.skipIf(!runSecureExecIntegration)(
 	'code mode runs TypeScript that uses node:fs/promises against fs.home',
 	async () => {
-		const { createCodeMode } = await import('#shfs/code-mode/index');
+		const { createCodeMode } = await import('@/code-mode/index');
 		const fs = new MemoryFS({ home: '/home/user' });
 		fs.setFile('/home/user/README.md', '# shfs');
 		fs.setFile('/home/user/src/index.ts', 'export const value = 1;');
@@ -104,7 +104,7 @@ export default async function main() {
 test.skipIf(!runSecureExecIntegration)(
 	'read-only code mode does not persist guest writes',
 	async () => {
-		const { createCodeMode } = await import('#shfs/code-mode/index');
+		const { createCodeMode } = await import('@/code-mode/index');
 		const fs = new MemoryFS({ home: '/home/user' });
 		fs.setFile('/home/user/README.md', '# shfs');
 
