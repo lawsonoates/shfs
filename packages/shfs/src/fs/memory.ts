@@ -18,6 +18,7 @@ const DIRECTORY_MODE = 0o755;
 const MAX_SYMLINK_HOPS = 40;
 
 export class MemoryFS implements FS {
+	readonly home: string;
 	private readonly files = new Map<string, Uint8Array>();
 	private readonly directories = new Set<string>();
 	private readonly symlinks = new Map<string, string>();
@@ -28,11 +29,16 @@ export class MemoryFS implements FS {
 		{ mtime: Date; isDirectory: boolean }
 	>();
 
-	constructor() {
+	constructor(options?: { home?: string }) {
 		// Initialize root directory
 		this.directories.add('/');
 		this.directoryChildren.set('/', new Set());
 		this.fileMetadata.set('/', { mtime: new Date(), isDirectory: true });
+		this.home = normalizePath(options?.home ?? '/');
+		if (this.home !== '/') {
+			this.ensureParentDirectories(this.home);
+			this.addDirectory(this.home, new Date());
+		}
 	}
 
 	setFile(path: string, content: string | Uint8Array): void {
@@ -258,6 +264,9 @@ export class MemoryFS implements FS {
 	): Promise<void> {
 		const recursive = options?.recursive ?? false;
 		const normalizedPath = normalizePath(path);
+		if (recursive && this.directories.has(normalizedPath)) {
+			return;
+		}
 		if (
 			this.directories.has(normalizedPath) ||
 			this.files.has(normalizedPath) ||

@@ -6,8 +6,3 @@ export {
 	type CreateCodeModeOptions,
 	createCodeMode,
 } from './code-mode';
-export {
-	ShfsVirtualFileSystem,
-	type ShfsVirtualFileSystemOptions,
-	ShfsVirtualFsError,
-} from './secure-exec-fs';

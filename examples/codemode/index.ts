@@ -4,9 +4,9 @@ import { createCodeMode } from 'shfs/code-mode';
 import { MemoryFS } from 'shfs/fs';
 import { z } from 'zod';
 
-const fs = new MemoryFS();
+const fs = new MemoryFS({ home: '/home/user' });
 fs.setFile(
-	'/lines.txt',
+	'/home/user/lines.txt',
 	Array.from({ length: 10 }, (_, i) => `Line ${i + 1}`).join('\n')
 );
 
@@ -17,8 +17,9 @@ const codemodeTool = tool({
 		Use this tool to execute TypeScript code for filesystem-related tasks.
 
 		Use normal Node.js filesystem APIs such as \`node:fs\` and
-		\`node:fs/promises\`. Use absolute paths like \`/lines.txt\` or paths
-		relative to the working directory.
+		\`node:fs/promises\`. Your files live in /home/user, which is also the
+		working directory, so use paths like \`lines.txt\` or
+		\`/home/user/lines.txt\`.
 
 		The code must be an ES module. Export a default value or an async default
 		function; the returned value will be reported back to you.
@@ -38,7 +39,7 @@ const codemodeTool = tool({
 try {
 	const { text } = await generateText({
 		model: openrouter('anthropic/claude-haiku-4.5'),
-		prompt: 'Read the contents of the file /lines.txt and return the last 2 lines.',
+		prompt: 'Read the contents of the file lines.txt and return the last 2 lines.',
 		stopWhen: stepCountIs(2),
 		tools: { codemode: codemodeTool },
 	});
