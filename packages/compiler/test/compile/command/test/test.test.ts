@@ -7,6 +7,9 @@ test('test compiles operands', () => {
 		compileTest(cmd('test', [literal('1'), literal('='), literal('1')]))
 	).toEqual({
 		cmd: 'test',
-		args: { operands: [literal('1'), literal('='), literal('1')] },
+		args: {
+			bracket: false,
+			operands: [literal('1'), literal('='), literal('1')],
+		},
 	});
 });

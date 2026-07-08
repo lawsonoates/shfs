@@ -33,6 +33,10 @@ export const TokenKind = {
 	RPAREN: 10, // ) - command substitution end
 	LESS: 11, // < - input redirection (Phase 2)
 	GREAT: 12, // > - output redirection (Phase 2)
+
+	// === Multi-char Operators ===
+	AND_AND: 13, // && - conjunction combiner
+	OR_OR: 14, // || - disjunction combiner
 } as const;
 
 export type TokenKind = (typeof TokenKind)[keyof typeof TokenKind];
@@ -49,7 +53,20 @@ interface TokenWordPartBase {
 export type TokenWordPart =
 	| (TokenWordPartBase & { readonly kind: 'literal' })
 	| (TokenWordPartBase & { readonly kind: 'glob' })
-	| (TokenWordPartBase & { readonly kind: 'commandSub' });
+	| (TokenWordPartBase & {
+			readonly kind: 'commandSub';
+			/** Inner command source without the surrounding parens. */
+			readonly source: string;
+			/** Raw index expression text (without brackets), if sliced. */
+			readonly index: string | null;
+	  })
+	| (TokenWordPartBase & {
+			readonly kind: 'variable';
+			/** The variable name after the dollar sign. */
+			readonly name: string;
+			/** Raw index expression text (without brackets), if sliced. */
+			readonly index: string | null;
+	  });
 
 /**
  * Token flags for metadata about how the token was formed.
@@ -99,6 +116,8 @@ const TOKEN_KIND_NAMES: Record<TokenKind, string> = {
 	[TokenKind.RPAREN]: 'RPAREN',
 	[TokenKind.LESS]: 'LESS',
 	[TokenKind.GREAT]: 'GREAT',
+	[TokenKind.AND_AND]: 'AND_AND',
+	[TokenKind.OR_OR]: 'OR_OR',
 };
 
 /**
@@ -114,6 +133,8 @@ const TOKEN_SPELLINGS: ReadonlyMap<TokenKind, string> = new Map([
 	[TokenKind.RPAREN, ')'],
 	[TokenKind.LESS, '<'],
 	[TokenKind.GREAT, '>'],
+	[TokenKind.AND_AND, '&&'],
+	[TokenKind.OR_OR, '||'],
 ]);
 
 /**
@@ -158,7 +179,7 @@ export class Token {
 	 * Check if this token is an operator.
 	 */
 	get isOperator(): boolean {
-		return this.kind >= TokenKind.PIPE && this.kind <= TokenKind.GREAT;
+		return this.kind >= TokenKind.PIPE && this.kind <= TokenKind.OR_OR;
 	}
 
 	/**

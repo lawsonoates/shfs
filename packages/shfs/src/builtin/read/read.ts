@@ -1,5 +1,6 @@
 import type { ReadStep } from '@shfs/compiler';
 import { evaluateExpandedWord } from '../../execute/path';
+import { setVariable } from '../../execute/variables';
 import type { Builtin, BuiltinRuntime } from '../types';
 
 const VARIABLE_NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -35,7 +36,7 @@ export const read: Builtin<ReadStep['args']> = (runtime, args) => {
 			return;
 		}
 
-		runtime.context.localVars.set(name, value);
+		setVariable(runtime.context, name, [value], 'auto');
 		runtime.context.status = 0;
 		yield* [];
 	})();

@@ -14,6 +14,7 @@ import {
 	CommandSubPart,
 	GlobPart,
 	LiteralPart,
+	VariablePart,
 	Word,
 	type WordPart,
 } from './ast';
@@ -97,8 +98,24 @@ export class WordParser {
 				return new LiteralPart(part.span, part.text);
 			case 'glob':
 				return new GlobPart(part.span, part.text);
-			case 'commandSub':
-				return this.parseCommandSubstitution(part.text, part.span);
+			case 'commandSub': {
+				// Parse the inner content recursively for early validation.
+				const innerProgram = this.parser.parseSubstitution(part.source);
+				return new CommandSubPart(
+					part.span,
+					innerProgram,
+					part.source,
+					part.quote === 'double',
+					part.index
+				);
+			}
+			case 'variable':
+				return new VariablePart(
+					part.span,
+					part.name,
+					part.quote === 'double',
+					part.index
+				);
 			default: {
 				const _exhaustive: never = part;
 				throw new ParseSyntaxError(
@@ -108,24 +125,6 @@ export class WordParser {
 				);
 			}
 		}
-	}
-
-	private parseCommandSubstitution(
-		spelling: string,
-		span: SourceSpan
-	): CommandSubPart {
-		let inner = spelling;
-
-		// Extract the inner content (remove outer parens)
-		// The lexer includes the parens in the spelling
-		if (inner.startsWith('(') && inner.endsWith(')')) {
-			inner = inner.slice(1, -1);
-		}
-
-		// Parse the inner content recursively
-		const innerProgram = this.parser.parseSubstitution(inner);
-
-		return new CommandSubPart(span, innerProgram);
 	}
 
 	/**

@@ -3,12 +3,10 @@
 // Copyright (C) 2009- fish-shell contributors
 // License: GNU General Public License, version 2.
 
-// Note: fish uses $() for command substitution inside double quotes.
-// shfs only supports bare () for command substitution (outside quotes).
-// Inside double quotes, bare () must be treated as literal characters,
-// matching fish semantics where bare () is literal inside double quotes.
-// Tests using $() in fish are translated to the equivalent shfs pattern
-// of closing and reopening double quotes around the substitution.
+// Note: shfs supports both bare () and $() command substitution, including
+// $() inside double quotes. Bare () inside double quotes stays literal,
+// matching fish semantics. Upstream's escape sequences (\n) and brace
+// expansion cases are adapted with functions that emit multiple lines.
 
 import { beforeEach, expect, test } from 'bun:test';
 
@@ -144,4 +142,142 @@ test('fish command substitution: cmdsub.fish - command substitution as set value
 	expect(await run('set -g result (echo computed); echo $result')).toBe(
 		'computed'
 	);
+});
+
+// ── $() form ────────────────────────────────────────────────
+
+// cmdsub.fish: echo $(echo 1\n2)
+// Adapted: a function emits the two lines instead of echo with \n escapes.
+test('fish command substitution: cmdsub.fish - unquoted $() splits output lines into arguments', async () => {
+	const script = [
+		'function two',
+		'    echo 1',
+		'    echo 2',
+		'end',
+		'echo $(two)',
+	].join('\n');
+	expect(await run(script)).toBe('1 2');
+});
+
+// cmdsub.fish: echo "a$(echo b)c"
+test('fish command substitution: cmdsub.fish - $() works inside double quotes', async () => {
+	expect(await run('echo "a$(echo b)c"')).toBe('abc');
+});
+
+// cmdsub.fish: echo "$(echo "$(echo a)")"
+test('fish command substitution: cmdsub.fish - nested quoted $()', async () => {
+	expect(await run('echo "$(echo "$(echo a)")"')).toBe('a');
+});
+
+// cmdsub.fish: echo "$(echo $(echo b))"
+test('fish command substitution: cmdsub.fish - unquoted $() nested in quoted $()', async () => {
+	expect(await run('echo "$(echo $(echo b))"')).toBe('b');
+});
+
+// cmdsub.fish: echo "$(echo multiple).$(echo command).$(echo substitutions)"
+test('fish command substitution: cmdsub.fish - multiple quoted $() substitutions', async () => {
+	expect(
+		await run(
+			'echo "$(echo multiple).$(echo command).$(echo substitutions)"'
+		)
+	).toBe('multiple.command.substitutions');
+});
+
+// cmdsub.fish: test -n "$()" || echo "empty list is interpolated to empty string"
+test('fish command substitution: cmdsub.fish - quoted empty $() interpolates to an empty string', async () => {
+	expect(
+		await run(
+			'test -n "$()" || echo "empty list is interpolated to empty string"'
+		)
+	).toBe('empty list is interpolated to empty string');
+});
+
+// cmdsub.fish: quoted command substitution preserves internal newlines.
+test('fish command substitution: cmdsub.fish - quoted $() preserves inner newlines', async () => {
+	const script = [
+		'function lines',
+		'    echo line 1',
+		'    echo line 2',
+		'end',
+		'echo "$(lines)"',
+	].join('\n');
+	expect(await run(script)).toBe('line 1\nline 2');
+});
+
+// cmdsub.fish: echo trim any newlines "$(echo \n\n\n)" after cmdsub
+// Adapted: echo emits a single empty line; the quoted result is empty.
+test('fish command substitution: cmdsub.fish - quoted $() trims trailing newlines', async () => {
+	expect(await run('echo x "$(echo)" y')).toBe('x  y');
+});
+
+// cmdsub.fish: echo "$(echo index\nrange\nexpansion)[2]"
+test('fish command substitution: cmdsub.fish - quoted $() output can be indexed', async () => {
+	const script = [
+		'function irx',
+		'    echo index',
+		'    echo range',
+		'    echo expansion',
+		'end',
+		'echo "$(irx)[2]"',
+	].join('\n');
+	expect(await run(script)).toBe('range');
+});
+
+// cmdsub.fish: echo "$(echo '"')"
+test('fish command substitution: cmdsub.fish - quote characters nest inside quoted $()', async () => {
+	expect(await run(`echo "$(echo '"')"`)).toBe('"');
+});
+
+// cmdsub.fish: echo "$(echo 1))"
+test('fish command substitution: cmdsub.fish - literal paren after quoted $()', async () => {
+	expect(await run('echo "$(echo 1))"')).toBe('1)');
+});
+
+// cmdsub.fish: echo "($(echo 1))"
+test('fish command substitution: cmdsub.fish - literal parens around quoted $()', async () => {
+	expect(await run('echo "($(echo 1))"')).toBe('(1)');
+});
+
+// cmdsub.fish: echo "$(echo 1) ( $(echo 2)"
+test('fish command substitution: cmdsub.fish - lone paren between quoted $()', async () => {
+	expect(await run('echo "$(echo 1) ( $(echo 2)"')).toBe('1 ( 2');
+});
+
+// cmdsub.fish: echo "$(echo A)B$(echo C)D"(echo E)
+test('fish command substitution: cmdsub.fish - quoted $() concatenates with unquoted ()', async () => {
+	expect(await run('echo "$(echo A)B$(echo C)D"(echo E)')).toBe('ABCDE');
+});
+
+// cmdsub.fish: echo "($(echo A)B$(echo C))"
+test('fish command substitution: cmdsub.fish - text and quoted $() inside literal parens', async () => {
+	expect(await run('echo "($(echo A)B$(echo C))"')).toBe('(ABC)');
+});
+
+// cmdsub.fish: echo "quoted1""quoted2"(echo unquoted3)"$(echo quoted4)_$(echo quoted5)"
+test('fish command substitution: cmdsub.fish - adjacent quoted, unquoted, and $() segments', async () => {
+	expect(
+		await run(
+			'echo "quoted1""quoted2"(echo unquoted3)"$(echo quoted4)_$(echo quoted5)"'
+		)
+	).toBe('quoted1quoted2unquoted3quoted4_quoted5');
+});
+
+// cmdsub.fish: var=a echo "$var$(echo b)"
+test('fish command substitution: cmdsub.fish - command-scoped variable adjacent to quoted $()', async () => {
+	expect(await run('var=a echo "$var$(echo b)"')).toBe('ab');
+});
+
+// cmdsub.fish: echo "\$(echo 1)"
+test('fish command substitution: cmdsub.fish - escaped dollar in quotes prevents $()', async () => {
+	expect(await run('echo "\\$(echo 1)"')).toBe('$(echo 1)');
+});
+
+// cmdsub.fish: echo "\$$(echo 1)"
+test('fish command substitution: cmdsub.fish - escaped dollar before quoted $()', async () => {
+	expect(await run('echo "\\$$(echo 1)"')).toBe('$1');
+});
+
+// cmdsub.fish: echo "$(echo '$@')"
+test('fish command substitution: cmdsub.fish - dollar inside single quotes in quoted $()', async () => {
+	expect(await run(`echo "$(echo '$@')"`)).toBe('$@');
 });

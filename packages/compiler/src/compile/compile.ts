@@ -4,15 +4,15 @@
  * This compiler traverses the AST and produces script-level IR
  * with enhanced word expansion information.
  *
- * Key differences from the old compile.ts:
- * - Accepts Program from the new parser (not ShellAST)
- * - Produces ScriptIR/PipelineIR with ExpandedWord types
- * - Preserves word structure for runtime expansion
+ * Statements compile recursively: jobs become pipelines of typed steps,
+ * blocks and control flow compile to nested statement IR, and unknown
+ * command names compile to call steps resolved at runtime (functions).
  */
 
 import { Result } from 'better-result';
 import { CompileError, createCommandDiagnostic } from '../diagnostic';
 import {
+	type AssignmentIR,
 	commandSub,
 	compound,
 	type ExpandedWord,
@@ -20,23 +20,35 @@ import {
 	expandedWordHasCommandSub,
 	expandedWordToString,
 	glob,
+	type IfBranchIR,
 	literal,
 	type PipelineIR,
 	type RedirectionIR,
 	type ScriptIR,
-	type ScriptStatementIR,
 	type SimpleCommandIR,
 	type SourceIR,
+	type StatementIR,
 	type StepIR,
+	variable,
 } from '../ir';
-import type {
-	Pipeline,
-	Program,
-	Redirection,
-	SimpleCommand,
+import {
+	type Assignment,
+	BeginStatement,
+	BreakStatement,
+	ContinueStatement,
+	ForStatement,
+	FunctionStatement,
+	IfStatement,
+	type Pipeline,
+	type Program,
+	type Redirection,
+	ReturnStatement,
+	type SimpleCommand,
 	Statement,
-	Word,
-	WordPart,
+	type StatementNode,
+	WhileStatement,
+	type Word,
+	type WordPart,
 } from '../parser/ast';
 import { CommandHandler } from './command/handler';
 
@@ -75,29 +87,140 @@ class ProgramCompiler {
 	compileProgram(node: Program): Result<ScriptIR, CompileError> {
 		const compiler = this;
 		return Result.gen(function* () {
-			const statements = new Array<ScriptStatementIR>(
-				node.statements.length
-			);
-			for (let index = 0; index < node.statements.length; index++) {
-				const statement = node.statements[index];
-				if (statement) {
-					statements[index] =
-						yield* compiler.compileStatement(statement);
+			return Result.ok({
+				statements: yield* compiler.compileStatements(node.statements),
+			});
+		});
+	}
+
+	compileStatements(
+		nodes: StatementNode[]
+	): Result<StatementIR[], CompileError> {
+		const compiler = this;
+		return Result.gen(function* () {
+			const statements = new Array<StatementIR>(nodes.length);
+			for (let index = 0; index < nodes.length; index++) {
+				const node = nodes[index];
+				if (node) {
+					statements[index] = yield* compiler.compileStatement(node);
 				}
 			}
-			return Result.ok({ statements });
+			return Result.ok(statements);
 		});
 	}
 
 	/**
-	 * Compile a script statement to ScriptStatementIR.
+	 * Compile a statement node to StatementIR.
 	 */
-	compileStatement(node: Statement): Result<ScriptStatementIR, CompileError> {
+	compileStatement(node: StatementNode): Result<StatementIR, CompileError> {
 		const compiler = this;
 		return Result.gen(function* () {
-			return Result.ok({
+			if (node instanceof Statement) {
+				return Result.ok<StatementIR>({
+					chainMode: node.chainMode,
+					kind: 'job',
+					negated: node.negated,
+					pipeline: yield* compiler.compilePipeline(node.pipeline),
+				});
+			}
+			if (node instanceof IfStatement) {
+				return Result.ok(yield* compiler.compileIfStatement(node));
+			}
+			if (node instanceof WhileStatement) {
+				return Result.ok<StatementIR>({
+					assignments: compiler.compileAssignments(node.assignments),
+					body: yield* compiler.compileStatements(node.body),
+					chainMode: node.chainMode,
+					condition: yield* compiler.compileStatements(
+						node.condition
+					),
+					kind: 'while',
+					negated: node.negated,
+				});
+			}
+			if (node instanceof ForStatement) {
+				return Result.ok<StatementIR>({
+					body: yield* compiler.compileStatements(node.body),
+					chainMode: node.chainMode,
+					kind: 'for',
+					values: node.values.map((value) =>
+						compiler.expandWord(value)
+					),
+					variable: node.variable,
+				});
+			}
+			if (node instanceof BeginStatement) {
+				return Result.ok<StatementIR>({
+					assignments: compiler.compileAssignments(node.assignments),
+					body: yield* compiler.compileStatements(node.body),
+					chainMode: node.chainMode,
+					kind: 'begin',
+					negated: node.negated,
+				});
+			}
+			if (node instanceof FunctionStatement) {
+				return Result.ok<StatementIR>({
+					argumentNames: node.argumentNames,
+					body: yield* compiler.compileStatements(node.body),
+					chainMode: node.chainMode,
+					kind: 'function',
+					name: node.name,
+				});
+			}
+			if (node instanceof BreakStatement) {
+				return Result.ok<StatementIR>({
+					chainMode: node.chainMode,
+					kind: 'break',
+				});
+			}
+			if (node instanceof ContinueStatement) {
+				return Result.ok<StatementIR>({
+					chainMode: node.chainMode,
+					kind: 'continue',
+				});
+			}
+			if (node instanceof ReturnStatement) {
+				return Result.ok<StatementIR>({
+					chainMode: node.chainMode,
+					kind: 'return',
+					values: node.values.map((value) =>
+						compiler.expandWord(value)
+					),
+				});
+			}
+			return yield* new CompileError(
+				createCommandDiagnostic(
+					'<statement>',
+					'unknown-statement',
+					'Unknown statement node'
+				)
+			);
+		});
+	}
+
+	private compileIfStatement(
+		node: IfStatement
+	): Result<StatementIR, CompileError> {
+		const compiler = this;
+		return Result.gen(function* () {
+			const branches: IfBranchIR[] = [];
+			for (const branch of node.branches) {
+				branches.push({
+					body: yield* compiler.compileStatements(branch.body),
+					condition: yield* compiler.compileStatements(
+						branch.condition
+					),
+				});
+			}
+			return Result.ok<StatementIR>({
+				assignments: compiler.compileAssignments(node.assignments),
+				branches,
 				chainMode: node.chainMode,
-				pipeline: yield* compiler.compilePipeline(node.pipeline),
+				elseBody: node.elseBody
+					? yield* compiler.compileStatements(node.elseBody)
+					: null,
+				kind: 'if',
+				negated: node.negated,
 			});
 		});
 	}
@@ -171,7 +294,15 @@ class ProgramCompiler {
 			name: this.expandWord(node.name),
 			args,
 			redirections,
+			assignments: this.compileAssignments(node.assignments),
 		};
+	}
+
+	compileAssignments(assignments: readonly Assignment[]): AssignmentIR[] {
+		return assignments.map((assignment) => ({
+			name: assignment.name,
+			value: this.expandWord(assignment.value),
+		}));
 	}
 
 	/**
@@ -237,10 +368,16 @@ class ProgramCompiler {
 				return literal(part.value);
 			case 'glob':
 				return glob(part.pattern);
-			case 'commandSub': {
-				const innerCommand = this.serializeProgram(part.program);
-				return commandSub(innerCommand);
-			}
+			case 'commandSub':
+				return commandSub(part.source, [], {
+					index: part.index,
+					quoted: part.quoted,
+				});
+			case 'variable':
+				return variable(part.name, {
+					index: part.index,
+					quoted: part.quoted,
+				});
 			default: {
 				const _exhaustive: never = part;
 				throw new Error(
@@ -272,6 +409,9 @@ class ProgramCompiler {
 
 	/**
 	 * Compile a SimpleCommandIR to a StepIR.
+	 *
+	 * Known commands compile to typed steps; unknown command names become
+	 * call steps that resolve against runtime-defined functions.
 	 */
 	private compileCommandToStep(
 		cmd: SimpleCommandIR
@@ -289,10 +429,23 @@ class ProgramCompiler {
 				);
 			}
 
+			if (!CommandHandler.has(cmdName)) {
+				return Result.ok<StepIR>({
+					args: {
+						name: cmdName,
+						words: [...cmd.args],
+					},
+					assignments: cmd.assignments,
+					cmd: 'call',
+					redirections: cmd.redirections,
+				});
+			}
+
 			const handler = yield* CommandHandler.get(cmdName);
 			const step = yield* handler(cmd);
 			return Result.ok({
 				...step,
+				assignments: cmd.assignments,
 				redirections: cmd.redirections,
 			});
 		});
@@ -307,139 +460,5 @@ class ProgramCompiler {
 			return word.value;
 		}
 		return null;
-	}
-
-	/**
-	 * Serialize a Program AST back to a string representation.
-	 * Used for storing command substitution content.
-	 */
-	private serializeProgram(program: Program): string {
-		const statements = new Array<string>(program.statements.length);
-		for (let index = 0; index < program.statements.length; index++) {
-			const statement = program.statements[index];
-			if (statement) {
-				statements[index] = this.serializePipeline(statement.pipeline);
-			}
-		}
-		return statements.join('; ');
-	}
-
-	private serializePipeline(pipeline: Pipeline): string {
-		const segments: string[] = [];
-		for (let index = 0; index < pipeline.commands.length; index++) {
-			const command = pipeline.commands[index];
-			if (!command) {
-				continue;
-			}
-			const hasNextCommand = index < pipeline.commands.length - 1;
-			segments.push(
-				this.serializeCommand(command, {
-					omitPipeRedirections: hasNextCommand,
-				})
-			);
-			if (hasNextCommand) {
-				segments.push(this.serializePipelineOperator(command));
-			}
-		}
-		return segments.join(' ');
-	}
-
-	private serializeCommand(
-		command: SimpleCommand,
-		options: { omitPipeRedirections?: boolean } = {}
-	): string {
-		const segments = [this.serializeWord(command.name)];
-		for (const arg of command.args) {
-			segments.push(this.serializeWord(arg));
-		}
-		for (const redirection of command.redirections) {
-			if (options.omitPipeRedirections && redirection.mode === 'pipe') {
-				continue;
-			}
-			segments.push(this.serializeRedirection(redirection));
-		}
-		return segments.join(' ');
-	}
-
-	private serializePipelineOperator(command: SimpleCommand): string {
-		const pipeRedirections = command.redirections.filter(
-			(redirection) =>
-				redirection.redirectKind === 'output' &&
-				redirection.mode === 'pipe'
-		);
-		const pipesStdout = pipeRedirections.some(
-			(redirection) => redirection.sourceFd === 1
-		);
-		const pipesStderr = pipeRedirections.some(
-			(redirection) => redirection.sourceFd === 2
-		);
-
-		if (pipesStdout && pipesStderr) {
-			return '&|';
-		}
-		const onlyPipeRedirection = pipeRedirections[0];
-		if (pipeRedirections.length === 1 && onlyPipeRedirection) {
-			return this.serializeRedirection(onlyPipeRedirection);
-		}
-		return '|';
-	}
-
-	private serializeRedirection(redirection: Redirection): string {
-		const sourceFd =
-			redirection.sourceFd ===
-			(redirection.redirectKind === 'input' ? 0 : 1)
-				? ''
-				: String(redirection.sourceFd);
-		if (redirection.redirectKind === 'input') {
-			const operator = redirection.optional ? '<?' : '<';
-			if (redirection.mode === 'fd') {
-				return `${sourceFd}<&${redirection.targetFd}`;
-			}
-			if (redirection.mode === 'close') {
-				return `${sourceFd}<&-`;
-			}
-			return `${sourceFd}${operator}${this.serializeWord(redirection.target)}`;
-		}
-
-		if (redirection.mode === 'pipe') {
-			return `${sourceFd}>|`;
-		}
-		if (redirection.mode === 'fd') {
-			return `${sourceFd}>&${redirection.targetFd}`;
-		}
-		if (redirection.mode === 'close') {
-			return `${sourceFd}>&-`;
-		}
-
-		let operator = redirection.append ? '>>' : '>';
-		if (redirection.noclobber) {
-			operator = `${operator}?`;
-		}
-		return `${sourceFd}${operator}${this.serializeWord(redirection.target)}`;
-	}
-
-	private serializeWord(word: Word): string {
-		let value = '';
-		for (const part of word.parts) {
-			value += this.serializeWordPart(part);
-		}
-		return value;
-	}
-
-	private serializeWordPart(part: WordPart): string {
-		switch (part.kind) {
-			case 'literal':
-				return part.value;
-			case 'glob':
-				return part.pattern;
-			case 'commandSub':
-				return `(${this.serializeProgram(part.program)})`;
-			default: {
-				const _exhaustive: never = part;
-				throw new Error(
-					`Unknown word part kind: ${JSON.stringify(_exhaustive)}`
-				);
-			}
-		}
 	}
 }

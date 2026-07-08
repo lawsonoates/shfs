@@ -84,10 +84,21 @@ function isSpecialChar(c: string): boolean {
 		case '?':
 		case '[':
 		case '#':
+		case '$':
+		case '&':
 			return true;
 		default:
 			return false;
 	}
+}
+
+function isVariableNameStart(c: string): boolean {
+	return isNameStartCode(c.charCodeAt(0));
+}
+
+function isVariableNameChar(c: string): boolean {
+	const code = c.charCodeAt(0);
+	return isNameStartCode(code) || isDigitCode(code);
 }
 
 function isWordBoundaryChar(c: string): boolean {
@@ -226,6 +237,18 @@ export class Scanner {
 			return this.makeToken(TokenKind.NEWLINE, '\n', start);
 		}
 
+		// Multi-char operators: && and ||
+		if (c0 === '&' && this.source.peek(1) === '&') {
+			this.source.advance();
+			this.source.advance();
+			return this.makeToken(TokenKind.AND_AND, '&&', start);
+		}
+		if (c0 === '|' && this.source.peek(1) === '|') {
+			this.source.advance();
+			this.source.advance();
+			return this.makeToken(TokenKind.OR_OR, '||', start);
+		}
+
 		// Single-char operators
 		const singleOp = singleCharOperatorKind(c0);
 		if (singleOp !== null) {
@@ -339,6 +362,15 @@ export class Scanner {
 				break;
 			}
 
+			// && ends a word (|| is covered by "|" being a boundary).
+			if (
+				!this.stateCtx.inQuotes &&
+				c === '&' &&
+				this.source.peek(1) === '&'
+			) {
+				break;
+			}
+
 			// Handle based on current context
 			const result = this.processChar(c, this.source.position);
 			spelling += result.chars;
@@ -371,9 +403,14 @@ export class Scanner {
 			return this.handleEscape(start);
 		}
 
+		// Dollar expansion: $name, $name[...], or $(...)
+		if (c === '$' && !this.stateCtx.inSingleQuote) {
+			return this.handleDollar(start);
+		}
+
 		// Command substitution: (...) - only outside quotes
 		if (c === '(' && !this.stateCtx.inQuotes) {
-			return this.readCommandSubstitution(start);
+			return this.readCommandSubstitution(start, '');
 		}
 
 		// Glob characters: * ?
@@ -381,8 +418,12 @@ export class Scanner {
 			return this.handleGlobChar(c, start);
 		}
 
-		// Character class: [...]
-		if (c === '[' && !this.stateCtx.inQuotes) {
+		// Character class: [...] - only when a "]" closes it within the word
+		if (
+			c === '[' &&
+			!this.stateCtx.inQuotes &&
+			this.hasCharacterClassEnd()
+		) {
 			return this.readCharacterClass(start);
 		}
 
@@ -502,9 +543,9 @@ export class Scanner {
 			};
 		}
 
-		// In double quotes, only \" and \\ are special (minimal escaping per spec)
+		// In double quotes, only \", \\ and \$ are special (minimal escaping)
 		if (this.stateCtx.inDoubleQuote) {
-			if ('"\\'.includes(next)) {
+			if ('"\\$'.includes(next)) {
 				this.source.advance();
 				return {
 					chars: next,
@@ -550,10 +591,138 @@ export class Scanner {
 	}
 
 	// ─────────────────────────────────────────────────────────
+	// Dollar expansion handlers
+	// ─────────────────────────────────────────────────────────
+
+	private handleDollar(start: SourcePosition): CharProcessResult {
+		const next = this.source.peek(1);
+
+		// $(...) command substitution, allowed inside double quotes.
+		if (next === '(') {
+			this.source.advance(); // consume $
+			return this.readCommandSubstitution(start, '$');
+		}
+
+		// $name variable reference, allowed inside double quotes.
+		if (isVariableNameStart(next)) {
+			return this.readVariable(start);
+		}
+
+		// Bare dollar stays literal.
+		const quote = this.currentWordPartQuote();
+		this.source.advance();
+		return {
+			chars: '$',
+			flags: createEmptyFlags(),
+			done: false,
+			part: this.createWordPart(
+				'literal',
+				'$',
+				start.span(this.source.position),
+				quote
+			),
+		};
+	}
+
+	private readVariable(start: SourcePosition): CharProcessResult {
+		const quote = this.currentWordPartQuote();
+		let raw = this.source.advance(); // $
+
+		let name = '';
+		while (!this.source.eof && isVariableNameChar(this.source.peek())) {
+			name += this.source.advance();
+		}
+		raw += name;
+
+		const index = this.readIndexSuffix();
+		if (index !== null) {
+			raw += `[${index}]`;
+		}
+
+		const flags = createEmptyFlags();
+		flags.containsExpansion = true;
+		const span = start.span(this.source.position);
+		return {
+			chars: raw,
+			flags,
+			done: false,
+			part: {
+				escaped: false,
+				index,
+				kind: 'variable',
+				name,
+				quote,
+				span,
+				text: raw,
+			},
+		};
+	}
+
+	/**
+	 * Read a trailing `[...]` index expression after a variable or command
+	 * substitution. Spaces are allowed inside the brackets; newlines are not.
+	 * Returns the inner text, or null when no index expression follows.
+	 */
+	private readIndexSuffix(): string | null {
+		if (this.source.peek() !== '[') {
+			return null;
+		}
+
+		let lookahead = 1;
+		while (true) {
+			const c = this.source.peek(lookahead);
+			if (c === ']') {
+				break;
+			}
+			if (c === '\n' || c === '\0') {
+				return null;
+			}
+			lookahead++;
+		}
+
+		this.source.advance(); // [
+		let index = '';
+		while (this.source.peek() !== ']') {
+			index += this.source.advance();
+		}
+		this.source.advance(); // ]
+		return index;
+	}
+
+	/**
+	 * Check whether a `[` begins a character class: a closing `]` must appear
+	 * before any whitespace, newline, or EOF.
+	 */
+	private hasCharacterClassEnd(): boolean {
+		let lookahead = 1;
+		// A leading negation or literal ] does not close the class.
+		const first = this.source.peek(lookahead);
+		if (first === '!' || first === '^') {
+			lookahead++;
+		}
+		if (this.source.peek(lookahead) === ']') {
+			lookahead++;
+		}
+		while (true) {
+			const c = this.source.peek(lookahead);
+			if (c === ']') {
+				return true;
+			}
+			if (c === ' ' || c === '\t' || c === '\n' || c === '\0') {
+				return false;
+			}
+			lookahead++;
+		}
+	}
+
+	// ─────────────────────────────────────────────────────────
 	// Command substitution handler
 	// ─────────────────────────────────────────────────────────
 
-	private readCommandSubstitution(start: SourcePosition): CharProcessResult {
+	private readCommandSubstitution(
+		start: SourcePosition,
+		prefix: string
+	): CharProcessResult {
 		const quote = this.currentWordPartQuote();
 		let result = '';
 		result += this.source.advance(); // (
@@ -581,18 +750,32 @@ export class Scanner {
 			}
 		}
 
+		const source = result.endsWith(')')
+			? result.slice(1, -1)
+			: result.slice(1);
+
+		const index = this.readIndexSuffix();
+		let raw = `${prefix}${result}`;
+		if (index !== null) {
+			raw += `[${index}]`;
+		}
+
 		const flags = createEmptyFlags();
 		flags.containsExpansion = true;
+		const span = start.span(this.source.position);
 		return {
-			chars: result,
+			chars: raw,
 			flags,
 			done: false,
-			part: this.createWordPart(
-				'commandSub',
-				result,
-				start.span(this.source.position),
-				quote
-			),
+			part: {
+				escaped: false,
+				index,
+				kind: 'commandSub',
+				quote,
+				source,
+				span,
+				text: raw,
+			},
 		};
 	}
 
@@ -730,7 +913,7 @@ export class Scanner {
 	}
 
 	private createWordPart(
-		kind: TokenWordPart['kind'],
+		kind: 'literal' | 'glob',
 		text: string,
 		span: SourceSpan,
 		quote: TokenWordPartQuote = 'none',

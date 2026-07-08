@@ -47,11 +47,15 @@ shfs is fish-inspired but intentionally not a full fish shell. It targets determ
 
 Included behavior:
 
-- variable expansion and assignment (`$var`, `set -g`, `set -l`)
-- command substitution (`(cmd)`)
+- fish list variables with indexing and slices (`$var`, `$var[1]`, `$var[2..-1]`, `count`)
+- variable assignment (`set`, `set -g`/`-l`, erase `-e`, query `-q`, append/prepend `-a`/`-p`, slice assignment)
+- command-scoped assignments (`name=value command`)
+- command substitution (`(cmd)` and `$(cmd)`, including `$(cmd)` inside double quotes)
 - multi-statement scripts with newline and `;`
-- boolean chaining and status (`and`, `or`, `$status`)
-- script-core builtins (`test`, `echo`, `read`, `string`)
+- boolean chaining, combiners, and negation (`and`, `or`, `&&`, `||`, `not`, `!`, `$status`)
+- control flow and blocks (`if`/`else if`/`else`, `while`, `for ... in`, `begin ... end`, `break`, `continue`)
+- functions (`function name [-a names]` ... `end`, `$argv`, `return`)
+- script-core builtins (`test`/`[`, `echo`, `read`, `string`, `true`, `false`, `count`)
 - core path behavior (`cd`, `pwd`, `.`, `..`, absolute/relative paths)
 - fish-style wildcard expansion (`*`, `?`, `[ ... ]`, `**`)
 - symlink creation, traversal, and command semantics (`find -H`/`-L`/`-P`, `-type l`, `-xtype`, symlink-preserving recursive `cp`)
@@ -59,25 +63,32 @@ Included behavior:
 
 Explicitly out of scope:
 
-- control-flow blocks and function definitions (`if`/`for`/`function` + `end`)
 - `CDPATH`
-- host OS/process emulation and interactive shell UX
+- host OS/process emulation, job control, and interactive shell UX
 - full fish compatibility or fish-verbatim error text
 
 Canonical boundary doc: [notes/shfs-subset-boundary.md](notes/shfs-subset-boundary.md).
 
 ## Language Features
 
-- variables:
-    - `set -g name value` persists across runs
-    - `set -l name value` is local to one script run
-    - `$status` exposes last command status (`0` success, `1` failure)
+- variables are lists:
+    - `set name a b c` stores three elements; `echo $name[2]` prints `b`
+    - slices support ranges, negative indices, and open ends (`$name[2..-1]`, `$name[..2]`)
+    - `set -g` persists across runs, `set -l` is block-local, unscoped `set` keeps the existing scope
+    - `set -e name` erases, `set -q name` queries, `set -a`/`-p` append/prepend
+    - `$status` exposes the last command status; `$argv` holds function arguments
+    - unquoted list expansion yields one argument per element; quoted expansion joins with spaces; empty lists elide the word
 - command substitution:
-    - `(echo subdir)` can be used as an argument
-    - nested substitutions are supported
+    - `(echo subdir)` and `$(echo subdir)` can be used as arguments
+    - `$(cmd)` also works inside double quotes and preserves inner newlines
+    - unquoted substitutions split output lines into arguments; output can be sliced (`(cmd)[2]`)
 - script statements:
     - newline and semicolon statement separators
-    - `and` and `or` chain statements based on previous status
+    - `and`/`or` keywords and `&&`/`||` combiners chain on the previous status
+    - `not`/`!` negate a job's status
+    - `if`/`else if`/`else`, `while`, `for ... in`, and `begin ... end` blocks with `break`/`continue`
+    - `function name [-a names] ... end` defines functions with `$argv` and `return`
+    - `name=value command` scopes an assignment to a single command
 - quoting and expansion:
     - quoted wildcard text is treated literally
     - unquoted wildcard text is expanded for in-scope path arguments
@@ -106,11 +117,14 @@ Filesystem/path commands:
 
 Script builtins:
 
+- count
 - echo
+- false
 - read
 - set
 - string
-- test
+- test (and its `[` alias)
+- true
 
 Symlink-related command behavior:
 

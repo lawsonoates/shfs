@@ -31,18 +31,19 @@ import { touch } from '../operator/touch/touch';
 import { createTreeResolvedArgs, runTreeCommand } from '../operator/tree/tree';
 import { runWcCommand } from '../operator/wc/wc';
 import { runXargsCommand } from '../operator/xargs/xargs';
-import type { Record as ShellRecord } from '../record';
+import { formatRecord, type Record as ShellRecord } from '../record';
 import type { Stream } from '../stream';
 import { BufferedShellOutput, createShellInput } from './io';
 import {
 	evaluateExpandedPathWordsEffect,
 	evaluateExpandedSinglePathEffect,
 	evaluateExpandedWordsEffect,
+	expandWordToValuesEffect,
 	resolvePathFromCwd,
 	resolvePathsFromCwd,
 } from './path';
 import { files } from './producers';
-import { fromRecordGenerator, type RecordStream } from './record-stream';
+import { empty, fromRecordGenerator, type RecordStream } from './record-stream';
 import { toFormattedLineStream } from './records';
 import {
 	resolveInputRedirectEffect,
@@ -78,8 +79,11 @@ const ACTION_COMMANDS = ['cd', 'cp', 'mkdir', 'mv', 'rm', 'touch'] as const;
 const ACTION_COMMAND_SET = new Set<StepIR['cmd']>(ACTION_COMMANDS);
 const TRAILING_SLASH_REGEX = /\/+$/;
 const STREAM_COMMANDS = [
+	'call',
 	'cat',
+	'count',
 	'echo',
+	'false',
 	'find',
 	'grep',
 	'head',
@@ -92,6 +96,7 @@ const STREAM_COMMANDS = [
 	'tail',
 	'test',
 	'tree',
+	'true',
 	'xargs',
 	'wc',
 ] as const;
@@ -365,6 +370,10 @@ function isActionStep(step: StepIR): step is ActionStep {
 	return ACTION_COMMAND_SET.has(step.cmd);
 }
 
+function has(command: string): boolean {
+	return commands.has(command as StepIR['cmd']);
+}
+
 function executeStep(params: ExecuteStreamStepParams): RecordStream;
 function executeStep(
 	params: ExecuteActionStepParams
@@ -382,6 +391,7 @@ export const CommandRegistry = {
 	executeStep,
 	getEffect,
 	getStream,
+	has,
 	isActionStep,
 	register,
 };
@@ -920,6 +930,86 @@ CommandRegistry.register('string', {
 	handler: ({ step, fs, input, context }) => {
 		return fromRecordGenerator(
 			string(createBuiltinRuntime(fs, context, input), step.args)
+		);
+	},
+});
+
+CommandRegistry.register('true', {
+	kind: 'stream',
+	handler: ({ context }) => {
+		context.status = 0;
+		return empty();
+	},
+});
+
+CommandRegistry.register('false', {
+	kind: 'stream',
+	handler: ({ context }) => {
+		context.status = 1;
+		return empty();
+	},
+});
+
+CommandRegistry.register('count', {
+	kind: 'stream',
+	handler: ({ step, fs, input, context }) => {
+		return fromRecordGenerator(
+			(async function* (): Stream<ShellRecord> {
+				const values: string[] = [];
+				for (const word of step.args.values) {
+					const expanded = await runOrReport(
+						expandWordToValuesEffect(word, fs, context, {
+							command: 'count',
+							emptyGlobOk: true,
+						}),
+						context
+					);
+					if (!expanded.ok) {
+						return;
+					}
+					values.push(...expanded.value);
+				}
+				if (step.args.values.length === 0 && input) {
+					for await (const record of input) {
+						values.push(formatRecord(record));
+					}
+				}
+				yield {
+					kind: 'line',
+					text: String(values.length),
+				} as const;
+				context.status = values.length > 0 ? 0 : 1;
+			})()
+		);
+	},
+});
+
+CommandRegistry.register('call', {
+	kind: 'stream',
+	handler: ({ step, fs, context }) => {
+		return fromRecordGenerator(
+			(async function* (): Stream<ShellRecord> {
+				const definition = context.functions.get(step.args.name);
+				if (!definition) {
+					context.status = 127;
+					context.stderr.append(`Unknown command: ${step.args.name}`);
+					return;
+				}
+				const args = await runOrReport(
+					evaluateExpandedWordsEffect(step.args.words, fs, context),
+					context
+				);
+				if (!args.ok) {
+					return;
+				}
+				const executeModule = await import('./execute');
+				yield* executeModule.runFunctionCall(
+					definition,
+					args.value,
+					fs,
+					context
+				);
+			})()
 		);
 	},
 });

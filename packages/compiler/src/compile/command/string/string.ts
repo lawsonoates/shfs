@@ -1,5 +1,5 @@
 import { Result } from 'better-result';
-import { CompileError, createCommandDiagnostic } from '../../../diagnostic';
+import type { CompileError } from '../../../diagnostic';
 import type { SimpleCommandIR, StepIR } from '../../../ir';
 
 export function compileString(cmd: SimpleCommandIR): StepIR {
@@ -12,24 +12,13 @@ export function compileString(cmd: SimpleCommandIR): StepIR {
 
 export const compileStringEffect: (
 	cmd: SimpleCommandIR
-) => Result<StepIR, CompileError> = (cmd) =>
-	Result.gen(function* () {
-		const [subcommand, ...operands] = cmd.args;
-		if (!subcommand) {
-			return yield* new CompileError(
-				createCommandDiagnostic(
-					'string',
-					'missing-subcommand',
-					'string requires a subcommand'
-				)
-			);
-		}
-
-		return Result.ok({
-			cmd: 'string',
-			args: {
-				subcommand,
-				operands,
-			},
-		} as const satisfies StepIR);
-	});
+) => Result<StepIR, CompileError> = (cmd) => {
+	const [subcommand, ...operands] = cmd.args;
+	return Result.ok({
+		cmd: 'string',
+		args: {
+			subcommand: subcommand ?? null,
+			operands,
+		},
+	} as const satisfies StepIR);
+};

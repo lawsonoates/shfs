@@ -10,6 +10,7 @@ import { CompileError, createCommandDiagnostic } from '../../diagnostic';
 import type { SimpleCommandIR, StepIR } from '../../ir';
 import { compileCatEffect } from './cat/cat';
 import { compileCdEffect } from './cd/cd';
+import { compileCountEffect } from './count/count';
 import { compileCpEffect } from './cp/cp';
 import { compileEcho } from './echo/echo';
 import { compileFind } from './find/find';
@@ -25,9 +26,10 @@ import { compileSetEffect } from './set/set';
 import { compileSort } from './sort/sort';
 import { compileStringEffect } from './string/string';
 import { compileTailEffect } from './tail/tail';
-import { compileTestEffect } from './test/test';
+import { compileBracketTestEffect, compileTestEffect } from './test/test';
 import { compileTouchEffect } from './touch/touch';
 import { compileTreeEffect } from './tree/tree';
+import { compileFalseEffect, compileTrueEffect } from './true/true';
 import { compileWcEffect } from './wc/wc';
 import { compileXargsEffect } from './xargs/xargs';
 
@@ -41,10 +43,13 @@ export type Handler = (cmd: SimpleCommandIR) => Result<StepIR, CompileError>;
  * Registry of command handlers for the compiler.
  */
 const handlers: Record<string, Handler> = {
+	'[': compileBracketTestEffect,
 	cat: compileCatEffect,
 	cd: compileCdEffect,
+	count: compileCountEffect,
 	cp: compileCpEffect,
 	echo: (cmd) => Result.ok(compileEcho(cmd)),
+	false: compileFalseEffect,
 	find: (cmd) => Result.ok(compileFind(cmd)),
 	grep: (cmd) => Result.ok(compileGrep(cmd)),
 	head: compileHeadEffect,
@@ -61,6 +66,7 @@ const handlers: Record<string, Handler> = {
 	test: compileTestEffect,
 	touch: compileTouchEffect,
 	tree: compileTreeEffect,
+	true: compileTrueEffect,
 	wc: compileWcEffect,
 	xargs: compileXargsEffect,
 };

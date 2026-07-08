@@ -1,3 +1,4 @@
+import type { StatementIR } from '@shfs/compiler';
 import type { ShellErrorCause, ShellResult } from '../diagnostics';
 import type { ShellInput, ShellIo } from '../execute/io';
 import type { FS } from '../fs/fs';
@@ -5,12 +6,32 @@ import type { Record as ShellRecord } from '../record';
 import type { OutputStream } from '../stderr';
 import type { Stream } from '../stream';
 
+/**
+ * One frame of local variables. Function calls push a barrier frame:
+ * lookups stop at the barrier and fall through to globals only.
+ */
+export interface VariableFrame {
+	vars: Map<string, string[]>;
+	barrier?: boolean;
+}
+
+/**
+ * A runtime-defined fish function.
+ */
+export interface FunctionDefinition {
+	name: string;
+	argumentNames: string[];
+	body: StatementIR[];
+}
+
 export interface BuiltinContext {
 	cwd: string;
 	status: number;
 	stderr: OutputStream;
-	globalVars: Map<string, string>;
-	localVars: Map<string, string>;
+	globalVars: Map<string, string[]>;
+	/** Local variable frames, innermost last. */
+	scopes: VariableFrame[];
+	functions: Map<string, FunctionDefinition>;
 }
 
 export interface BuiltinRuntime {

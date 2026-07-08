@@ -6,16 +6,38 @@ It is not a full fish shell and does not target host OS parity.
 ## Included (must support)
 
 - Variable expansion and assignment:
-  - `$var`
-  - `set` with local/global scope (`-l`, `-g`)
+  - `$var` with fish list semantics: element counts (`count`), indexing and
+    slicing (`$var[1]`, `$var[2..-1]`, multiple ranges, open ranges), quoted
+    join vs unquoted per-element expansion, empty-list word elision, and
+    cartesian products of adjacent expansions
+  - `set` with `-l`/`-g`/unscoped assignment, erase (`-e`), query (`-q`),
+    append/prepend (`-a`/`-p`), and index/slice assignment and erasure
+  - command-scoped assignment prefixes (`name=value command`, PATH-like
+    colon splitting)
+  - `$status`, function-local `$argv`; `status` is read-only
 - Command substitution:
-  - `(cmd)` executes and captures output
+  - `(cmd)` and `$(cmd)` execute and capture output; `$(cmd)` also inside
+    double quotes; unquoted substitutions split output lines into arguments;
+    substitution output can be sliced (`(cmd)[2]`)
 - Multi-statement scripts:
   - newline and `;` statement chaining
-- Boolean chaining and status:
-  - `and`, `or`, `$status`
+- Boolean chaining, combiners, and status:
+  - `and`, `or`, `&&`, `||` (with newline continuation), `not`/`!` negation,
+    `$status`
+- Control flow and blocks:
+  - `if`/`else if`/`else`/`end`, `while`, `for ... in`, `begin ... end`,
+    `break`, `continue` (fish block scoping for local variables)
+- Functions:
+  - `function name [-a names]`/`end`, `$argv`, `return [status]`,
+    function-local scope with caller-local isolation
 - Script-core builtins:
-  - `test`, `echo`, `read`, `string`
+  - `test` (and its `[` alias), `echo`, `read`, `string`, `true`, `false`,
+    `count`
+  - `test` supports string/numeric/file predicates, `!`, `-a`/`-o`, and
+    fish's `test-require-arg` behavior (missing operands are errors; bare
+    `-n`/`-z` treat the missing operand as empty)
+  - `string` supports `match`/`replace` glob basics plus `length`, `sub`,
+    `split`, `join`, `trim`, `repeat`, `lower`, `upper`
 - Core path semantics:
   - `cd` / `pwd` with `.`, `..`, absolute and relative path handling
 - Recursive file discovery with `find`:
@@ -63,8 +85,11 @@ It is not a full fish shell and does not target host OS parity.
 
 ## Not Included (explicitly out of scope)
 
-- Control flow blocks and function definitions:
-  - `if` / `else` / `end`, `for` / `end`, `function` / `end`
+- `switch` / `case`, `eval`, brace expansion (`{a,b}`), tilde expansion,
+  and indirect variable expansion (`$$name`)
+- Exported (`-x`/`-u`) and universal (`-U`) variables, variable event hooks
+- Blocks as pipeline components or redirection targets
+  (`begin ... end | cmd`, `begin ... end > file`)
 - `CDPATH`
 - Symlink support and symlink-focused commands/behavior
   - this remains out of scope even when a glob would otherwise match/traverse symlinks
@@ -86,7 +111,8 @@ It is not a full fish shell and does not target host OS parity.
     merge-only mode, compression/temp/parallel tuning, debug annotations,
     `--files0-from`, `-z`, and `-o` output-file behavior are out of scope
 - Permission model beyond basic virtual FS behavior
-- `env KEY=... cmd` scoped environment injection
+- The `env` command (command-scoped assignment uses the fish
+  `name=value cmd` form instead)
 - Interactive shell features:
   - completion (`complete -C`), prompt/history behavior
   - dir stack UX (`prevd`, `nextd`)
