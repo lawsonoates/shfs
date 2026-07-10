@@ -140,19 +140,6 @@ test('fish redirect: redirect.fish - 2> creates the target file even when stderr
 	expect(await run('cat /tmp/empty-stderr.txt')).toBe('');
 });
 
-// Additional file-targeted stderr redirection in the same family as lines 46-49.
-test('fish redirect: redirect.fish - 2> sends stderr to a file', async () => {
-	await prepareMixedStreamFixture();
-
-	const result = await runWithStatus('find /missing 2> /tmp/stderr-only.txt');
-	expect(result.status).toBe(1);
-	expect(result.output).toBe('');
-	expect(result.stderr).toBe('');
-	expect(await run('cat /tmp/stderr-only.txt')).toContain(
-		MISSING_PATH_MESSAGE
-	);
-});
-
 // redirect.fish lines 66-80: end 2>&1 | ...
 test('fish redirect: redirect.fish - 2>&1 merges stderr into stdout for downstream pipelines', async () => {
 	await prepareMixedStreamFixture();

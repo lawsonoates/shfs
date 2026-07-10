@@ -67,6 +67,7 @@ interface ExecuteStreamStepParams {
 	input: Stream<ShellRecord> | null;
 	context: ExecuteStepContext;
 	resolvedOutputRedirectPath?: string;
+	vars?: ReadonlyMap<string, string[]>;
 }
 
 interface ExecuteActionStepParams {
@@ -140,6 +141,7 @@ type StreamCommandHandler<TCommand extends StreamCommand = StreamCommand> =
 		input: Stream<ShellRecord> | null;
 		context: ExecuteStepContext;
 		resolvedOutputRedirectPath?: string;
+		vars?: ReadonlyMap<string, string[]>;
 	}) => RecordStream;
 
 type ActionCommandHandler<TCommand extends ActionCommand = ActionCommand> =
@@ -240,6 +242,7 @@ function executeStreamStep({
 	input,
 	context,
 	resolvedOutputRedirectPath,
+	vars,
 }: ExecuteStreamStepParams): RecordStream {
 	const verificationError = verifyCommandRegistries();
 	if (verificationError) {
@@ -261,6 +264,7 @@ function executeStreamStep({
 		input,
 		context,
 		resolvedOutputRedirectPath,
+		vars,
 	});
 }
 
@@ -986,7 +990,7 @@ CommandRegistry.register('count', {
 
 CommandRegistry.register('call', {
 	kind: 'stream',
-	handler: ({ step, fs, context }) => {
+	handler: ({ step, fs, input, context, vars }) => {
 		return fromRecordGenerator(
 			(async function* (): Stream<ShellRecord> {
 				const definition = context.functions.get(step.args.name);
@@ -1002,12 +1006,33 @@ CommandRegistry.register('call', {
 				if (!args.ok) {
 					return;
 				}
+				const resolved = await runOrReport(
+					resolveInputRedirectEffect(
+						step.args.name,
+						step.redirections,
+						fs,
+						context
+					),
+					context
+				);
+				if (!resolved.ok) {
+					return;
+				}
+				let source = input;
+				if (resolved.value.closed) {
+					source = null;
+				}
+				if (!resolved.value.closed && resolved.value.path) {
+					source = lineRecordsFromPath(fs, resolved.value.path);
+				}
 				const executeModule = await import('./execute');
 				yield* executeModule.runFunctionCall(
 					definition,
 					args.value,
 					fs,
-					context
+					context,
+					source,
+					vars
 				);
 			})()
 		);

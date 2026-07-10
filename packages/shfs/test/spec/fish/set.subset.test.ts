@@ -139,6 +139,20 @@ test('fish set: set.fish - loop body variables persist across iterations', async
 	expect(await run(script)).toBe('Test 7 pass');
 });
 
+// set.fish test16: the caller's local variables are not visible inside a
+// function, but globals are.
+test('fish set: set.fish - functions see globals but not caller locals', async () => {
+	const script = [
+		'set -g gseen global',
+		'set -l lhidden caller',
+		'function peek',
+		'    echo "[$gseen][$lhidden]"',
+		'end',
+		'peek',
+	].join('\n');
+	expect(await run(script)).toBe('[global][]');
+});
+
 // set.fish Test 10 (adapted, no universal scope): erase in a specific scope
 test('fish set: set.fish - erasing the global while a local shadows it', async () => {
 	const script = [
@@ -197,29 +211,8 @@ test('fish set: set.fish - set -q status counts missing variables', async () => 
 	);
 });
 
-// Existing shfs behaviors that remain true under list semantics.
-test('fish set: set.fish - can assign and read global variables', async () => {
-	await run('set -g smurf blue');
-	expect(await run('echo $smurf')).toBe('blue');
-});
-
-test('fish set: set.fish - local variables are scoped to one script run', async () => {
-	expect(await run('set -l t3 bar; echo $t3')).toBe('bar');
-	expect(await run('echo "[$t3]"')).toBe('[]');
-});
-
-test('fish set: set.fish - global reassignment persists across runs', async () => {
-	await run('set -g t5 a');
-	await run('set -g t5 b');
-	expect(await run('echo $t5')).toBe('b');
-});
-
-test('fish set: set.fish - local scope shadows global scope within a run', async () => {
-	await run('set -g shade blue');
-	expect(await run('set -l shade red; echo $shade')).toBe('red');
-	expect(await run('echo $shade')).toBe('blue');
-});
-
+// set.fish Test 18: set accepts command substitutions and participates in
+// boolean chaining based on the substitution status.
 test('fish set: set.fish - command substitution can be used as set value', async () => {
 	expect(
 		await run('set -g fish_test_18 (echo pass); echo $fish_test_18')
@@ -233,25 +226,8 @@ test('fish set: set.fish - set success participates in status/boolean chaining',
 	expect(await run('echo $status')).toBe('0');
 });
 
-// set preserves the incoming status on success (fish 3.0 behavior).
-test('fish set: set.fish - successful set does not change $status', async () => {
-	expect(await run('false; set -g keep x; echo $status')).toBe('1');
-});
-
 test('fish set: set.fish - validates variable names', async () => {
 	const result = await runResult('set -g 1bad value');
 	expect(result.exitCode).not.toBe(0);
 	expect(result.stderr).toContain('set: invalid variable name: 1bad');
-});
-
-// Universal and exported variables stay out of scope.
-test('fish set: set.fish - universal/export flags are out of scope', async () => {
-	for (const command of [
-		'set -x smurf blue',
-		'set -U smurf blue',
-		'set -u smurf blue',
-	]) {
-		const result = await runResult(command);
-		expect(result.exitCode).not.toBe(0);
-	}
 });

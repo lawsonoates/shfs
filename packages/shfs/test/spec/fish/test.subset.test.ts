@@ -33,7 +33,7 @@ async function runResult(command: string) {
 	};
 }
 
-// Numeric comparisons (used throughout upstream checks, e.g. andandoror.fish).
+// test.fish: numeric comparison operators.
 test('fish test: test.fish - numeric comparison operators', async () => {
 	expect(await run('test 5 -eq 5; echo $status')).toBe('0');
 	expect(await run('test 5 -ne 5; echo $status')).toBe('1');

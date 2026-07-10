@@ -157,3 +157,14 @@ test('fish loops: loops.fish - continue in a while condition continues the outer
 	].join('\n');
 	expect(await run(script)).toBe('');
 });
+
+// loops.fish: for loops with read-only vars is an error (#4342)
+test('fish loops: loops.fish - read-only loop variable is an error', async () => {
+	const result = await runResult(
+		'for status in a b c\n    echo $status\nend'
+	);
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain(
+		'for: status: cannot overwrite read-only variable'
+	);
+});

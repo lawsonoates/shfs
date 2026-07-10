@@ -5,6 +5,9 @@ This inventory compares `shfs` with upstream fish-shell `tests/checks` from
 on 2026-07-07. It only lists behavior fish has that `shfs` is missing or only
 partially implements.
 
+For the follow-up audit of interactions across functions, blocks, pipelines,
+substitutions, and child commands, see `docs/execution-boundary-audit.md`.
+
 > **Update 2026-07-08**: the fish scripting subset landed, resolving items
 > 1-6 and large parts of 7, 10, 19, 21, and 22: `&&`/`||`, `not`/`!`,
 > `begin`/`if`/`while`/`for` blocks, functions with `$argv`/`return`,
@@ -18,14 +21,14 @@ partially implements.
 > job control, external processes, interactive UX, fish-exact diagnostics,
 > and so on) stay out of scope.
 
-Local `shfs` fish-derived coverage directly ports 20 of 208 upstream check
+Local `shfs` fish-derived coverage directly ports 23 of 208 upstream check
 scripts: `andandoror.fish`, `andor.fish`, `basic.fish`, `cd.fish`,
-`cmdsub.fish`, `expansion.fish`, `for.fish`, `function.fish` (with
-`function-definition.fish`), `glob.fish`, `loops.fish`, `not.fish`,
-`read.fish`, `redirect.fish`, `return.fish`, `set.fish`, `slices.fish`,
-`string.fish`, `test.fish`, `variable-assignment.fish`, and
-`zero_based_array.fish`. Those ports are subset ports, not full parity
-ports.
+`cmdsub.fish`, `disown-parent.fish`, `expansion.fish`, `fish_add_path.fish`,
+`for.fish`, `function-definition.fish`, `function.fish`, `glob.fish`,
+`loops.fish`, `not.fish`, `read.fish`, `redirect.fish`, `return.fish`,
+`set.fish`, `slices.fish`, `string.fish`, `test.fish`,
+`variable-assignment.fish`, and `zero_based_array.fish`. Those ports are subset
+ports, not full parity ports.
 
 1. `&&` and `||` command combiners are missing. `shfs` supports `; and` and
    `; or`, but not symbolic combiners, continuation after combiners, or use of

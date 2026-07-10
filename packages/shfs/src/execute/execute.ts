@@ -20,6 +20,7 @@ import type { FS } from '../fs/fs';
 import { formatRecord, type Record as ShellRecord } from '../record';
 import { BufferedOutputStream, type OutputStream } from '../stderr';
 import type { Stream } from '../stream';
+import { createShellInput, type ShellInput } from './io';
 import {
 	evaluateExpandedSinglePathEffect,
 	expandWordToValuesEffect,
@@ -49,6 +50,7 @@ export interface ExecuteContext {
 	status?: number;
 	stderr?: OutputStream;
 	globalVars?: Map<string, string[]>;
+	stdin?: ShellInput;
 	scopes?: VariableFrame[];
 	functions?: Map<string, FunctionDefinition>;
 }
@@ -542,15 +544,22 @@ export async function* runFunctionCall(
 	definition: FunctionDefinition,
 	args: readonly string[],
 	fs: FS,
-	context: NormalizedExecuteContext
+	context: NormalizedExecuteContext,
+	input: Stream<ShellRecord> | null = null,
+	vars?: ReadonlyMap<string, string[]>
 ): AsyncGenerator<ShellRecord, void> {
-	const vars = new Map<string, string[]>();
-	vars.set('argv', [...args]);
+	const local = new Map<string, string[]>();
+	for (const [name, values] of vars ?? []) {
+		local.set(name, [...values]);
+	}
+	local.set('argv', [...args]);
 	definition.argumentNames.forEach((name, index) => {
 		const value = args[index];
-		vars.set(name, value === undefined ? [] : [value]);
+		local.set(name, value === undefined ? [] : [value]);
 	});
-	context.scopes.push({ barrier: true, vars });
+	const stdin = context.stdin;
+	context.stdin = input ? createShellInput(input) : undefined;
+	context.scopes.push({ barrier: true, vars: local });
 	try {
 		const signal = yield* runStatementList(definition.body, fs, context);
 		if (signal.kind === 'break' || signal.kind === 'continue') {
@@ -559,6 +568,7 @@ export async function* runFunctionCall(
 		}
 	} finally {
 		context.scopes.pop();
+		context.stdin = stdin;
 	}
 }
 
@@ -718,10 +728,13 @@ async function executeStreamStep(params: {
 				fs,
 				input:
 					inputRecords === null
-						? null
+						? (childContext.stdin?.records() ?? null)
 						: recordsToStream(inputRecords),
 				context: childContext,
 				resolvedOutputRedirectPath,
+				vars: framePushed
+					? childContext.scopes.at(-1)?.vars
+					: undefined,
 			});
 			const collected = await runOrReport(
 				collectRecordStream(stepOutput),
@@ -773,6 +786,7 @@ function createChildContext(
 		scopes: context.scopes,
 		status: context.status,
 		stderr: new BufferedOutputStream(),
+		stdin: context.stdin,
 	};
 }
 

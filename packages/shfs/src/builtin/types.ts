@@ -29,6 +29,8 @@ export interface BuiltinContext {
 	status: number;
 	stderr: OutputStream;
 	globalVars: Map<string, string[]>;
+	/** Shared stdin cursor inherited by nested function statements. */
+	stdin?: ShellInput;
 	/** Local variable frames, innermost last. */
 	scopes: VariableFrame[];
 	functions: Map<string, FunctionDefinition>;

@@ -22,15 +22,6 @@ async function run(command: string): Promise<string> {
 	return await shell.$`${command}`.text();
 }
 
-async function runResult(command: string) {
-	const result = await shell.$`${command}`.nothrow();
-	return {
-		exitCode: result.exitCode,
-		stderr: result.stderr.toString(),
-		stdout: result.text(),
-	};
-}
-
 // Basic iteration order.
 test('fish for: for.fish - iterates values in order', async () => {
 	expect(await run('for i in 1 2 3\n    echo $i\nend')).toBe('1\n2\n3');
@@ -76,17 +67,6 @@ test('fish for: for.fish - body-local set resets on each iteration', async () =>
 	].join('\n');
 	expect(await run(script)).toBe(
 		'foo value is 3\nfoo value is bar\nfoo value is 3'
-	);
-});
-
-// loops.fish: for loops with read-only vars is an error (#4342)
-test('fish for: for.fish + loops.fish - read-only loop variable is an error', async () => {
-	const result = await runResult(
-		'for status in a b c\n    echo $status\nend'
-	);
-	expect(result.exitCode).not.toBe(0);
-	expect(result.stderr).toContain(
-		'for: status: cannot overwrite read-only variable'
 	);
 });
 
