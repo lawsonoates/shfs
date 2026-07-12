@@ -563,6 +563,7 @@ function expandGlobProductsEffect(
 ): ShellResult<string[], ShellErrorCause> {
 	return Result.gen(async function* () {
 		const matches: string[] = [];
+		let firstUnmatchedPattern: string | null = null;
 		for (const pattern of products) {
 			const globbed = yield* await expandGlobPatternEffect(
 				pattern,
@@ -570,18 +571,26 @@ function expandGlobProductsEffect(
 				context
 			);
 			if (globbed.length === 0) {
-				if (options?.emptyGlobOk) {
-					continue;
-				}
-				return yield* createDiagnosticError(
-					createExpansionDiagnostic(
-						options?.command ?? '<glob>',
-						'no-match',
-						`${NO_GLOB_MATCH_MESSAGE}: ${pattern}`
-					)
-				);
+				firstUnmatchedPattern ??= pattern;
+				continue;
 			}
 			matches.push(...globbed);
+		}
+		// Fish semantics: when variable expansion produces several glob
+		// products, one unmatched product does not fail the word as long as
+		// another product matches (tests/checks/wildcard.fish).
+		if (
+			matches.length === 0 &&
+			firstUnmatchedPattern !== null &&
+			!options?.emptyGlobOk
+		) {
+			return yield* createDiagnosticError(
+				createExpansionDiagnostic(
+					options?.command ?? '<glob>',
+					'no-match',
+					`${NO_GLOB_MATCH_MESSAGE}: ${firstUnmatchedPattern}`
+				)
+			);
 		}
 		return Result.ok(matches);
 	});

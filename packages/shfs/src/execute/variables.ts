@@ -118,7 +118,15 @@ export function setVariable(
 		context.globalVars.set(name, values);
 		return;
 	}
-	functionScopeFrame(context).vars.set(name, values);
+	const frame = functionScopeFrame(context);
+	if (frame === context.scopes[0] && !frame.barrier) {
+		// Outside functions, fish's function-less scope is the global scope,
+		// so top-level unscoped `set` persists across invocations
+		// (tests/checks/command-vars-persist.fish).
+		context.globalVars.set(name, values);
+		return;
+	}
+	frame.vars.set(name, values);
 }
 
 /**

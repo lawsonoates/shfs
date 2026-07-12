@@ -98,3 +98,19 @@ test('fish return: return.fish - return with a non-integer is an error', async (
 	expect(result.stdout).toBe('');
 	expect(result.stderr).toContain('return: abc: invalid integer');
 });
+
+// return.fish:145-156: negative return values wrap but never map to a
+// $status of 0. Reduced from the `seq -- -550 -1` sweep to representative
+// values, including the -256 multiple that wraps to 255.
+test('fish return: return.fish - negative return values never map to 0', async () => {
+	const script = [
+		'function empty_return',
+		'    return $argv[1]',
+		'end',
+		'for i in -5 -256 -512 -550',
+		'    empty_return $i',
+		'    echo $status',
+		'end',
+	].join('\n');
+	expect(await run(script)).toBe('251\n255\n255\n218');
+});

@@ -168,3 +168,38 @@ test('fish loops: loops.fish - read-only loop variable is an error', async () =>
 		'for: status: cannot overwrite read-only variable'
 	);
 });
+
+// loops.fish:122-131: the loop variable reuses an existing local and remains
+// visible after the loop. Reduced: `set --show` is out of scope, so the value
+// is observed with echo.
+test('fish loops: loops.fish - loop variable updates an existing block local', async () => {
+	const script = [
+		'begin',
+		'    set -l loop_var initial-value',
+		'    for loop_var in a b c',
+		'    end',
+		'    echo $loop_var',
+		'end',
+	].join('\n');
+	expect(await run(script)).toBe('c');
+});
+
+// loops.fish:133-145: inside a function the loop variable is function-local
+// and keeps its break value; the global is untouched. Reduced from
+// `set --show` to echo.
+test('fish loops: loops.fish - function loop variable shadows the global', async () => {
+	const script = [
+		'set -g loop_var global_val',
+		'function loop_test',
+		'    for loop_var in a b c',
+		'        if test $loop_var = b',
+		'            break',
+		'        end',
+		'    end',
+		'    echo $loop_var',
+		'end',
+		'loop_test',
+		'echo $loop_var',
+	].join('\n');
+	expect(await run(script)).toBe('b\nglobal_val');
+});

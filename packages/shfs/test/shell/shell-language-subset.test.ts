@@ -15,11 +15,25 @@ async function run(command: string): Promise<string> {
 	return await shell.$`${command}`.text();
 }
 
-test('read variables remain local to one shell API invocation', async () => {
-	expect(await run('echo scoped | read local_only; echo $local_only')).toBe(
+// Fish scoping: without an explicit scope, a new variable set outside a
+// function lands in the global scope (fish set.rst; read follows set's
+// rules), so it persists across shell API invocations.
+test('read variables set outside functions are global and persist', async () => {
+	expect(await run('echo scoped | read top_level; echo $top_level')).toBe(
 		'scoped'
 	);
-	expect(await run('echo $local_only')).toBe('');
+	expect(await run('echo $top_level')).toBe('scoped');
+});
+
+test('read variables inside functions stay function-local', async () => {
+	const script = [
+		'function consume',
+		'    read inner',
+		'end',
+		'echo hidden | consume',
+		'echo "[$inner]"',
+	].join('\n');
+	expect(await run(script)).toBe('[]');
 });
 
 test('the read subset requires exactly one variable name', async () => {

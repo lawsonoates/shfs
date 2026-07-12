@@ -535,9 +535,12 @@ async function runReturnStatement(
 			return { kind: 'return' };
 		}
 		const parsed = Number.parseInt(value, 10);
-		context.status =
+		const wrapped =
 			((parsed % RETURN_STATUS_MODULO) + RETURN_STATUS_MODULO) %
 			RETURN_STATUS_MODULO;
+		// Fish semantics: a negative return never maps to success
+		// (tests/checks/return.fish); multiples of -256 become 255.
+		context.status = parsed < 0 && wrapped === 0 ? 255 : wrapped;
 	}
 	return { kind: 'return' };
 }
@@ -566,6 +569,9 @@ export async function* runFunctionCall(
 	const stdin = context.stdin;
 	context.stdin = input ? createShellInput(input) : undefined;
 	context.scopes.push({ barrier: true, vars: local });
+	// Fish semantics: functions do not preserve the caller's $status; a
+	// function with an empty body returns 0 (tests/checks/empty.fish).
+	context.status = 0;
 	try {
 		const signal = yield* runStatementList(definition.body, fs, context);
 		if (signal.kind === 'break' || signal.kind === 'continue') {

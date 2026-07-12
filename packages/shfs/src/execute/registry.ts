@@ -973,7 +973,9 @@ CommandRegistry.register('count', {
 					}
 					values.push(...expanded.value);
 				}
-				if (step.args.values.length === 0 && input) {
+				// Fish counts arguments plus stdin lines when both are present
+				// (tests/checks/count.fish).
+				if (input) {
 					for await (const record of input) {
 						values.push(formatRecord(record));
 					}

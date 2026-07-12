@@ -251,3 +251,19 @@ test('fish redirect: redirect.fish - <?&fail is rejected', async () => {
 	expect(result.status).toBe(1);
 	expect(result.stderr).toContain('&');
 });
+
+// redirect.fish lines 51-61: an output redirect on a function call captures
+// the callee's output, while the outer call still writes to stdout.
+test('fish redirect: redirect.fish - output redirect on a recursive function call', async () => {
+	const script = [
+		'function redir_to_argv1',
+		'    if set -q argv[1]',
+		'        redir_to_argv1 > $argv[1]',
+		'    end',
+		'    echo foo',
+		'end',
+		'redir_to_argv1 /bar',
+		'cat /bar',
+	].join('\n');
+	expect(await run(script)).toBe('foo\nfoo');
+});

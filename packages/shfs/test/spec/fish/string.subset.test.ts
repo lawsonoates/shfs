@@ -48,6 +48,27 @@ test('fish string: string.fish - replace can read formatted stdin lines', async 
 	expect(await run('echo a.b | string replace . -')).toBe('a-b');
 });
 
+// string.fish:499-500: replace rewrites each matching argument and passes
+// non-matching arguments through unchanged.
+test('fish string: string.fish - replace passes non-matching values through', async () => {
+	expect(await run('string replace 3rd last 1st 2nd 3rd')).toBe(
+		'1st\n2nd\nlast'
+	);
+});
+
+// string.fish:504-505: -a replaces every occurrence.
+test('fish string: string.fish - replace -a replaces all occurrences', async () => {
+	expect(await run('string replace -a " " _ "spaces to underscores"')).toBe(
+		'spaces_to_underscores'
+	);
+});
+
+// string.fish:504-505 (contrast): without -a only the first occurrence is
+// replaced, per fish `string replace` semantics.
+test('fish string: string.fish - replace without -a replaces the first occurrence only', async () => {
+	expect(await run('string replace a X aaa')).toBe('Xaa');
+});
+
 test('fish string: string.fish - match supports fish-style wildcard patterns', async () => {
 	expect(await run('string match "a*b" axxb')).toBe('axxb');
 });
