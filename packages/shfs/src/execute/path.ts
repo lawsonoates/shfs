@@ -3,7 +3,6 @@ import {
 	createExpansionDiagnostic,
 	type ExpandedWord,
 	type ExpandedWordPart,
-	expandedWordHasGlob,
 	expandedWordParts,
 	parse,
 } from '@shfs/compiler';
@@ -20,6 +19,7 @@ import {
 import type { FS } from '../fs/fs';
 import { formatRecord } from '../record';
 import { collectRecordStream, toShellFailure } from './record-stream';
+import { lookupVariable, selectByIndex } from './variables';
 
 function toShellErrorCause(cause: unknown): ShellErrorCause {
 	return toShellFailure(cause) as ShellErrorCause;
@@ -38,14 +38,17 @@ interface PendingDirectory {
 const MULTIPLE_SLASH_REGEX = /\/+/g;
 const ROOT_DIRECTORY = '/';
 const TRAILING_SLASH_REGEX = /\/+$/;
-const VARIABLE_REFERENCE_REGEX = /\$([A-Za-z_][A-Za-z0-9_]*)/g;
 const NO_GLOB_MATCH_MESSAGE = 'no matches found';
 
+/**
+ * Execute a command substitution and return its output lines.
+ * Trailing empty lines are dropped, mirroring fish's trailing-newline trim.
+ */
 function evaluateCommandSubstitutionEffect(
 	command: string,
 	fs: FS,
 	context: BuiltinContext
-): ShellResult<string, ShellErrorCause> {
+): ShellResult<string[], ShellErrorCause> {
 	return Result.gen(async function* () {
 		const parsed = yield* Result.mapError(
 			Result.try({ try: () => parse(command), catch: toShellErrorCause }),
@@ -65,29 +68,13 @@ function evaluateCommandSubstitutionEffect(
 			),
 			toShellErrorCause
 		);
-		return Result.ok(
-			records.map((record) => formatRecord(record)).join('\n')
+		const lines = records.flatMap((record) =>
+			formatRecord(record).split('\n')
 		);
-	});
-}
-
-function resolveVariable(
-	variableName: string,
-	context: BuiltinContext
-): string {
-	if (variableName === 'status') {
-		return String(context.status);
-	}
-	return (
-		context.localVars.get(variableName) ??
-		context.globalVars.get(variableName) ??
-		''
-	);
-}
-
-function expandVariables(input: string, context: BuiltinContext): string {
-	return input.replace(VARIABLE_REFERENCE_REGEX, (_full, variableName) => {
-		return resolveVariable(variableName, context);
+		while (lines.length > 0 && lines.at(-1) === '') {
+			lines.pop();
+		}
+		return Result.ok(lines);
 	});
 }
 
@@ -420,37 +407,7 @@ export const evaluateExpandedPathWordEffect: (
 	fs: FS,
 	context: BuiltinContext
 ) => ShellResult<string[], ShellErrorCause> = (command, word, fs, context) =>
-	Result.gen(async function* () {
-		if (!expandedWordHasGlob(word)) {
-			return Result.ok([
-				yield* await evaluateExpandedWordEffect(word, fs, context),
-			]);
-		}
-
-		const patternSegments: string[] = [];
-		for (const part of expandedWordParts(word)) {
-			patternSegments.push(
-				yield* await evaluateExpandedWordPartEffect(part, fs, context)
-			);
-		}
-
-		const pattern = patternSegments.join('');
-		const matches = yield* await expandGlobPatternEffect(
-			pattern,
-			fs,
-			context
-		);
-		if (matches.length === 0) {
-			return yield* createDiagnosticError(
-				createExpansionDiagnostic(
-					command,
-					'no-match',
-					`${NO_GLOB_MATCH_MESSAGE}: ${pattern}`
-				)
-			);
-		}
-		return Result.ok(matches);
-	});
+	expandWordToValuesEffect(word, fs, context, { command });
 
 export const evaluateExpandedSinglePathEffect: (
 	command: string,
@@ -502,7 +459,7 @@ export const evaluateExpandedWordsEffect: (
 		const resolvedWords: string[] = [];
 		for (const word of words) {
 			resolvedWords.push(
-				yield* await evaluateExpandedWordEffect(word, fs, context)
+				...(yield* await expandWordToValuesEffect(word, fs, context))
 			);
 		}
 		return Result.ok(resolvedWords);
@@ -520,39 +477,144 @@ export async function evaluateExpandedWord(
 	return result.value;
 }
 
+/**
+ * Expand a word to a single string. Words that expand to multiple values
+ * join with spaces (like a double-quoted fish expansion).
+ */
 export const evaluateExpandedWordEffect: (
 	word: ExpandedWord,
 	fs: FS,
 	context: BuiltinContext
 ) => ShellResult<string, ShellErrorCause> = (word, fs, context) =>
 	Result.gen(async function* () {
-		const segments: string[] = [];
-		for (const part of expandedWordParts(word)) {
-			segments.push(
-				yield* await evaluateExpandedWordPartEffect(part, fs, context)
-			);
-		}
-		return Result.ok(segments.join(''));
+		const values = yield* await expandWordToValuesEffect(word, fs, context);
+		return Result.ok(values.join(' '));
 	});
 
-function evaluateExpandedWordPartEffect(
+export interface ExpandWordOptions {
+	/** Command name used in glob no-match diagnostics. */
+	command?: string;
+	/** Expand unmatched globs to an empty list instead of failing. */
+	emptyGlobOk?: boolean;
+}
+
+/**
+ * Expand one word into its list of argument values (fish semantics):
+ *
+ * - unquoted list variables and command substitutions contribute one value
+ *   per element/line; quoted ones contribute a single joined value
+ * - adjacent parts combine as a cartesian product; an empty list factor
+ *   elides the entire word
+ * - words containing glob parts expand each product as a glob pattern
+ */
+export const expandWordToValuesEffect: (
+	word: ExpandedWord,
+	fs: FS,
+	context: BuiltinContext,
+	options?: ExpandWordOptions
+) => ShellResult<string[], ShellErrorCause> = (word, fs, context, options) =>
+	Result.gen(async function* () {
+		const parts = expandedWordParts(word);
+		const partCandidates: string[][] = [];
+		let hasGlob = false;
+
+		for (const part of parts) {
+			partCandidates.push(
+				yield* await expandPartToCandidatesEffect(part, fs, context)
+			);
+			if (part.kind === 'glob') {
+				hasGlob = true;
+			}
+		}
+
+		const products = cartesianProduct(partCandidates);
+		if (!hasGlob) {
+			return Result.ok(products);
+		}
+		return await expandGlobProductsEffect(products, fs, context, options);
+	});
+
+/**
+ * Combine per-part candidate lists left to right. An empty factor elides
+ * the entire word.
+ */
+function cartesianProduct(partCandidates: readonly string[][]): string[] {
+	let products: string[] = [''];
+	for (const candidates of partCandidates) {
+		if (candidates.length === 0) {
+			return [];
+		}
+		const next: string[] = [];
+		for (const product of products) {
+			for (const candidate of candidates) {
+				next.push(product + candidate);
+			}
+		}
+		products = next;
+	}
+	return products;
+}
+
+function expandGlobProductsEffect(
+	products: readonly string[],
+	fs: FS,
+	context: BuiltinContext,
+	options?: ExpandWordOptions
+): ShellResult<string[], ShellErrorCause> {
+	return Result.gen(async function* () {
+		const matches: string[] = [];
+		for (const pattern of products) {
+			const globbed = yield* await expandGlobPatternEffect(
+				pattern,
+				fs,
+				context
+			);
+			if (globbed.length === 0) {
+				if (options?.emptyGlobOk) {
+					continue;
+				}
+				return yield* createDiagnosticError(
+					createExpansionDiagnostic(
+						options?.command ?? '<glob>',
+						'no-match',
+						`${NO_GLOB_MATCH_MESSAGE}: ${pattern}`
+					)
+				);
+			}
+			matches.push(...globbed);
+		}
+		return Result.ok(matches);
+	});
+}
+
+function expandPartToCandidatesEffect(
 	part: ExpandedWordPart,
 	fs: FS,
 	context: BuiltinContext
-): ShellResult<string, ShellErrorCause> {
+): ShellResult<string[], ShellErrorCause> {
 	return Result.gen(async function* () {
 		switch (part.kind) {
 			case 'literal':
-				return Result.ok(expandVariables(part.value, context));
+				return Result.ok([part.value]);
 			case 'glob':
-				return Result.ok(expandVariables(part.pattern, context));
+				return Result.ok([part.pattern]);
+			case 'variable': {
+				let values = lookupVariable(context, part.name) ?? [];
+				if (part.index !== null) {
+					values = yield* selectByIndex(context, values, part.index);
+				}
+				return Result.ok(part.quoted ? [values.join(' ')] : values);
+			}
 			case 'commandSub': {
-				const commandText = expandVariables(part.command, context);
-				return await evaluateCommandSubstitutionEffect(
-					commandText,
+				let lines = yield* await evaluateCommandSubstitutionEffect(
+					part.command,
 					fs,
 					context
 				);
+				if (part.index !== null && part.index !== undefined) {
+					lines = yield* selectByIndex(context, lines, part.index);
+				}
+				return Result.ok(part.quoted ? [lines.join('\n')] : lines);
 			}
 			default: {
 				const _exhaustive: never = part;

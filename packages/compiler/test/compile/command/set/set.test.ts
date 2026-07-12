@@ -14,8 +14,11 @@ test('set compiles global assignment', () => {
 	).toEqual({
 		cmd: 'set',
 		args: {
+			append: false,
+			mode: 'assign',
+			names: [literal('PROJECT_ROOT')],
+			prepend: false,
 			scope: 'global',
-			name: literal('PROJECT_ROOT'),
 			values: [literal('/tmp')],
 		},
 	});
@@ -27,9 +30,54 @@ test('set compiles local assignment', () => {
 	).toEqual({
 		cmd: 'set',
 		args: {
+			append: false,
+			mode: 'assign',
+			names: [literal('LOCAL')],
+			prepend: false,
 			scope: 'local',
-			name: literal('LOCAL'),
 			values: [literal('x')],
+		},
+	});
+});
+
+test('set compiles unscoped assignment to auto scope', () => {
+	expect(compileSet(cmd('set', [literal('NAME'), literal('x')]))).toEqual({
+		cmd: 'set',
+		args: {
+			append: false,
+			mode: 'assign',
+			names: [literal('NAME')],
+			prepend: false,
+			scope: 'auto',
+			values: [literal('x')],
+		},
+	});
+});
+
+test('set compiles combined erase-global flags', () => {
+	expect(compileSet(cmd('set', [literal('-eg'), literal('NAME')]))).toEqual({
+		cmd: 'set',
+		args: {
+			append: false,
+			mode: 'erase',
+			names: [literal('NAME')],
+			prepend: false,
+			scope: 'global',
+			values: [],
+		},
+	});
+});
+
+test('set compiles query mode', () => {
+	expect(compileSet(cmd('set', [literal('-q'), literal('NAME')]))).toEqual({
+		cmd: 'set',
+		args: {
+			append: false,
+			mode: 'query',
+			names: [literal('NAME')],
+			prepend: false,
+			scope: 'auto',
+			values: [],
 		},
 	});
 });

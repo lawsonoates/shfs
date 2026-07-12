@@ -10,7 +10,23 @@ import type { ShellDiagnostic } from './diagnostic';
 export type ExpandedWordPart =
 	| { kind: 'literal'; value: string }
 	| { kind: 'glob'; pattern: string; expanded: string[] }
-	| { kind: 'commandSub'; command: string; output: string[] };
+	| {
+			kind: 'commandSub';
+			command: string;
+			output: string[];
+			/** True when the substitution appeared inside double quotes. */
+			quoted?: boolean;
+			/** Raw index expression text (without brackets), if sliced. */
+			index?: string | null;
+	  }
+	| {
+			kind: 'variable';
+			name: string;
+			/** True when the expansion appeared inside double quotes. */
+			quoted: boolean;
+			/** Raw index expression text (without brackets), if sliced. */
+			index: string | null;
+	  };
 
 /**
  * Represents the compiled shape of a shell word.
@@ -21,12 +37,21 @@ export type ExpandedWord =
 	| { kind: 'compound'; parts: ExpandedWordPart[] };
 
 /**
+ * A command-scoped variable assignment (`name=value command`).
+ */
+export interface AssignmentIR {
+	name: string;
+	value: ExpandedWord;
+}
+
+/**
  * Represents a simple command in IR form (for new AST-based compiler).
  */
 export interface SimpleCommandIR {
 	name: ExpandedWord;
 	args: ExpandedWord[];
 	redirections: RedirectionIR[];
+	assignments?: AssignmentIR[];
 }
 
 /**
@@ -62,6 +87,7 @@ export type SourceIR =
 export interface CdStep {
 	cmd: 'cd';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: {
 		path: ExpandedWord;
 	};
@@ -73,6 +99,7 @@ export interface CdStep {
 export interface CatStep {
 	cmd: 'cat';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: {
 		files: ExpandedWord[];
 		numberLines?: boolean;
@@ -91,6 +118,7 @@ export interface CatStep {
 export interface CpStep {
 	cmd: 'cp';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: {
 		dest: ExpandedWord;
 		force?: boolean;
@@ -106,6 +134,7 @@ export interface CpStep {
 export interface HeadStep {
 	cmd: 'head';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: { n: number; files: ExpandedWord[] };
 }
 
@@ -115,6 +144,7 @@ export interface HeadStep {
 export interface LsStep {
 	cmd: 'ls';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: { longFormat?: boolean; paths: ExpandedWord[]; showAll?: boolean };
 }
 
@@ -124,6 +154,7 @@ export interface LsStep {
 export interface MkdirStep {
 	cmd: 'mkdir';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: { parents?: boolean; paths: ExpandedWord[]; recursive: boolean };
 }
 
@@ -133,6 +164,7 @@ export interface MkdirStep {
 export interface MvStep {
 	cmd: 'mv';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: {
 		dest: ExpandedWord;
 		force?: boolean;
@@ -147,6 +179,7 @@ export interface MvStep {
 export interface RmStep {
 	cmd: 'rm';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: {
 		force?: boolean;
 		interactive?: boolean;
@@ -189,6 +222,7 @@ export interface SortArgsIR {
 export interface SortStep {
 	cmd: 'sort';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: SortArgsIR;
 }
 
@@ -198,6 +232,7 @@ export interface SortStep {
 export interface TailStep {
 	cmd: 'tail';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: { n: number; files: ExpandedWord[] };
 }
 
@@ -222,6 +257,7 @@ export interface TreeArgsIR {
 export interface TreeStep {
 	cmd: 'tree';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: TreeArgsIR;
 }
 
@@ -231,6 +267,7 @@ export interface TreeStep {
 export interface TouchStep {
 	cmd: 'touch';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: {
 		accessTimeOnly?: boolean;
 		files: ExpandedWord[];
@@ -244,6 +281,7 @@ export interface TouchStep {
 export interface PwdStep {
 	cmd: 'pwd';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: Record<never, never>;
 }
 
@@ -253,6 +291,7 @@ export interface PwdStep {
 export interface EchoStep {
 	cmd: 'echo';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: {
 		values: ExpandedWord[];
 	};
@@ -329,6 +368,7 @@ export interface FindArgsIR {
 export interface FindStep {
 	cmd: 'find';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: FindArgsIR;
 }
 
@@ -385,6 +425,7 @@ export interface GrepArgsIR {
 export interface GrepStep {
 	cmd: 'grep';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: GrepArgsIR;
 }
 
@@ -404,6 +445,7 @@ export interface XargsArgsIR {
 export interface XargsStep {
 	cmd: 'xargs';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: XargsArgsIR;
 }
 
@@ -426,10 +468,12 @@ export interface WcArgsIR {
 export interface WcStep {
 	cmd: 'wc';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: WcArgsIR;
 }
 
-export type SetScope = 'global' | 'local';
+export type SetScope = 'auto' | 'global' | 'local';
+export type SetMode = 'assign' | 'erase' | 'query';
 
 /**
  * Set step.
@@ -437,21 +481,73 @@ export type SetScope = 'global' | 'local';
 export interface SetStep {
 	cmd: 'set';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: {
 		scope: SetScope;
-		name: ExpandedWord;
+		mode: SetMode;
+		append: boolean;
+		prepend: boolean;
+		names: ExpandedWord[];
 		values: ExpandedWord[];
 	};
 }
 
 /**
- * Test step.
+ * Test step (also used for the `[` alias).
  */
 export interface TestStep {
 	cmd: 'test';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: {
 		operands: ExpandedWord[];
+		bracket: boolean;
+	};
+}
+
+/**
+ * True step.
+ */
+export interface TrueStep {
+	cmd: 'true';
+	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
+	args: Record<never, never>;
+}
+
+/**
+ * False step.
+ */
+export interface FalseStep {
+	cmd: 'false';
+	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
+	args: Record<never, never>;
+}
+
+/**
+ * Count step.
+ */
+export interface CountStep {
+	cmd: 'count';
+	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
+	args: {
+		values: ExpandedWord[];
+	};
+}
+
+/**
+ * Call step: invocation of a runtime-defined function (or an unknown
+ * command reported at runtime).
+ */
+export interface CallStep {
+	cmd: 'call';
+	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
+	args: {
+		name: string;
+		words: ExpandedWord[];
 	};
 }
 
@@ -461,19 +557,21 @@ export interface TestStep {
 export interface ReadStep {
 	cmd: 'read';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: {
 		name: ExpandedWord;
 	};
 }
 
 /**
- * String step.
+ * String step. A missing subcommand is reported at runtime.
  */
 export interface StringStep {
 	cmd: 'string';
 	redirections?: RedirectionIR[];
+	assignments?: AssignmentIR[];
 	args: {
-		subcommand: ExpandedWord;
+		subcommand: ExpandedWord | null;
 		operands: ExpandedWord[];
 	};
 }
@@ -482,10 +580,13 @@ export interface StringStep {
  * Union of all step types.
  */
 export type StepIR =
+	| CallStep
 	| CdStep
 	| CatStep
+	| CountStep
 	| CpStep
 	| EchoStep
+	| FalseStep
 	| FindStep
 	| GrepStep
 	| HeadStep
@@ -502,6 +603,7 @@ export type StepIR =
 	| TestStep
 	| TouchStep
 	| TreeStep
+	| TrueStep
 	| WcStep
 	| XargsStep;
 
@@ -516,13 +618,92 @@ export interface PipelineIR {
 
 export type StatementChainModeIR = 'always' | 'and' | 'or';
 
-export interface ScriptStatementIR {
+/**
+ * A job statement: a pipeline plus chain metadata and negation.
+ */
+export interface JobStatementIR {
+	kind: 'job';
 	chainMode: StatementChainModeIR;
+	negated: boolean;
 	pipeline: PipelineIR;
 }
 
+export interface IfBranchIR {
+	condition: StatementIR[];
+	body: StatementIR[];
+}
+
+export interface IfStatementIR {
+	kind: 'if';
+	chainMode: StatementChainModeIR;
+	negated: boolean;
+	assignments: AssignmentIR[];
+	branches: IfBranchIR[];
+	elseBody: StatementIR[] | null;
+}
+
+export interface WhileStatementIR {
+	kind: 'while';
+	chainMode: StatementChainModeIR;
+	negated: boolean;
+	assignments: AssignmentIR[];
+	condition: StatementIR[];
+	body: StatementIR[];
+}
+
+export interface ForStatementIR {
+	kind: 'for';
+	chainMode: StatementChainModeIR;
+	variable: string;
+	values: ExpandedWord[];
+	body: StatementIR[];
+}
+
+export interface BeginStatementIR {
+	kind: 'begin';
+	chainMode: StatementChainModeIR;
+	negated: boolean;
+	assignments: AssignmentIR[];
+	body: StatementIR[];
+}
+
+export interface FunctionStatementIR {
+	kind: 'function';
+	chainMode: StatementChainModeIR;
+	name: string;
+	argumentNames: string[];
+	body: StatementIR[];
+}
+
+export interface BreakStatementIR {
+	kind: 'break';
+	chainMode: StatementChainModeIR;
+}
+
+export interface ContinueStatementIR {
+	kind: 'continue';
+	chainMode: StatementChainModeIR;
+}
+
+export interface ReturnStatementIR {
+	kind: 'return';
+	chainMode: StatementChainModeIR;
+	values: ExpandedWord[];
+}
+
+export type StatementIR =
+	| JobStatementIR
+	| IfStatementIR
+	| WhileStatementIR
+	| ForStatementIR
+	| BeginStatementIR
+	| FunctionStatementIR
+	| BreakStatementIR
+	| ContinueStatementIR
+	| ReturnStatementIR;
+
 export interface ScriptIR {
-	statements: ScriptStatementIR[];
+	statements: StatementIR[];
 }
 
 // ─────────────────────────────────────────────────────────
@@ -570,9 +751,31 @@ export function glob(
  */
 export function commandSub(
 	command: string,
-	output: string[] = []
+	output: string[] = [],
+	options: { quoted?: boolean; index?: string | null } = {}
 ): ExpandedWordPart {
-	return { kind: 'commandSub', command, output };
+	return {
+		kind: 'commandSub',
+		command,
+		output,
+		quoted: options.quoted ?? false,
+		index: options.index ?? null,
+	};
+}
+
+/**
+ * Create a variable ExpandedWord.
+ */
+export function variable(
+	name: string,
+	options: { quoted?: boolean; index?: string | null } = {}
+): ExpandedWordPart {
+	return {
+		kind: 'variable',
+		name,
+		quoted: options.quoted ?? false,
+		index: options.index ?? null,
+	};
 }
 
 /**
@@ -587,6 +790,8 @@ export function expandedWordToString(word: ExpandedWord): string {
 			return word.pattern;
 		case 'commandSub':
 			return word.command;
+		case 'variable':
+			return `$${word.name}`;
 		case 'compound':
 			return word.parts.map(expandedWordPartToString).join('');
 		default: {
@@ -626,6 +831,8 @@ export function extractPathsFromExpandedWords(words: ExpandedWord[]): string[] {
 					: [word.pattern];
 			case 'commandSub':
 				return word.output;
+			case 'variable':
+				return [`$${word.name}`];
 			case 'compound':
 				return [expandedWordToString(word)];
 			default: {
@@ -646,6 +853,8 @@ function expandedWordPartToString(part: ExpandedWordPart): string {
 			return part.pattern;
 		case 'commandSub':
 			return part.command;
+		case 'variable':
+			return `$${part.name}`;
 		default: {
 			const _exhaustive: never = part;
 			throw new Error(

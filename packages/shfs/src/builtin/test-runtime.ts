@@ -3,7 +3,7 @@ import { MemoryFS } from '../fs/memory';
 import type { Record as ShellRecord } from '../record';
 import { BufferedOutputStream } from '../stderr';
 import type { Stream } from '../stream';
-import type { BuiltinRuntime } from './types';
+import type { BuiltinRuntime, FunctionDefinition } from './types';
 
 const ROOT_DIRECTORY = '/';
 
@@ -20,8 +20,9 @@ export function createBuiltinRuntime(options?: {
 	const runtime: BuiltinRuntime = {
 		context: {
 			cwd,
-			globalVars: new Map<string, string>(),
-			localVars: new Map<string, string>(),
+			functions: new Map<string, FunctionDefinition>(),
+			globalVars: new Map<string, string[]>(),
+			scopes: [{ vars: new Map<string, string[]>() }],
 			status: 0,
 			stderr,
 		},

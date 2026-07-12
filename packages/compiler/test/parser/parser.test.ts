@@ -1,78 +1,86 @@
 import { expect, test } from 'bun:test';
 
+import { Statement, type StatementNode } from '@/parser/ast';
 import { Parser, parse, parseEffect } from '@/parser/parser';
 import { ParseSyntaxError } from '@/parser/syntax-error';
+
+function job(statement: StatementNode | undefined): Statement {
+	if (!(statement instanceof Statement)) {
+		throw new Error('Expected a job statement');
+	}
+	return statement;
+}
 
 test('parse supports newline-separated statements', () => {
 	const program = parse('pwd\ncd /tmp');
 
 	expect(program.statements).toHaveLength(2);
-	expect(program.statements[0]?.pipeline.commands[0]?.name.literalValue).toBe(
-		'pwd'
-	);
-	expect(program.statements[1]?.pipeline.commands[0]?.name.literalValue).toBe(
-		'cd'
-	);
+	expect(
+		job(program.statements[0]).pipeline.commands[0]?.name.literalValue
+	).toBe('pwd');
+	expect(
+		job(program.statements[1]).pipeline.commands[0]?.name.literalValue
+	).toBe('cd');
 });
 
 test('parse supports semicolon-separated statements', () => {
 	const program = parse('pwd;cd /tmp');
 
 	expect(program.statements).toHaveLength(2);
-	expect(program.statements[0]?.pipeline.commands[0]?.name.literalValue).toBe(
-		'pwd'
-	);
-	expect(program.statements[1]?.pipeline.commands[0]?.name.literalValue).toBe(
-		'cd'
-	);
+	expect(
+		job(program.statements[0]).pipeline.commands[0]?.name.literalValue
+	).toBe('pwd');
+	expect(
+		job(program.statements[1]).pipeline.commands[0]?.name.literalValue
+	).toBe('cd');
 });
 
 test('parse supports mixed statement separators', () => {
 	const program = parse('pwd; cd /tmp\npwd');
 
 	expect(program.statements).toHaveLength(3);
-	expect(program.statements[0]?.pipeline.commands[0]?.name.literalValue).toBe(
-		'pwd'
-	);
-	expect(program.statements[1]?.pipeline.commands[0]?.name.literalValue).toBe(
-		'cd'
-	);
-	expect(program.statements[2]?.pipeline.commands[0]?.name.literalValue).toBe(
-		'pwd'
-	);
+	expect(
+		job(program.statements[0]).pipeline.commands[0]?.name.literalValue
+	).toBe('pwd');
+	expect(
+		job(program.statements[1]).pipeline.commands[0]?.name.literalValue
+	).toBe('cd');
+	expect(
+		job(program.statements[2]).pipeline.commands[0]?.name.literalValue
+	).toBe('pwd');
 });
 
 test('parse ignores trailing separators', () => {
 	const program = parse('pwd;\n');
 
 	expect(program.statements).toHaveLength(1);
-	expect(program.statements[0]?.pipeline.commands[0]?.name.literalValue).toBe(
-		'pwd'
-	);
+	expect(
+		job(program.statements[0]).pipeline.commands[0]?.name.literalValue
+	).toBe('pwd');
 });
 
 test('parse keeps pipe newline continuation within one statement', () => {
 	const program = parse('cat file.txt |\n tail -n 1');
 
 	expect(program.statements).toHaveLength(1);
-	expect(program.statements[0]?.pipeline.commands).toHaveLength(2);
+	expect(job(program.statements[0]).pipeline.commands).toHaveLength(2);
 });
 
 test('parse supports standalone command substitution in argument position', () => {
 	const program = parse('cd (echo subdir)');
-	const arg = program.statements[0]?.pipeline.commands[0]?.args[0];
+	const arg = job(program.statements[0]).pipeline.commands[0]?.args[0];
 	expect(arg?.hasCommandSub).toBe(true);
 });
 
 test('parse supports nested command substitutions in argument position', () => {
 	const program = parse('echo (echo (echo nested))');
-	const arg = program.statements[0]?.pipeline.commands[0]?.args[0];
+	const arg = job(program.statements[0]).pipeline.commands[0]?.args[0];
 	expect(arg?.hasCommandSub).toBe(true);
 });
 
 test('parse preserves ordered parts for mixed glob words', () => {
 	const program = parse('ls src/*.test.ts');
-	const arg = program.statements[0]?.pipeline.commands[0]?.args[0];
+	const arg = job(program.statements[0]).pipeline.commands[0]?.args[0];
 
 	expect(
 		arg?.parts.map((part) => {
@@ -93,7 +101,7 @@ test('parse preserves ordered parts for mixed glob words', () => {
 
 test('parse preserves spans and nested substitutions for mixed command substitution words', () => {
 	const program = parse('echo foo(echo (echo bar))baz');
-	const arg = program.statements[0]?.pipeline.commands[0]?.args[0];
+	const arg = job(program.statements[0]).pipeline.commands[0]?.args[0];
 	const commandSubPart = arg?.parts[1];
 
 	expect(arg?.parts.map((part) => part.kind)).toEqual([
@@ -110,14 +118,14 @@ test('parse preserves spans and nested substitutions for mixed command substitut
 		throw new Error('Expected command substitution part');
 	}
 
-	const nestedArg =
-		commandSubPart.program.statements[0]?.pipeline.commands[0]?.args[0];
+	const nestedArg = job(commandSubPart.program.statements[0]).pipeline
+		.commands[0]?.args[0];
 	expect(nestedArg?.hasCommandSub).toBe(true);
 });
 
 test('parse preserves mixed quoted and unquoted word parts', () => {
 	const program = parse('echo prefix"*"suffix?.txt');
-	const arg = program.statements[0]?.pipeline.commands[0]?.args[0];
+	const arg = job(program.statements[0]).pipeline.commands[0]?.args[0];
 
 	expect(
 		arg?.parts.map((part) => {
@@ -140,7 +148,8 @@ test('parse preserves mixed quoted and unquoted word parts', () => {
 
 // Quoted & before > is an argument, not a redirection prefix.
 test('parse keeps quoted redirection prefix as an argument', () => {
-	const command = parse("echo '&'>out").statements[0]?.pipeline.commands[0];
+	const command = job(parse("echo '&'>out").statements[0]).pipeline
+		.commands[0];
 
 	expect(command?.args.map((arg) => arg.literalValue)).toEqual(['&']);
 	expect(
@@ -150,7 +159,8 @@ test('parse keeps quoted redirection prefix as an argument', () => {
 
 // Quoted & before | is an argument, not the &| pipe operator.
 test('parse keeps quoted pipe prefix as an argument', () => {
-	const command = parse("echo '&'|cat").statements[0]?.pipeline.commands[0];
+	const command = job(parse("echo '&'|cat").statements[0]).pipeline
+		.commands[0];
 
 	expect(command?.args.map((arg) => arg.literalValue)).toEqual(['&']);
 	expect(command?.redirections).toHaveLength(0);

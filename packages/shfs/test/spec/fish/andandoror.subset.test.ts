@@ -4,10 +4,10 @@
 // License: GNU General Public License, version 2.
 
 // Note: fish andandoror.fish covers &&/|| operators, `not`/`!`, `begin`/`end`
-// blocks, `if`/`while` with &&/||, and `--help` flags. shfs supports `and`/`or`
-// keyword chaining and $status but not &&/|| operators, `not`/`!`, `begin`/`end`,
-// `if`/`while`, or `--help`. This subset covers the `and`/`or` keyword behavior
-// and $status propagation within the shfs boundary.
+// blocks, `if`/`while` with &&/||, newline continuation after combiners, and
+// `--help` flags. This subset covers everything except `--help` output and
+// `math`-based loops (adapted to list-based counting). Upstream external
+// commands (`true`, `false`, `sh`) map to the shfs builtins `true`/`false`.
 
 import { beforeEach, expect, test } from 'bun:test';
 
@@ -24,107 +24,182 @@ async function run(command: string): Promise<string> {
 	return await shell.$`${command}`.text();
 }
 
+async function runResult(command: string) {
+	const result = await shell.$`${command}`.nothrow();
+	return {
+		exitCode: result.exitCode,
+		stderr: result.stderr.toString(),
+		stdout: result.text(),
+	};
+}
+
 // andandoror.fish: echo first && echo second
-// Adapted: shfs uses `and`/`or` keywords instead of &&/||.
-test('fish and/or: andandoror.fish - and chains on success', async () => {
-	expect(await run('echo first; and echo second')).toBe('first\nsecond');
+test('fish and/or: andandoror.fish - && chains on success', async () => {
+	expect(await run('echo first && echo second')).toBe('first\nsecond');
 });
 
 // andandoror.fish: echo third || echo fourth
-// Adapted: `or` after a successful command does not run.
-test('fish and/or: andandoror.fish - or skips when prior command succeeds', async () => {
-	expect(await run('echo third; or echo fourth')).toBe('third');
+test('fish and/or: andandoror.fish - || skips when prior command succeeds', async () => {
+	expect(await run('echo third || echo fourth')).toBe('third');
 });
 
 // andandoror.fish: true && false; echo "true && false: $status"
-// Adapted: test 1 = 1 succeeds (status 0), then test 1 = 2 fails (status 1).
-test('fish and/or: andandoror.fish - and propagates failure status', async () => {
-	expect(await run('test 1 = 1; and test 1 = 2; echo $status')).toBe('1');
+test('fish and/or: andandoror.fish - && propagates failure status', async () => {
+	expect(await run('true && false; echo "true && false: $status"')).toBe(
+		'true && false: 1'
+	);
 });
 
 // andandoror.fish: true || false; echo "true || false: $status"
-// Adapted: first command succeeds, or is skipped, status remains 0.
-test('fish and/or: andandoror.fish - or preserves success status when first succeeds', async () => {
-	expect(await run('test 1 = 1; or test 1 = 2; echo $status')).toBe('0');
+test('fish and/or: andandoror.fish - || preserves success status when first succeeds', async () => {
+	expect(await run('true || false; echo "true || false: $status"')).toBe(
+		'true || false: 0'
+	);
 });
 
 // andandoror.fish: true && false || true; echo "true && false || true: $status"
-// Adapted: success → and runs → failure → or runs → success.
-test('fish and/or: andandoror.fish - chained and/or evaluates left to right', async () => {
+test('fish and/or: andandoror.fish - chained && || evaluates left to right', async () => {
+	expect(
+		await run(
+			'true && false || true; echo "true && false || true: $status"'
+		)
+	).toBe('true && false || true: 0');
+});
+
+// andandoror.fish: if true || false ... "if test 1 ok"
+test('fish and/or: andandoror.fish - || works in if conditions', async () => {
+	expect(await run('if true || false\n    echo "if test 1 ok"\nend')).toBe(
+		'if test 1 ok'
+	);
+});
+
+// andandoror.fish: if true && false; else; echo "if test 2 ok"; end
+test('fish and/or: andandoror.fish - && failure in if condition takes else branch', async () => {
+	expect(
+		await run('if true && false\nelse\n    echo "if test 2 ok"\nend')
+	).toBe('if test 2 ok');
+});
+
+// andandoror.fish: if true && false; or true ... "if test 3 ok"
+test('fish and/or: andandoror.fish - && condition continued by or keyword', async () => {
+	expect(
+		await run('if true && false; or true\n    echo "if test 3 ok"\nend')
+	).toBe('if test 3 ok');
+});
+
+// andandoror.fish: if [ 0 = 1 ] || [ 5 -ge 3 ] ... "if test 4 ok"
+test('fish and/or: andandoror.fish - || with [ ] test commands in if condition', async () => {
+	expect(
+		await run('if [ 0 = 1 ] || [ 5 -ge 3 ]\n    echo "if test 4 ok"\nend')
+	).toBe('if test 4 ok');
+});
+
+// andandoror.fish: while [ ... ] && [ ... ] with `or` continuation lines.
+// Adapted: upstream counts with `math`; this port shrinks lists instead.
+test('fish and/or: andandoror.fish - while condition supports && and or continuation', async () => {
+	const script = [
+		'set alpha a b',
+		'while false',
+		'    or [ (count $alpha) -gt 0 ]',
+		'    echo (count $alpha)',
+		'    set -e alpha[1]',
+		'end',
+	].join('\n');
+	expect(await run(script)).toBe('2\n1');
+});
+
+// andandoror.fish: true && ! false; echo $status
+test('fish and/or: andandoror.fish - ! negates after &&', async () => {
+	expect(await run('true && ! false\necho $status')).toBe('0');
+});
+
+// andandoror.fish: not true && ! false; echo $status
+test('fish and/or: andandoror.fish - not applies per pipeline within && chain', async () => {
+	expect(await run('not true && ! false\necho $status')).toBe('1');
+});
+
+// andandoror.fish: not not not true; echo $status
+test('fish and/or: andandoror.fish - triple not inverts once', async () => {
+	expect(await run('not not not true\necho $status')).toBe('1');
+});
+
+// andandoror.fish: not ! ! not true; echo $status
+test('fish and/or: andandoror.fish - mixed not and ! cancel in pairs', async () => {
+	expect(await run('not ! ! not true\necho $status')).toBe('0');
+});
+
+// andandoror.fish: not ! echo not !; echo $status
+test('fish and/or: andandoror.fish - not and ! outside command position are plain words', async () => {
+	expect(await run('not ! echo not !\necho $status')).toBe('not !\n0');
+});
+
+// andandoror.fish: begin ... end || begin ... end
+test('fish and/or: andandoror.fish - || chains begin blocks', async () => {
+	const script = [
+		'begin',
+		'    echo 1',
+		'    false',
+		'end || begin',
+		'    echo 2 && echo 3',
+		'end',
+	].join('\n');
+	expect(await run(script)).toBe('1\n2\n3');
+});
+
+// andandoror.fish: if false && true; or not false; echo 4; end
+test('fish and/or: andandoror.fish - if condition mixes &&, or continuation, and not', async () => {
+	expect(
+		await run('if false && true\n    or not false\n    echo 4\nend')
+	).toBe('4');
+});
+
+// andandoror.fish: true && \n echo newline after conjunction
+test('fish and/or: andandoror.fish - newline is allowed after &&', async () => {
+	expect(await run('true &&\necho newline after conjunction')).toBe(
+		'newline after conjunction'
+	);
+});
+
+// andandoror.fish: false || \n echo newline after disjunction
+test('fish and/or: andandoror.fish - newline is allowed after ||', async () => {
+	expect(await run('false ||\necho newline after disjunction')).toBe(
+		'newline after disjunction'
+	);
+});
+
+// andandoror.fish: true && <blank line> echo empty lines after conjunction
+test('fish and/or: andandoror.fish - empty lines are allowed after &&', async () => {
+	expect(await run('true &&\n\necho empty lines after conjunction')).toBe(
+		'empty lines after conjunction'
+	);
+});
+
+// andandoror.fish: true && # comment ... echo comment after conjunction
+test('fish and/or: andandoror.fish - comments are allowed after &&', async () => {
+	expect(
+		await run(
+			'true &&\n# can have comments here!\necho comment after conjunction'
+		)
+	).toBe('comment after conjunction');
+});
+
+// andandoror.fish: PATH= cat || echo cat failed
+// Adapted: shfs has no external commands; any unknown command name fails the
+// job at runtime and || recovers.
+test('fish and/or: andandoror.fish - unknown command failure is recovered by ||', async () => {
+	const result = await runResult(
+		'definitely_not_a_command_xyz || echo cat failed'
+	);
+	expect(result.stdout).toBe('cat failed');
+	expect(result.stderr).toContain('Unknown command');
+	expect(result.exitCode).toBe(0);
+});
+
+// Keyword forms remain equivalent to the symbolic combiners.
+test('fish and/or: andandoror.fish - `; and`/`; or` keyword chains stay equivalent', async () => {
 	expect(
 		await run('test 1 = 1; and test 1 = 2; or test 1 = 1; echo $status')
 	).toBe('0');
-});
-
-// Verify that `and` skips when prior command fails.
-test('fish and/or: andandoror.fish - and skips when prior command fails', async () => {
-	expect(await run('test 1 = 2; and echo should-not-run; echo done')).toBe(
-		'done'
-	);
-});
-
-// Verify that `or` runs when prior command fails.
-test('fish and/or: andandoror.fish - or runs when prior command fails', async () => {
-	expect(await run('test 1 = 2; or echo recovered')).toBe('recovered');
-});
-
-// Multiple and/or in sequence.
-test('fish and/or: andandoror.fish - multiple and chains all require success', async () => {
-	expect(await run('test 1 = 1; and test a = a; and echo "all passed"')).toBe(
-		'all passed'
-	);
-});
-
-test('fish and/or: andandoror.fish - and chain breaks on first failure', async () => {
-	expect(
-		await run(
-			'test 1 = 1; and test 1 = 2; and echo "should not run"; or echo "recovered"'
-		)
-	).toBe('recovered');
-});
-
-// or after or.
-test('fish and/or: andandoror.fish - or chain tries alternatives until one succeeds', async () => {
-	expect(await run('test 1 = 2; or test 1 = 3; or echo "fallback"')).toBe(
-		'fallback'
-	);
-});
-
-// and/or with echo (echo always succeeds).
-test('fish and/or: andandoror.fish - echo sets status 0 for subsequent and/or', async () => {
-	expect(await run('echo start; and echo "and ran"')).toBe('start\nand ran');
-	expect(await run('echo start; or echo "or ran"')).toBe('start');
-});
-
-// and/or interacts correctly with set.
-test('fish and/or: andandoror.fish - set success feeds into and/or chain', async () => {
-	expect(
-		await run('set -g x 1; and echo "set passed"; or echo "set failed"')
-	).toBe('set passed');
-});
-
-// $status is updated by each command in the chain.
-test('fish and/or: andandoror.fish - $status reflects the last executed command', async () => {
-	// test 1 = 2 fails (status 1), and is skipped, or runs test 1 = 1 (status 0).
-	await run('test 1 = 2; and echo skip; or test 1 = 1');
-	expect(await run('echo $status')).toBe('0');
-});
-
-// and/or at the start of a semicolon-separated script.
-test('fish and/or: andandoror.fish - and/or work across semicolon-separated statements', async () => {
 	expect(await run('test a = a; and echo "yes"; or echo "no"')).toBe('yes');
 	expect(await run('test a = b; and echo "yes"; or echo "no"')).toBe('no');
-});
-
-// andandoror.fish: not/! are out of scope for shfs.
-test('fish and/or: andandoror.fish - not and ! are out of scope', async () => {
-	await expect(run('not test 1 = 1')).rejects.toThrow('Unknown command: not');
-	await expect(run('! test 1 = 1')).rejects.toThrow();
-});
-
-// andandoror.fish: begin/end blocks are out of scope for shfs.
-test('fish and/or: andandoror.fish - begin/end blocks are out of scope', async () => {
-	await expect(run('begin; echo 1; end')).rejects.toThrow(
-		'Unknown command: begin'
-	);
 });

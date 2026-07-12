@@ -9,6 +9,7 @@ const NEWLINE = '\n';
 export interface ShellInput {
 	records(): Stream<ShellRecord>;
 	lines(): Stream<string>;
+	readLine(): Promise<string | null>;
 	bytes(options?: { trailingNewline?: boolean }): Promise<Uint8Array>;
 }
 
@@ -33,26 +34,41 @@ export class EmptyInput implements ShellInput {
 		// no lines
 	}
 
+	async readLine(): Promise<string | null> {
+		return null;
+	}
+
 	async bytes(): Promise<Uint8Array> {
 		return new Uint8Array();
 	}
 }
 
 export class RecordInput implements ShellInput {
-	private readonly input: Stream<ShellRecord>;
+	private readonly input: AsyncIterator<ShellRecord>;
 
 	constructor(input: Stream<ShellRecord>) {
-		this.input = input;
+		this.input = input[Symbol.asyncIterator]();
 	}
 
-	records(): Stream<ShellRecord> {
-		return this.input;
+	async *records(): Stream<ShellRecord> {
+		while (true) {
+			const next = await this.input.next();
+			if (next.done) {
+				return;
+			}
+			yield next.value;
+		}
 	}
 
 	async *lines(): Stream<string> {
-		for await (const record of this.input) {
+		for await (const record of this.records()) {
 			yield formatRecord(record);
 		}
+	}
+
+	async readLine(): Promise<string | null> {
+		const next = await this.input.next();
+		return next.done ? null : formatRecord(next.value);
 	}
 
 	async bytes(

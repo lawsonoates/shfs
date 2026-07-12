@@ -9,7 +9,6 @@ import { MemoryFS } from '@/fs/memory';
 import { Shell } from '@/shell/shell';
 
 let shell!: Shell;
-const REQUIRES_ONE_VARIABLE_NAME = 'read requires exactly one variable name';
 
 beforeEach(() => {
 	shell = new Shell(new MemoryFS());
@@ -44,36 +43,10 @@ test('fish read: read.fish - consumes only the first record from stream input', 
 	).toBe('first');
 });
 
-test('fish read: read.fish - stores values in local scope for one run only', async () => {
-	expect(await run('echo scoped | read local_only; echo $local_only')).toBe(
-		'scoped'
-	);
-	expect(await run('echo $local_only')).toBe('');
-});
-
 test('fish read: read.fish - reports failure status when no input stream is provided', async () => {
 	await runNothrow('read missing');
 	expect(await run('echo $status')).toBe('1');
 	expect(await run('read missing; and echo pass; or echo fail')).toBe('fail');
-});
-
-test('fish read: read.fish - requires exactly one variable name', async () => {
-	await expect(run('read')).rejects.toThrow(REQUIRES_ONE_VARIABLE_NAME);
-	await expect(run('read one two')).rejects.toThrow(
-		REQUIRES_ONE_VARIABLE_NAME
-	);
-});
-
-test('fish read: read.fish - fish read flags are out of scope', async () => {
-	await expect(run('read -a values')).rejects.toThrow(
-		REQUIRES_ONE_VARIABLE_NAME
-	);
-	await expect(run('read -n 3 value')).rejects.toThrow(
-		REQUIRES_ONE_VARIABLE_NAME
-	);
-	await expect(run('read -z value')).rejects.toThrow(
-		REQUIRES_ONE_VARIABLE_NAME
-	);
 });
 
 test('fish read: read.fish - validates variable names', async () => {
@@ -96,4 +69,21 @@ test('fish read: read.fish - input redirection preserves spaces for a single rea
 	expect(
 		await run('read phrase < /tmp/read-with-space.txt; echo $phrase')
 	).toBe('hello there');
+});
+
+// read.fish:375-382 pipes three records into a block with sequential reads.
+// A function replaces the upstream piped begin block, which is out of scope.
+test('fish read: read.fish - sequential function reads share one stdin cursor', async () => {
+	await run('echo first > /tmp/first.txt');
+	await run('echo second > /tmp/second.txt');
+	const script = [
+		'function consume',
+		'    read first',
+		'    read second',
+		'    echo $first:$second',
+		'end',
+		'cat /tmp/first.txt /tmp/second.txt | consume',
+	].join('\n');
+
+	expect(await run(script)).toBe('first:second');
 });

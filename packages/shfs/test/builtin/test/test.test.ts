@@ -8,6 +8,7 @@ import type { Record as ShellRecord } from '@/record';
 test('test sets status for equality success', async () => {
 	const runtime = createBuiltinRuntime();
 	const stream = testBuiltin(runtime, {
+		bracket: false,
 		operands: [literal('a'), literal('='), literal('a')],
 	});
 
@@ -19,6 +20,7 @@ test('test sets status for equality success', async () => {
 test('test sets status for equality failure', async () => {
 	const runtime = createBuiltinRuntime();
 	const stream = testBuiltin(runtime, {
+		bracket: false,
 		operands: [literal('a'), literal('='), literal('b')],
 	});
 

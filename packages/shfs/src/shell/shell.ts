@@ -1,6 +1,7 @@
 import { compile, parse, type ScriptIR } from '@shfs/compiler';
 import { Result } from 'better-result';
 
+import type { FunctionDefinition } from '../builtin/types';
 import { isShellFailure, reportShellFailure } from '../diagnostics';
 import { execute } from '../execute/execute';
 import { collectRecordStream } from '../execute/record-stream';
@@ -215,7 +216,8 @@ export class Shell {
 	private readonly fs: FS;
 	private currentCwd: string;
 	private currentStatus = 0;
-	private readonly globalVars = new Map<string, string>();
+	private readonly globalVars = new Map<string, string[]>();
+	private readonly functions = new Map<string, FunctionDefinition>();
 
 	constructor(fs: FS, options: ShellOptions = {}) {
 		this.fs = fs;
@@ -258,8 +260,9 @@ export class Shell {
 					cwd: commandStartCwd,
 					status: this.currentStatus,
 					stderr: new BufferedOutputStream(),
+					functions: this.functions,
 					globalVars: this.globalVars,
-					localVars: new Map<string, string>(),
+					scopes: [{ vars: new Map<string, string[]>() }],
 				};
 				try {
 					const runCommand = await Result.gen(async function* () {

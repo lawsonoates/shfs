@@ -346,8 +346,9 @@ async function runCommand(
 
 	const childContext: BuiltinContext = {
 		cwd: context.cwd,
+		functions: context.functions,
 		globalVars: context.globalVars,
-		localVars: context.localVars,
+		scopes: context.scopes,
 		status: context.status,
 		stderr: new BufferedOutputStream(),
 	};

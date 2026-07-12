@@ -226,7 +226,7 @@ test('variable-expanded output redirection resolves relative to cwd', async () =
 	const fs = new MemoryFS();
 	const context = {
 		cwd: '/workspace',
-		globalVars: new Map<string, string>([['LOGFILE', 'logs.txt']]),
+		globalVars: new Map<string, string[]>([['LOGFILE', ['logs.txt']]]),
 	};
 
 	const result = execute(
@@ -247,7 +247,7 @@ test('variable-expanded input redirection resolves relative to cwd', async () =>
 
 	const result = execute(compile(parse('head -n 1 < $INPUTFILE')), fs, {
 		cwd: '/workspace',
-		globalVars: new Map<string, string>([['INPUTFILE', 'input.txt']]),
+		globalVars: new Map<string, string[]>([['INPUTFILE', ['input.txt']]]),
 	});
 	const records = (await collectRecordStream(result)).unwrap();
 	const lineRecords = records.filter(
@@ -1095,6 +1095,8 @@ test('executes script statements in deterministic order', async () => {
 		statements: [
 			{
 				chainMode: 'always',
+				kind: 'job',
+				negated: false,
 				pipeline: {
 					firstCommand: {
 						name: literal('cd'),
@@ -1112,6 +1114,8 @@ test('executes script statements in deterministic order', async () => {
 			},
 			{
 				chainMode: 'always',
+				kind: 'job',
+				negated: false,
 				pipeline: {
 					firstCommand: {
 						name: literal('pwd'),
@@ -1129,6 +1133,8 @@ test('executes script statements in deterministic order', async () => {
 			},
 			{
 				chainMode: 'always',
+				kind: 'job',
+				negated: false,
 				pipeline: {
 					firstCommand: {
 						name: literal('cd'),
@@ -1146,6 +1152,8 @@ test('executes script statements in deterministic order', async () => {
 			},
 			{
 				chainMode: 'always',
+				kind: 'job',
+				negated: false,
 				pipeline: {
 					firstCommand: {
 						name: literal('pwd'),
@@ -1183,6 +1191,8 @@ test('script execution reuses shared context across statements', async () => {
 		statements: [
 			{
 				chainMode: 'always',
+				kind: 'job',
+				negated: false,
 				pipeline: {
 					firstCommand: {
 						name: literal('cd'),
@@ -1200,6 +1210,8 @@ test('script execution reuses shared context across statements', async () => {
 			},
 			{
 				chainMode: 'always',
+				kind: 'job',
+				negated: false,
 				pipeline: {
 					firstCommand: {
 						name: literal('pwd'),
@@ -1249,7 +1261,7 @@ test('expanded command substitution can feed path-taking commands', async () => 
 	const context = {
 		cwd: '/workspace',
 		status: 0,
-		globalVars: new Map<string, string>([['TARGET', 'subdir']]),
+		globalVars: new Map<string, string[]>([['TARGET', ['subdir']]]),
 	};
 	const ir = compile(parse('cd (echo $TARGET); pwd'));
 

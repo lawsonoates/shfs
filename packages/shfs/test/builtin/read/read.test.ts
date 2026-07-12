@@ -3,6 +3,7 @@ import { literal } from '@shfs/compiler';
 import { read } from '@/builtin/read/read';
 import { createBuiltinRuntime } from '@/builtin/test-runtime';
 import { collect } from '@/consumer/consumer';
+import { lookupVariable } from '@/execute/variables';
 import type { Record as ShellRecord } from '@/record';
 import type { Stream } from '@/stream';
 
@@ -17,7 +18,7 @@ test('read stores first value from stream into local vars', async () => {
 
 	await collect<ShellRecord>()(stream);
 
-	expect(runtime.context.localVars.get('value')).toBe('first');
+	expect(lookupVariable(runtime.context, 'value')).toEqual(['first']);
 	expect(runtime.context.status).toBe(0);
 });
 
@@ -30,7 +31,9 @@ test('read stores formatted file records instead of reading file contents', asyn
 
 	await collect<ShellRecord>()(stream);
 
-	expect(runtime.context.localVars.get('value')).toBe('/workspace/value.txt');
+	expect(lookupVariable(runtime.context, 'value')).toEqual([
+		'/workspace/value.txt',
+	]);
 	expect(runtime.context.status).toBe(0);
 });
 

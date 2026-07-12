@@ -44,3 +44,57 @@ test('string match with empty stdin returns non-match status', async () => {
 	expect(records).toEqual([]);
 	expect(runtime.context.status).toBe(1);
 });
+
+test('string lower lowercases each value', async () => {
+	const runtime = createBuiltinRuntime();
+	const stream = string(runtime, {
+		operands: [literal('AbC'), literal('DEF')],
+		subcommand: literal('lower'),
+	});
+	const records = await collect<ShellRecord>()(stream);
+
+	expect(records).toEqual([
+		{ kind: 'line', text: 'abc' },
+		{ kind: 'line', text: 'def' },
+	]);
+	expect(runtime.context.status).toBe(0);
+});
+
+test('string upper uppercases each value', async () => {
+	const runtime = createBuiltinRuntime();
+	const stream = string(runtime, {
+		operands: [literal('AbC')],
+		subcommand: literal('upper'),
+	});
+	const records = await collect<ShellRecord>()(stream);
+
+	expect(records).toEqual([{ kind: 'line', text: 'ABC' }]);
+	expect(runtime.context.status).toBe(0);
+});
+
+test('string lower reports status 1 when nothing changes', async () => {
+	const runtime = createBuiltinRuntime();
+	const stream = string(runtime, {
+		operands: [literal('abc')],
+		subcommand: literal('lower'),
+	});
+	const records = await collect<ShellRecord>()(stream);
+
+	expect(records).toEqual([{ kind: 'line', text: 'abc' }]);
+	expect(runtime.context.status).toBe(1);
+});
+
+test('string with a null subcommand reports a usage error', async () => {
+	const runtime = createBuiltinRuntime();
+	const stream = string(runtime, {
+		operands: [],
+		subcommand: null,
+	});
+	const records = await collect<ShellRecord>()(stream);
+
+	expect(records).toEqual([]);
+	expect(runtime.context.status).toBe(2);
+	expect(runtime.context.stderr.snapshot().join('\n')).toContain(
+		'string: missing subcommand'
+	);
+});

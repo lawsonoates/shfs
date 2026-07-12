@@ -2,12 +2,27 @@ import { expect, test } from 'bun:test';
 
 import { compile, compileEffect } from '@/compile/compile';
 import { CompileError } from '@/diagnostic';
-import { commandSub, compound, glob, literal } from '@/ir';
+import {
+	commandSub,
+	compound,
+	glob,
+	type JobStatementIR,
+	literal,
+	type StatementIR,
+	variable,
+} from '@/ir';
 import { parse } from '@/parser/parser';
+
+function job(statement: StatementIR | undefined): JobStatementIR {
+	if (statement?.kind !== 'job') {
+		throw new Error('Expected a job statement');
+	}
+	return statement;
+}
 
 test('compile preserves output redirection on steps', () => {
 	const ir = compile(parse('cat input.txt > output.txt'));
-	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+	expect(job(ir.statements[0]).pipeline.steps[0]).toMatchObject({
 		cmd: 'cat',
 		redirections: [{ kind: 'output', target: literal('output.txt') }],
 	});
@@ -15,7 +30,7 @@ test('compile preserves output redirection on steps', () => {
 
 test('compile preserves input redirection on steps', () => {
 	const ir = compile(parse('head -n 1 < input.txt'));
-	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+	expect(job(ir.statements[0]).pipeline.steps[0]).toMatchObject({
 		cmd: 'head',
 		redirections: [{ kind: 'input', target: literal('input.txt') }],
 	});
@@ -23,7 +38,7 @@ test('compile preserves input redirection on steps', () => {
 
 test('compile supports pwd command', () => {
 	const ir = compile(parse('pwd'));
-	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+	expect(job(ir.statements[0]).pipeline.steps[0]).toMatchObject({
 		args: {},
 		cmd: 'pwd',
 	});
@@ -31,7 +46,7 @@ test('compile supports pwd command', () => {
 
 test('compile supports cd command', () => {
 	const ir = compile(parse('cd'));
-	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+	expect(job(ir.statements[0]).pipeline.steps[0]).toMatchObject({
 		args: { path: literal('/') },
 		cmd: 'cd',
 	});
@@ -40,13 +55,13 @@ test('compile supports cd command', () => {
 test('compile preserves statement ordering in script IR', () => {
 	const ir = compile(parse('pwd; cd /tmp\npwd'));
 	expect(ir.statements).toHaveLength(3);
-	expect(ir.statements[0]?.pipeline.firstCommand?.name).toMatchObject(
+	expect(job(ir.statements[0]).pipeline.firstCommand?.name).toMatchObject(
 		literal('pwd')
 	);
-	expect(ir.statements[1]?.pipeline.firstCommand?.name).toMatchObject(
+	expect(job(ir.statements[1]).pipeline.firstCommand?.name).toMatchObject(
 		literal('cd')
 	);
-	expect(ir.statements[2]?.pipeline.firstCommand?.name).toMatchObject(
+	expect(job(ir.statements[2]).pipeline.firstCommand?.name).toMatchObject(
 		literal('pwd')
 	);
 });
@@ -61,7 +76,7 @@ test('compile sets default statement chain metadata to always', () => {
 
 test('compile supports command substitution in argument position', () => {
 	const ir = compile(parse('cd (echo subdir)'));
-	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+	expect(job(ir.statements[0]).pipeline.steps[0]).toMatchObject({
 		cmd: 'cd',
 		args: {
 			path: {
@@ -74,7 +89,7 @@ test('compile supports command substitution in argument position', () => {
 
 test('compile preserves nested command substitution serialization', () => {
 	const ir = compile(parse('echo (echo (echo nested))'));
-	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+	expect(job(ir.statements[0]).pipeline.steps[0]).toMatchObject({
 		cmd: 'echo',
 		args: {
 			values: [
@@ -93,7 +108,7 @@ test('compile preserves pipe redirection serialization in command substitution',
 		parse('echo (find /workspace /missing -maxdepth 0 2>| cat)')
 	);
 
-	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+	expect(job(ir.statements[0]).pipeline.steps[0]).toMatchObject({
 		args: {
 			values: [
 				commandSub('find /workspace /missing -maxdepth 0 2>| cat'),
@@ -106,7 +121,7 @@ test('compile preserves pipe redirection serialization in command substitution',
 test('compile preserves mixed glob words as compound arguments', () => {
 	const ir = compile(parse('echo src/*.test.ts'));
 
-	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+	expect(job(ir.statements[0]).pipeline.steps[0]).toMatchObject({
 		cmd: 'echo',
 		args: {
 			values: [
@@ -119,7 +134,7 @@ test('compile preserves mixed glob words as compound arguments', () => {
 test('compile preserves mixed command substitution words with adjacent literals', () => {
 	const ir = compile(parse('echo foo(echo bar)baz'));
 
-	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+	expect(job(ir.statements[0]).pipeline.steps[0]).toMatchObject({
 		cmd: 'echo',
 		args: {
 			values: [
@@ -133,11 +148,13 @@ test('compile preserves mixed command substitution words with adjacent literals'
 	});
 });
 
-test('compile keeps variable-like args for runtime expansion', () => {
+test('compile keeps variable args for runtime expansion', () => {
 	const ir = compile(parse('echo $status $PROJECT_ROOT'));
-	expect(ir.statements[0]?.pipeline.steps[0]).toMatchObject({
+	expect(job(ir.statements[0]).pipeline.steps[0]).toMatchObject({
 		cmd: 'echo',
-		args: { values: [literal('$status'), literal('$PROJECT_ROOT')] },
+		args: {
+			values: [variable('status'), variable('PROJECT_ROOT')],
+		},
 	});
 });
 
@@ -150,8 +167,16 @@ test('compile preserves and/or chain metadata', () => {
 	]);
 });
 
+test('compile routes unknown commands to runtime call steps', () => {
+	const ir = compile(parse('definitely-not-a-command arg1'));
+	expect(job(ir.statements[0]).pipeline.steps[0]).toMatchObject({
+		args: { name: 'definitely-not-a-command', words: [literal('arg1')] },
+		cmd: 'call',
+	});
+});
+
 test('compileEffect yields compile failures on the result error channel', () => {
-	const result = compileEffect(parse('definitely-not-a-command'));
+	const result = compileEffect(parse('set -Z x'));
 	expect(result.isErr()).toBeTrue();
 	if (result.isErr()) {
 		expect(result.error).toBeInstanceOf(CompileError);

@@ -1,12 +1,15 @@
 import {
+	type AssignmentIR,
 	expandedWordToString,
 	type PipelineIR,
 	type RedirectionIR,
 	type ScriptIR,
 	type StatementChainModeIR,
+	type StatementIR,
 	type StepIR,
 } from '@shfs/compiler';
 import { Result } from 'better-result';
+import type { FunctionDefinition, VariableFrame } from '../builtin/types';
 import {
 	runOrReport,
 	type ShellErrorCause,
@@ -17,8 +20,10 @@ import type { FS } from '../fs/fs';
 import { formatRecord, type Record as ShellRecord } from '../record';
 import { BufferedOutputStream, type OutputStream } from '../stderr';
 import type { Stream } from '../stream';
+import { createShellInput, type ShellInput } from './io';
 import {
 	evaluateExpandedSinglePathEffect,
+	expandWordToValuesEffect,
 	normalizeCwd,
 	resolvePathFromCwd,
 } from './path';
@@ -38,16 +43,32 @@ import {
 	CommandRegistry,
 	type ExecuteStepContext,
 } from './registry';
+import { isReadOnlyVariable, lookupVariable } from './variables';
 
 export interface ExecuteContext {
 	cwd: string;
 	status?: number;
 	stderr?: OutputStream;
-	globalVars?: Map<string, string>;
-	localVars?: Map<string, string>;
+	globalVars?: Map<string, string[]>;
+	stdin?: ShellInput;
+	scopes?: VariableFrame[];
+	functions?: Map<string, FunctionDefinition>;
 }
 
 type NormalizedExecuteContext = ExecuteStepContext;
+
+/**
+ * Loop and function control flow signal propagated through statement
+ * execution. `break`/`continue` are consumed by the innermost loop body;
+ * `return` is consumed by the function call (or ends the script).
+ */
+type ControlSignal =
+	| { kind: 'normal' }
+	| { kind: 'break' }
+	| { kind: 'continue' }
+	| { kind: 'return' };
+
+const NORMAL_SIGNAL: ControlSignal = { kind: 'normal' };
 
 type OutputDestination =
 	| { kind: 'closed' }
@@ -88,6 +109,8 @@ function toScriptIR(pipeline: PipelineIR): ScriptIR {
 		statements: [
 			{
 				chainMode: 'always',
+				kind: 'job',
+				negated: false,
 				pipeline,
 			},
 		],
@@ -130,15 +153,428 @@ async function* runScriptToStream(
 	fs: FS,
 	context: NormalizedExecuteContext
 ): Stream<ShellRecord> {
-	for (const statement of script.statements) {
+	const signal = yield* runStatementList(script.statements, fs, context);
+	if (signal.kind === 'break' || signal.kind === 'continue') {
+		context.status = 1;
+		context.stderr.append(`${signal.kind}: Not inside of loop`);
+	}
+}
+
+/**
+ * Run a statement list, yielding records and returning the control signal
+ * that ended it (`normal` when the list ran to completion).
+ */
+async function* runStatementList(
+	statements: readonly StatementIR[],
+	fs: FS,
+	context: NormalizedExecuteContext
+): AsyncGenerator<ShellRecord, ControlSignal> {
+	for (const statement of statements) {
 		if (!shouldExecuteStatement(statement.chainMode, context.status)) {
 			continue;
 		}
+		const signal = yield* runStatement(statement, fs, context);
+		if (signal.kind !== 'normal') {
+			return signal;
+		}
+	}
+	return NORMAL_SIGNAL;
+}
 
-		const records = await collectRecords(
-			runPipeline(statement.pipeline, fs, context)
+async function* runStatement(
+	statement: StatementIR,
+	fs: FS,
+	context: NormalizedExecuteContext
+): AsyncGenerator<ShellRecord, ControlSignal> {
+	switch (statement.kind) {
+		case 'job': {
+			const records = await collectRecords(
+				runPipeline(statement.pipeline, fs, context)
+			);
+			yield* recordsToStream(records);
+			if (statement.negated) {
+				context.status = context.status === 0 ? 1 : 0;
+			}
+			return NORMAL_SIGNAL;
+		}
+		case 'begin':
+			return yield* runBeginStatement(statement, fs, context);
+		case 'if':
+			return yield* runIfStatement(statement, fs, context);
+		case 'while':
+			return yield* runWhileStatement(statement, fs, context);
+		case 'for':
+			return yield* runForStatement(statement, fs, context);
+		case 'function':
+			runFunctionDefinition(statement, context);
+			return NORMAL_SIGNAL;
+		case 'break':
+			return { kind: 'break' };
+		case 'continue':
+			return { kind: 'continue' };
+		case 'return':
+			return await runReturnStatement(statement, fs, context);
+		default: {
+			const _exhaustive: never = statement;
+			throw new Error(
+				`Unknown statement kind: ${JSON.stringify(_exhaustive)}`
+			);
+		}
+	}
+}
+
+/**
+ * Evaluate command-scoped assignments into a variable frame.
+ * PATH-like names split their values on colons.
+ */
+function assignmentFrameEffect(
+	assignments: readonly AssignmentIR[],
+	fs: FS,
+	context: NormalizedExecuteContext
+): ShellResult<VariableFrame, ShellErrorCause> {
+	return Result.gen(async function* () {
+		const vars = new Map<string, string[]>();
+		for (const assignment of assignments) {
+			if (isReadOnlyVariable(assignment.name)) {
+				return yield* new ShellRuntimeError({
+					exitCode: 1,
+					message: `${assignment.name}: cannot overwrite read-only variable`,
+				});
+			}
+			let values = yield* await expandWordToValuesEffect(
+				assignment.value,
+				fs,
+				context,
+				{ command: assignment.name, emptyGlobOk: true }
+			);
+			if (assignment.name.endsWith('PATH')) {
+				values = values.flatMap((value) => value.split(':'));
+			}
+			vars.set(assignment.name, values);
+		}
+		return Result.ok({ vars });
+	});
+}
+
+/**
+ * Push an evaluated assignment frame. Returns false when evaluation
+ * failed (already reported); the caller should skip the statement.
+ */
+async function pushAssignmentFrame(
+	assignments: readonly AssignmentIR[],
+	fs: FS,
+	context: NormalizedExecuteContext
+): Promise<boolean> {
+	if (assignments.length === 0) {
+		context.scopes.push({ vars: new Map() });
+		return true;
+	}
+	const frame = await runOrReport(
+		assignmentFrameEffect(assignments, fs, context),
+		context
+	);
+	if (!frame.ok) {
+		return false;
+	}
+	context.scopes.push(frame.value);
+	return true;
+}
+
+async function* runBeginStatement(
+	statement: Extract<StatementIR, { kind: 'begin' }>,
+	fs: FS,
+	context: NormalizedExecuteContext
+): AsyncGenerator<ShellRecord, ControlSignal> {
+	if (!(await pushAssignmentFrame(statement.assignments, fs, context))) {
+		return NORMAL_SIGNAL;
+	}
+	context.scopes.push({ vars: new Map() });
+	try {
+		const signal = yield* runStatementList(statement.body, fs, context);
+		if (signal.kind === 'normal' && statement.negated) {
+			context.status = context.status === 0 ? 1 : 0;
+		}
+		return signal;
+	} finally {
+		context.scopes.pop();
+		context.scopes.pop();
+	}
+}
+
+async function* runIfStatement(
+	statement: Extract<StatementIR, { kind: 'if' }>,
+	fs: FS,
+	context: NormalizedExecuteContext
+): AsyncGenerator<ShellRecord, ControlSignal> {
+	if (!(await pushAssignmentFrame(statement.assignments, fs, context))) {
+		return NORMAL_SIGNAL;
+	}
+	try {
+		let branchTaken = false;
+		let signal: ControlSignal = NORMAL_SIGNAL;
+
+		for (const branch of statement.branches) {
+			const conditionSignal = yield* runStatementList(
+				branch.condition,
+				fs,
+				context
+			);
+			if (conditionSignal.kind !== 'normal') {
+				return conditionSignal;
+			}
+			if (context.status !== 0) {
+				continue;
+			}
+			branchTaken = true;
+			signal = yield* runBlockBody(branch.body, fs, context);
+			break;
+		}
+
+		if (!branchTaken && statement.elseBody) {
+			branchTaken = true;
+			signal = yield* runBlockBody(statement.elseBody, fs, context);
+		}
+		if (!branchTaken) {
+			context.status = 0;
+		}
+		if (signal.kind === 'normal' && statement.negated) {
+			context.status = context.status === 0 ? 1 : 0;
+		}
+		return signal;
+	} finally {
+		context.scopes.pop();
+	}
+}
+
+async function* runWhileStatement(
+	statement: Extract<StatementIR, { kind: 'while' }>,
+	fs: FS,
+	context: NormalizedExecuteContext
+): AsyncGenerator<ShellRecord, ControlSignal> {
+	if (!(await pushAssignmentFrame(statement.assignments, fs, context))) {
+		return NORMAL_SIGNAL;
+	}
+	try {
+		let lastBodyStatus = 0;
+		while (true) {
+			// Loop-control signals in the condition target the outer loop.
+			const conditionSignal = yield* runStatementList(
+				statement.condition,
+				fs,
+				context
+			);
+			if (conditionSignal.kind !== 'normal') {
+				return conditionSignal;
+			}
+			if (context.status !== 0) {
+				break;
+			}
+
+			const signal = yield* runBlockBody(statement.body, fs, context);
+			lastBodyStatus = context.status;
+			if (signal.kind === 'break') {
+				break;
+			}
+			if (signal.kind === 'return') {
+				return signal;
+			}
+		}
+		context.status = lastBodyStatus;
+		if (statement.negated) {
+			context.status = context.status === 0 ? 1 : 0;
+		}
+		return NORMAL_SIGNAL;
+	} finally {
+		context.scopes.pop();
+	}
+}
+
+async function* runForStatement(
+	statement: Extract<StatementIR, { kind: 'for' }>,
+	fs: FS,
+	context: NormalizedExecuteContext
+): AsyncGenerator<ShellRecord, ControlSignal> {
+	if (isReadOnlyVariable(statement.variable)) {
+		context.status = 1;
+		context.stderr.append(
+			`for: ${statement.variable}: cannot overwrite read-only variable`
 		);
-		yield* recordsToStream(records);
+		return NORMAL_SIGNAL;
+	}
+
+	const values: string[] = [];
+	for (const word of statement.values) {
+		const expanded = await runOrReport(
+			expandWordToValuesEffect(word, fs, context, {
+				command: 'for',
+				emptyGlobOk: true,
+			}),
+			context
+		);
+		if (!expanded.ok) {
+			return NORMAL_SIGNAL;
+		}
+		values.push(...expanded.value);
+	}
+
+	// The loop variable lives in the enclosing scope, initialized with any
+	// previously visible value.
+	const loopFrame = context.scopes.at(-1);
+	if (!loopFrame) {
+		throw new Error('Variable scope stack is empty');
+	}
+	loopFrame.vars.set(
+		statement.variable,
+		lookupVariable(context, statement.variable) ?? []
+	);
+
+	let lastBodyStatus = 0;
+	for (const value of values) {
+		loopFrame.vars.set(statement.variable, [value]);
+		const signal = yield* runBlockBody(statement.body, fs, context);
+		lastBodyStatus = context.status;
+		if (signal.kind === 'break') {
+			break;
+		}
+		if (signal.kind === 'return') {
+			return signal;
+		}
+	}
+	context.status = lastBodyStatus;
+	return NORMAL_SIGNAL;
+}
+
+/**
+ * Run a block body inside a fresh local scope frame.
+ */
+async function* runBlockBody(
+	body: readonly StatementIR[],
+	fs: FS,
+	context: NormalizedExecuteContext
+): AsyncGenerator<ShellRecord, ControlSignal> {
+	context.scopes.push({ vars: new Map() });
+	try {
+		return yield* runStatementList(body, fs, context);
+	} finally {
+		context.scopes.pop();
+	}
+}
+
+const RESERVED_FUNCTION_NAMES = new Set([
+	'!',
+	'and',
+	'begin',
+	'break',
+	'case',
+	'continue',
+	'else',
+	'end',
+	'for',
+	'function',
+	'if',
+	'in',
+	'not',
+	'or',
+	'return',
+	'switch',
+	'while',
+]);
+
+function runFunctionDefinition(
+	statement: Extract<StatementIR, { kind: 'function' }>,
+	context: NormalizedExecuteContext
+): void {
+	if (
+		RESERVED_FUNCTION_NAMES.has(statement.name) ||
+		CommandRegistry.has(statement.name)
+	) {
+		context.status = 1;
+		context.stderr.append(
+			`function: ${statement.name}: cannot use reserved keyword as function name`
+		);
+		return;
+	}
+	context.functions.set(statement.name, {
+		argumentNames: statement.argumentNames,
+		body: statement.body,
+		name: statement.name,
+	});
+	context.status = 0;
+}
+
+const RETURN_STATUS_REGEX = /^-?\d+$/;
+const RETURN_STATUS_MODULO = 256;
+
+async function runReturnStatement(
+	statement: Extract<StatementIR, { kind: 'return' }>,
+	fs: FS,
+	context: NormalizedExecuteContext
+): Promise<ControlSignal> {
+	const values: string[] = [];
+	for (const word of statement.values) {
+		const expanded = await runOrReport(
+			expandWordToValuesEffect(word, fs, context, { command: 'return' }),
+			context
+		);
+		if (!expanded.ok) {
+			return NORMAL_SIGNAL;
+		}
+		values.push(...expanded.value);
+	}
+
+	if (values.length > 1) {
+		context.status = 2;
+		context.stderr.append('return: too many arguments');
+		return { kind: 'return' };
+	}
+	const value = values.at(0);
+	if (value !== undefined) {
+		if (!RETURN_STATUS_REGEX.test(value)) {
+			context.status = 2;
+			context.stderr.append(`return: ${value}: invalid integer`);
+			return { kind: 'return' };
+		}
+		const parsed = Number.parseInt(value, 10);
+		context.status =
+			((parsed % RETURN_STATUS_MODULO) + RETURN_STATUS_MODULO) %
+			RETURN_STATUS_MODULO;
+	}
+	return { kind: 'return' };
+}
+
+/**
+ * Invoke a runtime-defined function: arguments bind to $argv (and any
+ * named arguments) in a barrier frame that hides caller locals.
+ */
+export async function* runFunctionCall(
+	definition: FunctionDefinition,
+	args: readonly string[],
+	fs: FS,
+	context: NormalizedExecuteContext,
+	input: Stream<ShellRecord> | null = null,
+	vars?: ReadonlyMap<string, string[]>
+): AsyncGenerator<ShellRecord, void> {
+	const local = new Map<string, string[]>();
+	for (const [name, values] of vars ?? []) {
+		local.set(name, [...values]);
+	}
+	local.set('argv', [...args]);
+	definition.argumentNames.forEach((name, index) => {
+		const value = args[index];
+		local.set(name, value === undefined ? [] : [value]);
+	});
+	const stdin = context.stdin;
+	context.stdin = input ? createShellInput(input) : undefined;
+	context.scopes.push({ barrier: true, vars: local });
+	try {
+		const signal = yield* runStatementList(definition.body, fs, context);
+		if (signal.kind === 'break' || signal.kind === 'continue') {
+			context.status = 1;
+			context.stderr.append(`${signal.kind}: Not inside of loop`);
+		}
+	} finally {
+		context.scopes.pop();
+		context.stdin = stdin;
 	}
 }
 
@@ -227,14 +663,26 @@ async function executeActionStep(params: {
 }): Promise<ExecutedStepResult | null> {
 	const { context, fs, plan, shouldPreserveStatus, step } = params;
 	const childContext = createChildContext(context);
-	await runOrReport(
-		CommandRegistry.executeStep({
-			step,
-			fs,
-			context: childContext,
-		}),
-		childContext
-	);
+	const stepAssignments = step.assignments ?? [];
+	const framePushed =
+		stepAssignments.length > 0 &&
+		(await pushAssignmentFrame(stepAssignments, fs, childContext));
+	try {
+		if (stepAssignments.length === 0 || framePushed) {
+			await runOrReport(
+				CommandRegistry.executeStep({
+					step,
+					fs,
+					context: childContext,
+				}),
+				childContext
+			);
+		}
+	} finally {
+		if (framePushed) {
+			childContext.scopes.pop();
+		}
+	}
 	const stderrLines = childContext.stderr.snapshot();
 	propagateChildContext(childContext, context);
 	const routed = await routeStepOutput({
@@ -274,18 +722,37 @@ async function executeStreamStep(params: {
 		step.cmd === 'grep' && plan.fd1.kind === 'file'
 			? plan.fd1.path
 			: undefined;
-	const stepOutput = CommandRegistry.executeStep({
-		step,
-		fs,
-		input: inputRecords === null ? null : recordsToStream(inputRecords),
-		context: childContext,
-		resolvedOutputRedirectPath,
-	});
-	const collected = await runOrReport(
-		collectRecordStream(stepOutput),
-		childContext
-	);
-	const stdoutRecords = collected.ok ? collected.value : [];
+	const stepAssignments = step.assignments ?? [];
+	const framePushed =
+		stepAssignments.length > 0 &&
+		(await pushAssignmentFrame(stepAssignments, fs, childContext));
+	let stdoutRecords: ShellRecord[] = [];
+	try {
+		if (stepAssignments.length === 0 || framePushed) {
+			const stepOutput = CommandRegistry.executeStep({
+				step,
+				fs,
+				input:
+					inputRecords === null
+						? (childContext.stdin?.records() ?? null)
+						: recordsToStream(inputRecords),
+				context: childContext,
+				resolvedOutputRedirectPath,
+				vars: framePushed
+					? childContext.scopes.at(-1)?.vars
+					: undefined,
+			});
+			const collected = await runOrReport(
+				collectRecordStream(stepOutput),
+				childContext
+			);
+			stdoutRecords = collected.ok ? collected.value : [];
+		}
+	} finally {
+		if (framePushed) {
+			childContext.scopes.pop();
+		}
+	}
 	const stderrLines = childContext.stderr.snapshot();
 	propagateChildContext(childContext, context);
 	const routed = await routeStepOutput({
@@ -306,8 +773,12 @@ function normalizeContext(context: ExecuteContext): NormalizedExecuteContext {
 	context.cwd = normalizeCwd(context.cwd);
 	context.status ??= 0;
 	context.stderr ??= new BufferedOutputStream();
-	context.globalVars ??= new Map<string, string>();
-	context.localVars ??= new Map<string, string>();
+	context.globalVars ??= new Map<string, string[]>();
+	context.scopes ??= [{ vars: new Map<string, string[]>() }];
+	if (context.scopes.length === 0) {
+		context.scopes.push({ vars: new Map<string, string[]>() });
+	}
+	context.functions ??= new Map<string, FunctionDefinition>();
 	return context as NormalizedExecuteContext;
 }
 
@@ -316,10 +787,12 @@ function createChildContext(
 ): NormalizedExecuteContext {
 	return {
 		cwd: context.cwd,
+		functions: context.functions,
 		globalVars: context.globalVars,
-		localVars: context.localVars,
+		scopes: context.scopes,
 		status: context.status,
 		stderr: new BufferedOutputStream(),
+		stdin: context.stdin,
 	};
 }
 

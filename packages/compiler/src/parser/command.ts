@@ -8,7 +8,13 @@
 
 import { SourceSpan } from '../lexer/position';
 import { TokenKind } from '../lexer/token';
-import { LiteralPart, Redirection, SimpleCommand, Word } from './ast';
+import {
+	type Assignment,
+	LiteralPart,
+	Redirection,
+	SimpleCommand,
+	Word,
+} from './ast';
 import type { Parser } from './parser';
 import type { WordParser } from './word';
 
@@ -38,8 +44,16 @@ export class CommandParser {
 	 * Parse a command.
 	 * Returns null if no command is present.
 	 */
-	parseCommand(): SimpleCommand | null {
-		return this.parseSimpleCommand();
+	parseCommand(assignments: Assignment[] = []): SimpleCommand | null {
+		return this.parseSimpleCommand(assignments);
+	}
+
+	/**
+	 * Parse a single word argument (used for loop variables, function
+	 * names/options, and return values).
+	 */
+	parseWordArgument(): Word | null {
+		return this.wordParser.parseWord();
 	}
 
 	/**
@@ -48,7 +62,7 @@ export class CommandParser {
 	 * Grammar:
 	 *   simple_command ::= word+ (redirection)*
 	 */
-	parseSimpleCommand(): SimpleCommand | null {
+	parseSimpleCommand(assignments: Assignment[] = []): SimpleCommand | null {
 		const startPos = this.parser.currentToken.span.start;
 
 		// Parse command name (first word)
@@ -90,7 +104,8 @@ export class CommandParser {
 			span,
 			name,
 			normalized.args,
-			normalized.redirections
+			normalized.redirections,
+			assignments
 		);
 	}
 
@@ -265,7 +280,9 @@ export class CommandParser {
 			kind === TokenKind.PIPE ||
 			kind === TokenKind.SEMICOLON ||
 			kind === TokenKind.NEWLINE ||
-			kind === TokenKind.EOF
+			kind === TokenKind.EOF ||
+			kind === TokenKind.AND_AND ||
+			kind === TokenKind.OR_OR
 		);
 	}
 

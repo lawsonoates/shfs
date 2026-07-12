@@ -147,6 +147,8 @@ function isSimpleWordDelimiterCode(code: number): boolean {
 		case 32:
 		case 34:
 		case 35:
+		case 36: // $
+		case 38: // &
 		case 39:
 		case 40:
 		case 41:

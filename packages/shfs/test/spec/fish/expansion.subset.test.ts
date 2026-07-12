@@ -3,10 +3,10 @@
 // Copyright (C) 2009- fish-shell contributors
 // License: GNU General Public License, version 2.
 
-// Note: fish expansion.fish covers brace expansion, slices, tilde expansion,
-// path variables, indirect variable expansion ($$), and more. Most of these
-// are out of scope for shfs. This subset covers only the variable expansion
-// and quoting behaviors that fall within the shfs subset boundary.
+// Note: fish expansion.fish covers brace expansion, tilde expansion, path
+// variables, and indirect variable expansion ($$), which are out of scope.
+// This subset covers list-variable expansion counts, empty-list elision,
+// quoting behaviors, and cartesian products of adjacent expansions.
 
 import { beforeEach, expect, test } from 'bun:test';
 
@@ -14,6 +14,14 @@ import { MemoryFS } from '@/fs/memory';
 import { Shell } from '@/shell/shell';
 
 let shell!: Shell;
+
+// expansion.fish: function expansion --description 'Prints argument count
+// followed by arguments'
+const EXPANSION_FUNCTION = [
+	'function expansion',
+	'    echo (count $argv) $argv',
+	'end',
+].join('\n');
 
 beforeEach(() => {
 	shell = new Shell(new MemoryFS());
@@ -34,44 +42,87 @@ async function runWithStatus(
 	};
 }
 
-// expansion.fish: echo {apple,orange}
-// Brace expansion is out of scope for shfs.
+async function runExpansion(setup: string, call: string): Promise<string> {
+	return await run(`${EXPANSION_FUNCTION}\n${setup}\n${call}`);
+}
 
-// expansion.fish: set -l foo; expansion "$foo"; expansion $foo
-// Tests empty variable expansion behavior.
-test('fish expansion: expansion.fish - double-quoted empty variable expands to empty string', async () => {
-	expect(await run('set -l foo; echo "$foo"')).toBe('');
+// expansion.fish: set -l foo; expansion "$foo" → 1
+// (The output has a trailing space from echoing the empty argument;
+// upstream's CHECK lines trim it.)
+test('fish expansion: expansion.fish - quoted empty list expands to one empty argument', async () => {
+	expect(await runExpansion('set -l foo', 'expansion "$foo"')).toBe('1 ');
 });
 
-test('fish expansion: expansion.fish - unquoted empty variable expands to empty string', async () => {
-	expect(await run('set -l foo; echo $foo')).toBe('');
+// expansion.fish: set -l foo; expansion $foo → 0
+test('fish expansion: expansion.fish - unquoted empty list expands to zero arguments', async () => {
+	expect(await runExpansion('set -l foo', 'expansion $foo')).toBe('0');
 });
 
-// expansion.fish: set -l foo; expansion "prefix$foo"; expansion prefix$foo
-test('fish expansion: expansion.fish - double-quoted prefix with empty variable keeps prefix', async () => {
-	expect(await run('set -l foo; echo "prefix$foo"')).toBe('prefix');
+// expansion.fish: set -l foo; expansion "prefix$foo" → 1 prefix
+test('fish expansion: expansion.fish - quoted prefix with empty list keeps the prefix', async () => {
+	expect(await runExpansion('set -l foo', 'expansion "prefix$foo"')).toBe(
+		'1 prefix'
+	);
 });
 
-test('fish expansion: expansion.fish - unquoted prefix with empty variable keeps prefix', async () => {
-	expect(await run('set -l foo; echo prefix$foo')).toBe('prefix');
+// expansion.fish: set -l foo; expansion prefix$foo → 0
+test('fish expansion: expansion.fish - unquoted prefix with empty list elides the word', async () => {
+	expect(await runExpansion('set -l foo', 'expansion prefix$foo')).toBe('0');
 });
 
-// expansion.fish: set -l foo ''; expansion "$foo"; expansion $foo
-test('fish expansion: expansion.fish - double-quoted variable set to empty string expands to empty', async () => {
-	expect(await run('set -l foo \'\'; echo "$foo"')).toBe('');
+// expansion.fish: set -l foo ''; expansion "$foo" / $foo → 1 / 1
+test('fish expansion: expansion.fish - empty-string element expands to one empty argument', async () => {
+	expect(await runExpansion("set -l foo ''", 'expansion "$foo"')).toBe('1 ');
+	expect(await runExpansion("set -l foo ''", 'expansion $foo')).toBe('1 ');
 });
 
-test('fish expansion: expansion.fish - unquoted variable set to empty string expands to empty', async () => {
-	expect(await run("set -l foo ''; echo $foo")).toBe('');
+// expansion.fish: set -l foo ''; expansion "prefix$foo" / prefix$foo → 1 prefix
+test('fish expansion: expansion.fish - empty-string element keeps prefixed words', async () => {
+	expect(await runExpansion("set -l foo ''", 'expansion "prefix$foo"')).toBe(
+		'1 prefix'
+	);
+	expect(await runExpansion("set -l foo ''", 'expansion prefix$foo')).toBe(
+		'1 prefix'
+	);
 });
 
-// expansion.fish: set -l foo ''; expansion "prefix$foo"; expansion prefix$foo
-test('fish expansion: expansion.fish - prefix with variable set to empty string keeps prefix', async () => {
-	expect(await run('set -l foo \'\'; echo "prefix$foo"')).toBe('prefix');
+// Undefined variables behave like empty lists.
+test('fish expansion: expansion.fish - undefined variable in quotes is one empty argument', async () => {
+	expect(await run(`${EXPANSION_FUNCTION}\nexpansion "$undefined"`)).toBe(
+		'1 '
+	);
+	expect(await run('echo "value:$undefined"')).toBe('value:');
 });
 
-// expansion.fish: set -l foo bar; set -l bar baz; expansion "$$foo"
-// Indirect expansion ($$) is out of scope for shfs.
+test('fish expansion: expansion.fish - undefined variable unquoted elides the word', async () => {
+	expect(await run(`${EXPANSION_FUNCTION}\nexpansion value:$undefined`)).toBe(
+		'0'
+	);
+});
+
+// Multi-element expansion counts.
+test('fish expansion: expansion.fish - unquoted list expands to one argument per element', async () => {
+	expect(await runExpansion('set -l pair a b', 'expansion $pair')).toBe(
+		'2 a b'
+	);
+});
+
+// Quoted lists join with spaces.
+test('fish expansion: expansion.fish - quoted list joins elements with spaces', async () => {
+	expect(await runExpansion('set -l pair a b', 'expansion "$pair"')).toBe(
+		'1 a b'
+	);
+});
+
+// expansion.fish: echo {$aa}a{1,2,3}... (adapted: cartesian product via lists)
+test('fish expansion: expansion.fish - adjacent list expansion forms a cartesian product', async () => {
+	expect(await runExpansion('set -l pair a b', 'expansion x$pair')).toBe(
+		'2 xa xb'
+	);
+	expect(
+		await runExpansion('set -l l 1 2\nset -l r x y', 'expansion $l$r')
+	).toBe('4 1x 1y 2x 2y');
+});
 
 // Variable expansion with command substitution.
 test('fish expansion: expansion.fish - variable expansion inside command substitution', async () => {
@@ -110,13 +161,17 @@ test('fish expansion: expansion.fish - variable expansion adjacent to command su
 	expect(await run('echo "$prefix"(echo fix)')).toBe('prefix');
 });
 
-// Undefined variable expands to empty.
-test('fish expansion: expansion.fish - undefined variable expands to empty in double quotes', async () => {
-	expect(await run('echo "value:$undefined"')).toBe('value:');
+// Single quotes suppress variable expansion.
+test('fish expansion: expansion.fish - single quotes keep dollar literal', async () => {
+	await run('set -g solo value');
+	expect(await run("echo '$solo'")).toBe('$solo');
 });
 
-test('fish expansion: expansion.fish - undefined variable expands to empty unquoted', async () => {
-	expect(await run('echo value:$undefined')).toBe('value:');
+// expansion.fish: $f[a] → Invalid index value
+test('fish expansion: expansion.fish - non-numeric index is an error', async () => {
+	const result = await runWithStatus('echo $f[a]');
+	expect(result.status).not.toBe(0);
+	expect(result.stderr).toContain('Invalid index value');
 });
 
 // expansion.fish lines 4-13 use nested fish execution with `... 2>&1`

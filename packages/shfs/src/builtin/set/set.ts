@@ -1,35 +1,262 @@
-import type { SetStep } from '@shfs/compiler';
 import {
-	evaluateExpandedWord,
-	evaluateExpandedWords,
+	type ExpandedWord,
+	expandedWordParts,
+	type SetStep,
+} from '@shfs/compiler';
+import { Result } from 'better-result';
+import { runOrReport } from '../../diagnostics';
+import {
+	evaluateExpandedWordEffect,
+	expandWordToValuesEffect,
 } from '../../execute/path';
-import type { Builtin } from '../types';
+import {
+	eraseVariable,
+	isReadOnlyVariable,
+	isValidVariableName,
+	lookupVariable,
+	resolveIndexPositions,
+	selectByIndex,
+	setVariable,
+	type VariableScope,
+} from '../../execute/variables';
+import type { Builtin, BuiltinRuntime } from '../types';
 
-const VARIABLE_NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const ERASE_MISSING_STATUS = 4;
+
+interface VariableTarget {
+	name: string;
+	index: string | null;
+}
+
+/**
+ * Split a `name[index]` word into the name portion and the raw index text.
+ * Depending on spacing, the lexer produces either a bracket glob part
+ * (`x[1]`) or plain literal text (`x[1 .. 2]` after merging), so the
+ * target is recovered from the combined raw text.
+ */
+async function resolveVariableTarget(
+	runtime: BuiltinRuntime,
+	word: ExpandedWord
+): Promise<VariableTarget> {
+	let combined = '';
+	for (const part of expandedWordParts(word)) {
+		if (part.kind === 'glob') {
+			combined += part.pattern;
+			continue;
+		}
+		const partResult = await evaluateExpandedWordEffect(
+			part,
+			runtime.fs,
+			runtime.context
+		);
+		if (Result.isError(partResult)) {
+			throw partResult.error;
+		}
+		combined += partResult.value;
+	}
+
+	const bracketStart = combined.indexOf('[');
+	if (bracketStart !== -1 && combined.endsWith(']')) {
+		return {
+			index: combined.slice(bracketStart + 1, -1),
+			name: combined.slice(0, bracketStart),
+		};
+	}
+	return { index: null, name: combined };
+}
+
+function reportSetError(runtime: BuiltinRuntime, message: string): void {
+	runtime.context.stderr.append(message);
+	runtime.context.status = 1;
+}
+
+function guardVariableName(runtime: BuiltinRuntime, name: string): boolean {
+	if (!isValidVariableName(name)) {
+		reportSetError(runtime, `set: invalid variable name: ${name}`);
+		return false;
+	}
+	if (isReadOnlyVariable(name)) {
+		reportSetError(
+			runtime,
+			`set: Tried to change the read-only variable '${name}'`
+		);
+		return false;
+	}
+	return true;
+}
+
+async function expandValues(
+	runtime: BuiltinRuntime,
+	words: readonly ExpandedWord[]
+): Promise<string[] | null> {
+	const values: string[] = [];
+	for (const word of words) {
+		const expanded = await runOrReport(
+			expandWordToValuesEffect(word, runtime.fs, runtime.context, {
+				command: 'set',
+				emptyGlobOk: true,
+			}),
+			runtime.context
+		);
+		if (!expanded.ok) {
+			return null;
+		}
+		values.push(...expanded.value);
+	}
+	return values;
+}
+
+async function runAssign(
+	runtime: BuiltinRuntime,
+	args: SetStep['args']
+): Promise<void> {
+	const nameWord = args.names[0];
+	if (!nameWord) {
+		reportSetError(runtime, 'set: expected a variable name');
+		return;
+	}
+	const target = await resolveVariableTarget(runtime, nameWord);
+	if (!guardVariableName(runtime, target.name)) {
+		return;
+	}
+	const values = await expandValues(runtime, args.values);
+	if (values === null) {
+		return;
+	}
+
+	if (target.index !== null) {
+		assignByIndex(runtime, target.name, target.index, values, args.scope);
+		return;
+	}
+
+	let nextValues = values;
+	if (args.append || args.prepend) {
+		const current = lookupVariable(runtime.context, target.name) ?? [];
+		nextValues = args.append
+			? [...current, ...values]
+			: [...values, ...current];
+	}
+	setVariable(runtime.context, target.name, nextValues, args.scope);
+	// On success, set preserves the incoming $status (fish 3.0 behavior).
+}
+
+function assignByIndex(
+	runtime: BuiltinRuntime,
+	name: string,
+	indexText: string,
+	values: string[],
+	scope: VariableScope
+): void {
+	const current = lookupVariable(runtime.context, name) ?? [];
+	const positions = resolveIndexPositions(
+		runtime.context,
+		indexText,
+		current.length
+	);
+	if (Result.isError(positions)) {
+		throw positions.error;
+	}
+	if (positions.value.length !== values.length) {
+		reportSetError(
+			runtime,
+			'set: The number of variable indexes does not match the number of values'
+		);
+		return;
+	}
+	const next = [...current];
+	positions.value.forEach((position, valueIndex) => {
+		const value = values[valueIndex];
+		if (value !== undefined) {
+			next[position - 1] = value;
+		}
+	});
+	setVariable(runtime.context, name, next, scope);
+}
+
+async function runErase(
+	runtime: BuiltinRuntime,
+	args: SetStep['args']
+): Promise<void> {
+	let missing = false;
+	for (const nameWord of args.names) {
+		const target = await resolveVariableTarget(runtime, nameWord);
+		if (!guardVariableName(runtime, target.name)) {
+			return;
+		}
+		if (target.index === null) {
+			if (!eraseVariable(runtime.context, target.name, args.scope)) {
+				missing = true;
+			}
+			continue;
+		}
+
+		const current = lookupVariable(runtime.context, target.name);
+		if (current === undefined) {
+			missing = true;
+			continue;
+		}
+		const positions = resolveIndexPositions(
+			runtime.context,
+			target.index,
+			current.length
+		);
+		if (Result.isError(positions)) {
+			throw positions.error;
+		}
+		const removed = new Set(positions.value);
+		const next = current.filter((_value, index) => !removed.has(index + 1));
+		setVariable(runtime.context, target.name, next, args.scope);
+	}
+	runtime.context.status = missing ? ERASE_MISSING_STATUS : 0;
+}
+
+async function runQuery(
+	runtime: BuiltinRuntime,
+	args: SetStep['args']
+): Promise<void> {
+	let missing = 0;
+	for (const nameWord of args.names) {
+		const target = await resolveVariableTarget(runtime, nameWord);
+		const values = lookupVariable(runtime.context, target.name);
+		if (values === undefined) {
+			missing++;
+			continue;
+		}
+		if (target.index !== null) {
+			const selected = selectByIndex(
+				runtime.context,
+				values,
+				target.index
+			);
+			if (Result.isError(selected)) {
+				throw selected.error;
+			}
+			if (selected.value.length === 0) {
+				missing++;
+			}
+		}
+	}
+	runtime.context.status = missing;
+}
+
+async function runSetCommand(
+	runtime: BuiltinRuntime,
+	args: SetStep['args']
+): Promise<void> {
+	if (args.mode === 'erase') {
+		await runErase(runtime, args);
+		return;
+	}
+	if (args.mode === 'query') {
+		await runQuery(runtime, args);
+		return;
+	}
+	await runAssign(runtime, args);
+}
 
 export const set: Builtin<SetStep['args']> = (runtime, args) => {
 	return (async function* () {
-		const name = await evaluateExpandedWord(
-			args.name,
-			runtime.fs,
-			runtime.context
-		);
-		if (!VARIABLE_NAME_REGEX.test(name)) {
-			throw new Error(`set: invalid variable name: ${name}`);
-		}
-
-		const values = await evaluateExpandedWords(
-			args.values,
-			runtime.fs,
-			runtime.context
-		);
-		const value = values.join(' ');
-		if (args.scope === 'global') {
-			runtime.context.globalVars.set(name, value);
-		} else {
-			runtime.context.localVars.set(name, value);
-		}
-		runtime.context.status = 0;
+		await runSetCommand(runtime, args);
 		yield* [];
 	})();
 };
