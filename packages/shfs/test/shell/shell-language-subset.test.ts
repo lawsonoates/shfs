@@ -67,6 +67,15 @@ test('successful set preserves the incoming status', async () => {
 	expect(await run('false; set -g keep x; echo $status')).toBe('1');
 });
 
+test('command assignments reject read-only variables', async () => {
+	const result = await shell.$`status=42 echo $status`.nothrow();
+	expect(result.exitCode).not.toBe(0);
+	expect(result.text()).toBe('');
+	expect(result.stderr.toString()).toContain(
+		'status: cannot overwrite read-only variable'
+	);
+});
+
 test('the set subset rejects universal and export flags', async () => {
 	for (const command of [
 		'set -x smurf blue',

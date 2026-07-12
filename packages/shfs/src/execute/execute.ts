@@ -235,6 +235,12 @@ function assignmentFrameEffect(
 	return Result.gen(async function* () {
 		const vars = new Map<string, string[]>();
 		for (const assignment of assignments) {
+			if (isReadOnlyVariable(assignment.name)) {
+				return yield* new ShellRuntimeError({
+					exitCode: 1,
+					message: `${assignment.name}: cannot overwrite read-only variable`,
+				});
+			}
 			let values = yield* await expandWordToValuesEffect(
 				assignment.value,
 				fs,
@@ -519,14 +525,14 @@ async function runReturnStatement(
 	if (values.length > 1) {
 		context.status = 2;
 		context.stderr.append('return: too many arguments');
-		return NORMAL_SIGNAL;
+		return { kind: 'return' };
 	}
 	const value = values.at(0);
 	if (value !== undefined) {
 		if (!RETURN_STATUS_REGEX.test(value)) {
 			context.status = 2;
 			context.stderr.append(`return: ${value}: invalid integer`);
-			return NORMAL_SIGNAL;
+			return { kind: 'return' };
 		}
 		const parsed = Number.parseInt(value, 10);
 		context.status =

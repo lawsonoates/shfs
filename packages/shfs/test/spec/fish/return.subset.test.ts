@@ -85,14 +85,16 @@ test('fish return: return.fish - bare return keeps the current status', async ()
 
 // return.fish: $fish -c "return 1 2"
 test('fish return: return.fish - return with too many arguments is an error', async () => {
-	const result = await runResult('return 1 2');
+	const result = await runResult('return 1 2; echo unreachable');
 	expect(result.exitCode).not.toBe(0);
+	expect(result.stdout).toBe('');
 	expect(result.stderr).toContain('return: too many arguments');
 });
 
 // return.fish: $fish -c "return abc"
 test('fish return: return.fish - return with a non-integer is an error', async () => {
-	const result = await runResult('return abc');
+	const result = await runResult('return abc; echo unreachable');
 	expect(result.exitCode).not.toBe(0);
+	expect(result.stdout).toBe('');
 	expect(result.stderr).toContain('return: abc: invalid integer');
 });
