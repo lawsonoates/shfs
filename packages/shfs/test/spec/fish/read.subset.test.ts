@@ -55,6 +55,13 @@ test('fish read: read.fish - validates variable names', async () => {
 	);
 });
 
+// read.fish:391-398: read cannot target the read-only status variable.
+test('fish read: read.fish - read status is a read-only variable error', async () => {
+	await expect(run('echo foo | read status')).rejects.toThrow(
+		'read: status: cannot overwrite read-only variable'
+	);
+});
+
 // read.fish lines 172-181 verify file-fed reads via `<$path`.
 test('fish read: read.fish - input redirection feeds read from a file', async () => {
 	await run('echo hello > /tmp/read-from-file.txt');

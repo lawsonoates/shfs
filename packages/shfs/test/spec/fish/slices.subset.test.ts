@@ -181,6 +181,13 @@ test('fish slices: slices.fish - double range is an invalid index', async () => 
 	expect(result.stderr).toContain('Invalid index value');
 });
 
+// slices.fish: echo $test[..1..2] → Invalid index value
+test('fish slices: slices.fish - double range with open start is an invalid index', async () => {
+	const result = await runResult(`${SET_TEST_LIST}\necho $test[..1..2]`);
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain('Invalid index value');
+});
+
 // slices.fish: set list[..2] $list[2..1]
 test('fish slices: slices.fish - open range slice assignment', async () => {
 	const script = [

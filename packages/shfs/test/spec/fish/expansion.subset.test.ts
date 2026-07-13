@@ -167,6 +167,65 @@ test('fish expansion: expansion.fish - single quotes keep dollar literal', async
 	expect(await run("echo '$solo'")).toBe('$solo');
 });
 
+// expansion.fish:169-191: slices whose range leaves the list produce nothing;
+// an invalid start with forced reversal also produces nothing.
+test('fish expansion: expansion.fish - out-of-range slices expand to zero arguments', async () => {
+	const setup = "set -l foo bar '' fooest";
+	expect(await runExpansion(setup, 'expansion $foo[-5..2]')).toBe('0');
+	expect(await runExpansion(setup, 'expansion $foo[-2..-1]')).toBe(
+		'2  fooest'
+	);
+	expect(await runExpansion(setup, 'expansion $foo[-10..-5]')).toBe('0');
+});
+
+// expansion.fish:177-180: command substitution slices behave the same way.
+test('fish expansion: expansion.fish - out-of-range substitution slices expand to zero arguments', async () => {
+	expect(
+		await run(`${EXPANSION_FUNCTION}\nexpansion (echo one)[2..-1]`)
+	).toBe('0');
+});
+
+// expansion.fish:193-213: indexing an empty list gives one empty argument
+// when quoted and zero arguments unquoted.
+test('fish expansion: expansion.fish - indexing an empty list', async () => {
+	expect(await runExpansion('set -l foo', 'expansion "$foo[1]"')).toBe('1 ');
+	expect(await runExpansion('set -l foo', 'expansion $foo[1]')).toBe('0');
+	expect(await runExpansion('set -l foo', 'expansion "$foo[1 2]"')).toBe(
+		'1 '
+	);
+	expect(await runExpansion('set -l foo', 'expansion $foo[1 2]')).toBe('0');
+});
+
+// expansion.fish:214-225: out-of-range indexes on a non-empty list elide.
+test('fish expansion: expansion.fish - out-of-range indexes expand to zero arguments', async () => {
+	const setup = 'set -l foo a b c';
+	expect(await runExpansion(setup, 'expansion $foo[17]')).toBe('0');
+	expect(await runExpansion(setup, 'expansion $foo[-17]')).toBe('0');
+	expect(await runExpansion(setup, 'expansion $foo[17..18]')).toBe('0');
+	expect(await runExpansion(setup, 'expansion $foo[4..-2]')).toBe('0');
+});
+
+// expansion.fish:226-238: index 0 is an error.
+test('fish expansion: expansion.fish - zero index is an error', async () => {
+	for (const command of [
+		'echo $foo[0]',
+		'echo $foo[1..0]',
+		'echo $foo[-0]',
+	]) {
+		const result = await runWithStatus(`set -l foo a\n${command}`);
+		expect(result.status).not.toBe(0);
+		expect(result.stderr).toContain('array indices start at 1');
+	}
+});
+
+// expansion.fish:249-254: indexing an empty substitution.
+test('fish expansion: expansion.fish - indexing an empty substitution', async () => {
+	expect(await run('echo ()[1]')).toBe('');
+	const result = await runWithStatus('echo ()[d]');
+	expect(result.status).not.toBe(0);
+	expect(result.stderr).toContain('Invalid index value');
+});
+
 // expansion.fish: $f[a] → Invalid index value
 test('fish expansion: expansion.fish - non-numeric index is an error', async () => {
 	const result = await runWithStatus('echo $f[a]');

@@ -125,6 +125,13 @@ async function runAssign(
 	}
 
 	if (target.index !== null) {
+		if (args.append || args.prepend) {
+			reportSetError(
+				runtime,
+				'set: Cannot use --append or --prepend when assigning to a slice'
+			);
+			return;
+		}
 		assignByIndex(runtime, target.name, target.index, values, args.scope);
 		return;
 	}
@@ -132,9 +139,9 @@ async function runAssign(
 	let nextValues = values;
 	if (args.append || args.prepend) {
 		const current = lookupVariable(runtime.context, target.name) ?? [];
-		nextValues = args.append
-			? [...current, ...values]
-			: [...values, ...current];
+		const appended = args.append ? values : [];
+		const prepended = args.prepend ? values : [];
+		nextValues = [...prepended, ...current, ...appended];
 	}
 	setVariable(runtime.context, target.name, nextValues, args.scope);
 	// On success, set preserves the incoming $status (fish 3.0 behavior).

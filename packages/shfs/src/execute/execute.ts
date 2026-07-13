@@ -535,6 +535,11 @@ async function runReturnStatement(
 			return { kind: 'return' };
 		}
 		const parsed = Number.parseInt(value, 10);
+		if (parsed > RETURN_STATUS_MODULO - 1) {
+			// Fish clamps out-of-range statuses to 255 (tests/checks/basic.fish).
+			context.status = RETURN_STATUS_MODULO - 1;
+			return { kind: 'return' };
+		}
 		const wrapped =
 			((parsed % RETURN_STATUS_MODULO) + RETURN_STATUS_MODULO) %
 			RETURN_STATUS_MODULO;

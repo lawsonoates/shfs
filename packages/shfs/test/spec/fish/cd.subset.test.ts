@@ -172,6 +172,22 @@ test('fish string: cd.fish - can transform paths used by cd and participate in s
 	).toBe('yes');
 });
 
+// cd.fish:44-45: pwd takes no arguments.
+test('fish pwd: cd.fish - pwd rejects arguments', async () => {
+	const result = await runWithStatus('pwd abc');
+	expect(result.status).not.toBe(0);
+	expect(result.stderr).toContain('pwd');
+	expect(result.stderr).toContain('argument');
+});
+
+// cd.fish:431-436: cd from / does not build a //-prefixed path.
+test('fish cd: cd.fish - cd from the root produces a single-slash path', async () => {
+	await run('mkdir /bin-like');
+	await run('cd /');
+	await run('cd bin-like');
+	expect(await run('pwd')).toBe('/bin-like');
+});
+
 test('fish cd errors: cd.fish - missing directory has stable deterministic message', async () => {
 	await expect(run('cd /missing')).rejects.toThrow(
 		'cd: directory does not exist: /missing'

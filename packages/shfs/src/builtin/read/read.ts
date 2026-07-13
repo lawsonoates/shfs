@@ -1,6 +1,6 @@
 import type { ReadStep } from '@shfs/compiler';
 import { evaluateExpandedWord } from '../../execute/path';
-import { setVariable } from '../../execute/variables';
+import { isReadOnlyVariable, setVariable } from '../../execute/variables';
 import type { Builtin } from '../types';
 
 const VARIABLE_NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -14,6 +14,11 @@ export const read: Builtin<ReadStep['args']> = (runtime, args) => {
 		);
 		if (!VARIABLE_NAME_REGEX.test(name)) {
 			throw new Error(`read: invalid variable name: ${name}`);
+		}
+		if (isReadOnlyVariable(name)) {
+			throw new Error(
+				`read: ${name}: cannot overwrite read-only variable`
+			);
 		}
 
 		const value = await runtime.stdin.readLine();

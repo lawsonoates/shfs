@@ -6,7 +6,7 @@
 // Note: regex flags (-r), capture groups, `string escape`/`unescape`/`pad`/
 // `shorten`/`collect`, NUL handling (join0/split0), visible-width handling,
 // and --fields are out of scope. This subset covers match/replace glob basics
-// plus length, sub, split, join, trim, and repeat.
+// plus length, sub, split, join, trim, repeat, lower, and upper.
 
 import { beforeEach, expect, test } from 'bun:test';
 
@@ -319,6 +319,77 @@ test('fish string: string.fish - repeat -q suppresses output', async () => {
 // string.fish: string repeat -n0 foo; or echo "exit 1"
 test('fish string: string.fish - repeat zero times outputs nothing and fails', async () => {
 	expect(await run('string repeat -n0 foo; or echo "exit 1"')).toBe('exit 1');
+});
+
+// ── lower / upper ───────────────────────────────────────────
+
+// string.fish:808-816: lower converts arguments and stdin.
+test('fish string: string.fish - lower converts to lowercase', async () => {
+	expect(await run('string lower abc DEF gHi')).toBe('abc\ndef\nghi');
+	expect(await run('echo abc DEF gHi | string lower')).toBe('abc def ghi');
+});
+
+// string.fish:818-819: lower -q fails when nothing changed.
+test('fish string: string.fish - lower -q fails on already-lowercase input', async () => {
+	expect(await run('string lower -q abc\necho $status')).toBe('1');
+});
+
+// string.fish:821-829: upper converts arguments and stdin.
+test('fish string: string.fish - upper converts to uppercase', async () => {
+	expect(await run('string upper abc DEF gHi')).toBe('ABC\nDEF\nGHI');
+	expect(await run('echo abc DEF gHi | string upper')).toBe('ABC DEF GHI');
+});
+
+// string.fish:831-832: upper -q fails when nothing changed.
+test('fish string: string.fish - upper -q fails on already-uppercase input', async () => {
+	expect(await run('string upper -q ABC DEF\necho $status')).toBe('1');
+});
+
+// ── sub range clamping ──────────────────────────────────────
+
+// string.fish:238-251: negative starts and ends clamp to the string.
+test('fish string: string.fish - sub clamps negative ranges to the string', async () => {
+	expect(await run('string sub -s -5 -e -2 abcdefgh')).toBe('def');
+	expect(await run('string sub -s -100 -e -2 abcde')).toBe('abc');
+	expect(await run('string sub -s -5 -e 2 abcde')).toBe('ab');
+	expect(await run('string sub -s -50 -e -100 abcde')).toBe('');
+	expect(await run('string sub -s 2 -e -5 abcde')).toBe('');
+});
+
+// string.fish:82-84: extreme negative start does not overflow.
+test('fish string: string.fish - sub survives an i64-minimum start', async () => {
+	expect(await run('string sub --start -9223372036854775808 abc')).toBe(
+		'abc'
+	);
+});
+
+// ── repeat error cases ──────────────────────────────────────
+
+// string.fish:686-687: repeat rejects mixing stdin and an argument.
+test('fish string: string.fish - repeat with stdin and an argument is an error', async () => {
+	const result = await runResult('echo stdin | string repeat -n1 "and arg"');
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain('string repeat: too many arguments');
+});
+
+// string.fish:696-701: empty counts and empty strings.
+test('fish string: string.fish - repeat rejects an empty count and fails on empty strings', async () => {
+	const emptyCount = await runResult('string repeat ""');
+	expect(emptyCount.exitCode).not.toBe(0);
+	expect(emptyCount.stderr).toContain("Invalid count value ''");
+
+	expect(
+		await run(
+			'string repeat -n3 ""\nor echo string repeat empty string failed'
+		)
+	).toBe('string repeat empty string failed');
+});
+
+// string.fish:674-675: negative counts are invalid.
+test('fish string: string.fish - repeat rejects a negative count', async () => {
+	const result = await runResult('string repeat -n-1 foo');
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain("Invalid count value '-1'");
 });
 
 // ── subcommand dispatch ─────────────────────────────────────

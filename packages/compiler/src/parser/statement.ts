@@ -445,17 +445,30 @@ export class StatementParser {
 					{ code: 'invalid-function-option' }
 				);
 			}
-			if (!VARIABLE_NAME_REGEX.test(literal)) {
-				throw new ParseSyntaxError(
-					`function: ${literal}: invalid argument name`,
-					word.span,
-					{ code: 'invalid-function-option' }
-				);
-			}
+			this.validateArgumentName(literal, word.span);
 			argumentNames.push(literal);
 		}
 
 		return argumentNames;
+	}
+
+	private validateArgumentName(literal: string, span: SourceSpan): void {
+		if (!VARIABLE_NAME_REGEX.test(literal)) {
+			throw new ParseSyntaxError(
+				`function: ${literal}: invalid argument name`,
+				span,
+				{ code: 'invalid-function-option' }
+			);
+		}
+		if (literal === 'status') {
+			// Fish rejects read-only names as named arguments while
+			// allowing argv (tests/checks/function.fish).
+			throw new ParseSyntaxError(
+				"function: variable 'status' is read-only",
+				span,
+				{ code: 'invalid-function-option' }
+			);
+		}
 	}
 
 	private parseLoopControl(

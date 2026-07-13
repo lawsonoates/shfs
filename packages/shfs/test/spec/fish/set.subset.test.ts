@@ -231,3 +231,130 @@ test('fish set: set.fish - validates variable names', async () => {
 	expect(result.exitCode).not.toBe(0);
 	expect(result.stderr).toContain('set: invalid variable name: 1bad');
 });
+
+// set.fish:569-580: -a appends values in order.
+test('fish set: set.fish - set -a appends values', async () => {
+	const script = [
+		'set -g var3a a b c',
+		'set -a var3a',
+		'set -a var3a d',
+		'set -a var3a e f',
+		'echo (count $var3a) $var3a',
+	].join('\n');
+	expect(await run(script)).toBe('6 a b c d e f');
+});
+
+// set.fish:591-603: -p prepends values in order.
+test('fish set: set.fish - set -p prepends values', async () => {
+	const script = [
+		'set -g var4a a b c',
+		'set -p var4a',
+		'set -p var4a d',
+		'set -p var4a e f',
+		'echo (count $var4a) $var4a',
+	].join('\n');
+	expect(await run(script)).toBe('6 e f d a b c');
+});
+
+// set.fish:614-626: -a and -p together prepend and append the same values.
+test('fish set: set.fish - set -a -p applies both directions', async () => {
+	const script = [
+		'set -g var5 abc def',
+		'set -a -p var5 0 x 0',
+		'echo (count $var5) $var5',
+	].join('\n');
+	expect(await run(script)).toBe('8 0 x 0 abc def 0 x 0');
+});
+
+// set.fish:641-652: append/prepend cannot target a slice.
+test('fish set: set.fish - set -a on a slice is an error', async () => {
+	for (const command of ['set -a foo[1]', 'set -p foo[1]']) {
+		const result = await runResult(command);
+		expect(result.exitCode).not.toBe(0);
+		expect(result.stderr).toContain(
+			'set: Cannot use --append or --prepend when assigning to a slice'
+		);
+	}
+});
+
+// set.fish:654-666: set -l with append copies the closest scope.
+test('fish set: set.fish - set -l -a copies the closest scope into the local', async () => {
+	const script = [
+		'set -g var6 ghi jkl',
+		'begin',
+		'    set -l -a var6 mno',
+		'    echo $var6',
+		'end',
+		'echo $var6',
+	].join('\n');
+	expect(await run(script)).toBe('ghi jkl mno\nghi jkl');
+});
+
+// set.fish:668-694: `and`/`or` create no scope of their own; `begin` does.
+test('fish set: set.fish - and/or create no scope but begin does', async () => {
+	expect(
+		await run('true; and set -l var7a 89 179\nset -q var7a\necho $status')
+	).toBe('0');
+	expect(
+		await run(
+			'true; and begin\n    set -l var7b 359 719\nend\nset -q var7b\necho $status'
+		)
+	).toBe('1');
+	expect(
+		await run('false; or set -l var8a 1439\nset -q var8a\necho $status')
+	).toBe('0');
+});
+
+// set.fish:741-743: $status cannot be assigned.
+test('fish set: set.fish - status is read-only', async () => {
+	const result = await runResult('set -g status 5');
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain(
+		"set: Tried to change the read-only variable 'status'"
+	);
+});
+
+// set.fish:774-790: erase reports missing names in $status and can erase
+// indexes across several variables in one call.
+test('fish set: set.fish - erase counts missing names and erases indexes', async () => {
+	const script = [
+		'set foo foo',
+		'set bar bar',
+		'set -e foo baz bar',
+		'echo $status',
+	].join('\n');
+	expect(await run(script)).toBe('4');
+
+	const indexScript = [
+		'set foo 1 2 3',
+		'set bar 1 2 3',
+		'set -e foo[1] bar[2]',
+		'echo $foo',
+		'echo $bar',
+	].join('\n');
+	expect(await run(indexScript)).toBe('2 3\n1 3');
+});
+
+// set.fish:800-805: the empty string is not a valid variable name.
+test('fish set: set.fish - empty variable name is an error', async () => {
+	const result = await runResult('set "" foo');
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain('set: invalid variable name');
+});
+
+// set.fish:1015-1018: index assignment requires matching value counts.
+test('fish set: set.fish - index count must match value count', async () => {
+	const script = ['set foo 1 2 3', 'set foo[1 2 3] a b'].join('\n');
+	const result = await runResult(script);
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain(
+		'set: The number of variable indexes does not match the number of values'
+	);
+});
+
+// set.fish:1056-1062: assigning to index 0 is an error, not a crash.
+test('fish set: set.fish - assigning index zero is an error', async () => {
+	const result = await runResult('set line[0] ""');
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain('array indices start at 1');
+});

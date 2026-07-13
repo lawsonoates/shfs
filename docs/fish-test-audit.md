@@ -1,4 +1,4 @@
-# Fish Upstream Check Audit (2026-07-12)
+# Fish Upstream Check Audit (2026-07-12, large files re-read 2026-07-13)
 
 This document records a full audit of every file in fish-shell
 `tests/checks/` (master snapshot in the opensrc cache, 208 check scripts)
@@ -30,6 +30,19 @@ Methodology:
 | One unmatched glob product does not fail a multi-product expansion | `wildcard.fish:3-13` | `expandGlobProductsEffect` fails only when no product matches |
 | Negative `return` values never map to status 0 | `return.fish:145-156` | `runReturnStatement` maps `-256` multiples to 255 |
 
+Applied during the 2026-07-13 line-by-line re-read of the large files
+(each confirmed against a runtime probe before the fix, red-first through
+the extended subset tests):
+
+| Contract | Upstream evidence | Fix |
+| --- | --- | --- |
+| `return` above 255 clamps to 255 (was mod-256 → `return 300` gave 44) | `basic.fish:118-127` | `runReturnStatement` clamps positives |
+| `read` rejects read-only variable names (`read status` silently succeeded) | `read.fish:391-398` | `read.ts` guards with `isReadOnlyVariable` |
+| `set -a`/`-p` on a slice is an error (was silently ignored) | `set.fish:641-652` | `runAssign` rejects append/prepend with an index |
+| `set -a -p name v...` prepends **and** appends (only appended before) | `set.fish:614-626` | `runAssign` builds `[prepend, current, append]` |
+| `function -a status` is rejected as read-only (was accepted) | `function.fish:160-176` | parser `validateArgumentName` |
+| A function redefined by a substitution in its own arguments is resolved after expansion (`foo (function foo; ...)` ran the old body) | `function.fish:182-186` | `call` step looks up the definition after expanding arguments |
+
 ## Newly ported subset files
 
 `count`, `empty`, `command-vars-persist`, `line-continuation`, `scoping`,
@@ -59,6 +72,21 @@ diverges. No failing tests are committed for them.
 | Glob results keep a literal `./` prefix | `wildcard.fish:9` | normalized away | Cosmetic divergence, noted in the subset file |
 | `$pipestatus` | `pipestatus.fish` | empty | Out of scope (boundary) |
 
+Recorded during the 2026-07-13 re-read (probed; left as divergences):
+
+| Behavior | Upstream evidence | shfs today | Disposition |
+| --- | --- | --- | --- |
+| A trailing `string split`/`split0` in a substitution passes its splits through as-is (`count (string split / /)` → 2) | `string.fish:893-895`, fish docs `language.rst` | substitutions always re-split on newlines and trim trailing empties → 0 | Divergence; would need split-aware substitutions |
+| Nested variable indexes in brackets (`$outer[$inner[2]]`) | `expansion.fish:256-261` | `Invalid index value` | Divergence; index text does not re-enter the expander |
+| Command substitutions as index bounds (`$test[(count $test)..1]`) | `slices.fish:36-39` | `Invalid index value` | Divergence, already noted in the slices port header |
+| Empty variables as index bounds (`$test[$empty..]` → nothing, `$test[.."$empty"]` → whole list) | `slices.fish:62-68` | `Invalid index value` | Divergence; empty bounds are not defaulted |
+| Unterminated index in quotes (`"$abc["`) is an error | `expansion.fish:337-340` | expands `$abc` and keeps `[` literally | Divergence |
+| A comment inside a substitution hides a closing `)` on the same line | `basic.fish:558-567` | parse error | Divergence (lexer treats `)` in comments as structure) |
+| `set -q` with no names / names expanding to nothing → status 255 | `set.fish:942-948` | compile error (status 1) / status 1 | Decision: deterministic error model |
+| `set -e undefined[x..]` reports an invalid index | `set.fish:994-1006` | silent status 4 | Divergence, minor |
+| Variable-derived `for` variable names (`for $var1 in ...`) | `basic.fish:463-469` | compile error | Decision: names are literal, matches `vars_as_commands` |
+| Bare `read` with no variable name is accepted | `read.fish:3` | `read` requires exactly one name | Decision: boundary (`read NAME`) |
+
 ## Classification of all upstream check files
 
 Ported before this audit (23, re-audited; extensions noted above):
@@ -66,13 +94,23 @@ Ported before this audit (23, re-audited; extensions noted above):
 `expansion`, `fish_add_path`, `for`, `function-definition`, `function`,
 `glob`, `loops`, `not`, `read`, `redirect`, `return`, `set`, `slices`,
 `string`, `test`, `variable-assignment`, `zero_based_array`.
-Small/medium files were re-read in full (`andor`, `cmdsub`, `for`,
-`function-definition`, `loops`, `not`, `redirect`, `return`,
-`variable-assignment`, `zero_based_array`); the large files (`basic`, `cd`,
+All ported files have now been re-read in full. The small/medium files
+(`andor`, `cmdsub`, `for`, `function-definition`, `loops`, `not`,
+`redirect`, `return`, `variable-assignment`, `zero_based_array`) were
+re-read during the initial audit; the large files (`basic`, `cd`,
 `expansion`, `function`, `read`, `set`, `string`, `test`, `glob`,
-`andandoror`, `slices`, `fish_add_path`, `disown-parent`) were
-spot-checked against their local ports, which are recent and organized by
-upstream case.
+`andandoror`, `slices`, `fish_add_path`, `disown-parent` — ~5,300 upstream
+lines) were re-read line-by-line on 2026-07-13 with a ~75-case probe
+battery against every in-scope behavior not already asserted by a port.
+That pass produced the six fixes above, the extra recorded divergences,
+and extensions to the `basic`, `cd`, `expansion`, `function`, `read`,
+`set`, `slices`, and `string` subset files (out-of-range slice and
+empty-list indexing, zero-index errors, escaped newlines and comment
+placement, `set` append/prepend and index-erasure semantics,
+`string lower`/`upper` and `sub` clamping, `repeat` error cases,
+read-only-variable enforcement across `set`/`read`/`for`/`function -a`).
+`glob`, `test`, `andandoror`, `fish_add_path`, and `disown-parent` needed
+no changes — their ports already covered every in-scope upstream case.
 
 Newly ported (9): `count`, `empty`, `command-vars-persist`,
 `line-continuation` (partial: escape-spelled keywords out of scope),
