@@ -574,10 +574,14 @@ export async function* runFunctionCall(
 	const stdin = context.stdin;
 	context.stdin = input ? createShellInput(input) : undefined;
 	context.scopes.push({ barrier: true, vars: local });
-	// Fish semantics: functions do not preserve the caller's $status; a
-	// function with an empty body returns 0 (tests/checks/empty.fish).
-	context.status = 0;
 	try {
+		// Fish semantics: the body sees the caller's $status, but a function
+		// that executes nothing returns 0 instead of preserving it
+		// (tests/checks/empty.fish).
+		if (definition.body.length === 0) {
+			context.status = 0;
+			return;
+		}
 		const signal = yield* runStatementList(definition.body, fs, context);
 		if (signal.kind === 'break' || signal.kind === 'continue') {
 			context.status = 1;

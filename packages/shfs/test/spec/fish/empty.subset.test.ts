@@ -45,6 +45,21 @@ test('fish empty: empty.fish - empty function returns 0 after success', async ()
 	expect(await run(script)).toBe('0');
 });
 
+// Fish only substitutes status 0 when the function executed nothing
+// (src/exec.rs get_performer_for_function); a non-empty body still sees the
+// caller's $status at entry.
+test('fish empty: empty.fish - non-empty function body sees the caller status', async () => {
+	const script = [
+		'function shows_status',
+		'    echo in:$status',
+		'end',
+		'false',
+		'shows_status',
+		'echo after:$status',
+	].join('\n');
+	expect(await run(script)).toBe('in:1\nafter:0');
+});
+
 // empty.fish:19-23: an empty begin/end block preserves a failing $status.
 test('fish empty: empty.fish - empty block preserves failing status', async () => {
 	expect(await run('false\nbegin\nend\necho $status')).toBe('1');
