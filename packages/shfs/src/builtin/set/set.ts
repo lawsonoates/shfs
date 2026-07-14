@@ -8,14 +8,13 @@ import { runOrReport } from '../../diagnostics';
 import {
 	evaluateExpandedWordEffect,
 	expandWordToValuesEffect,
+	resolveExpandedIndexPositionsEffect,
 } from '../../execute/path';
 import {
 	eraseVariable,
 	isReadOnlyVariable,
 	isValidVariableName,
 	lookupVariable,
-	resolveIndexPositions,
-	selectByIndex,
 	setVariable,
 	type VariableScope,
 } from '../../execute/variables';
@@ -132,7 +131,13 @@ async function runAssign(
 			);
 			return;
 		}
-		assignByIndex(runtime, target.name, target.index, values, args.scope);
+		await assignByIndex(
+			runtime,
+			target.name,
+			target.index,
+			values,
+			args.scope
+		);
 		return;
 	}
 
@@ -147,23 +152,37 @@ async function runAssign(
 	// On success, set preserves the incoming $status (fish 3.0 behavior).
 }
 
-function assignByIndex(
+async function resolveSetIndexPositions(
+	runtime: BuiltinRuntime,
+	indexText: string,
+	length: number
+): Promise<number[]> {
+	const positions = await resolveExpandedIndexPositionsEffect(
+		indexText,
+		length,
+		runtime.fs,
+		runtime.context
+	);
+	if (Result.isError(positions)) {
+		throw positions.error;
+	}
+	return positions.value;
+}
+
+async function assignByIndex(
 	runtime: BuiltinRuntime,
 	name: string,
 	indexText: string,
 	values: string[],
 	scope: VariableScope
-): void {
+): Promise<void> {
 	const current = lookupVariable(runtime.context, name) ?? [];
-	const positions = resolveIndexPositions(
-		runtime.context,
+	const positions = await resolveSetIndexPositions(
+		runtime,
 		indexText,
 		current.length
 	);
-	if (Result.isError(positions)) {
-		throw positions.error;
-	}
-	if (positions.value.length !== values.length) {
+	if (positions.length !== values.length) {
 		reportSetError(
 			runtime,
 			'set: The number of variable indexes does not match the number of values'
@@ -171,7 +190,7 @@ function assignByIndex(
 		return;
 	}
 	const next = [...current];
-	positions.value.forEach((position, valueIndex) => {
+	positions.forEach((position, valueIndex) => {
 		const value = values[valueIndex];
 		if (value !== undefined) {
 			next[position - 1] = value;
@@ -198,19 +217,16 @@ async function runErase(
 		}
 
 		const current = lookupVariable(runtime.context, target.name);
-		const positions = resolveIndexPositions(
-			runtime.context,
+		const positions = await resolveSetIndexPositions(
+			runtime,
 			target.index,
 			current?.length ?? 0
 		);
-		if (Result.isError(positions)) {
-			throw positions.error;
-		}
 		if (current === undefined) {
 			missing = true;
 			continue;
 		}
-		const removed = new Set(positions.value);
+		const removed = new Set(positions);
 		const next = current.filter((_value, index) => !removed.has(index + 1));
 		setVariable(runtime.context, target.name, next, args.scope);
 	}
@@ -230,15 +246,12 @@ async function runQuery(
 			continue;
 		}
 		if (target.index !== null) {
-			const selected = selectByIndex(
-				runtime.context,
-				values,
-				target.index
+			const positions = await resolveSetIndexPositions(
+				runtime,
+				target.index,
+				values.length
 			);
-			if (Result.isError(selected)) {
-				throw selected.error;
-			}
-			if (selected.value.length === 0) {
+			if (positions.length === 0) {
 				missing++;
 			}
 		}

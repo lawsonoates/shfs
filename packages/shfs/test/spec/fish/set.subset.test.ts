@@ -184,6 +184,71 @@ test('fish set: set.fish - erasing a single index shrinks the list', async () =>
 	expect(await run(script)).toBe('Test 11 pass');
 });
 
+// Adapted from set.fish indexed mutation plus slices.fish deferred bounds.
+test('fish set: deferred indexes work for erase, assignment, and query', async () => {
+	const eraseResult = await runResult(
+		[
+			'set values first second third fourth',
+			'set indexes 2 4',
+			'set -e values[(echo 1)]',
+			'set -e values[$indexes[1]]',
+			'echo $values',
+		].join('\n')
+	);
+	expect(eraseResult.stderr).toBe('');
+	expect(eraseResult.stdout).toBe('second fourth');
+
+	const assignAndQueryResult = await runResult(
+		[
+			'set values first second',
+			'set indexes 2',
+			'set values[(echo 1)] changed',
+			'set values[$indexes[1]] updated',
+			'set -q values[$indexes[1]]',
+			'echo $status $values',
+		].join('\n')
+	);
+	expect(assignAndQueryResult.stderr).toBe('');
+	expect(assignAndQueryResult.stdout).toBe('0 changed updated');
+});
+
+test('fish set: deferred index lists and empty bounds preserve slice semantics', async () => {
+	const multiIndex = await runResult(
+		[
+			'set values first second third fourth',
+			'set indexes 1 3',
+			'set -e values[$indexes]',
+			'echo $values',
+		].join('\n')
+	);
+	expect(multiIndex.stderr).toBe('');
+	expect(multiIndex.stdout).toBe('second fourth');
+
+	const emptyBounds = await runResult(
+		[
+			'set values first second third',
+			'set empty',
+			'set -e values[$empty..]',
+			'echo $values',
+			'set -e values[.."$empty"]',
+			'echo (count $values)',
+		].join('\n')
+	);
+	expect(emptyBounds.stderr).toBe('');
+	expect(emptyBounds.stdout).toBe('first second third\n0');
+});
+
+test('fish set: expanded index atoms stay literal and never glob', async () => {
+	for (const command of [
+		"set values first second; set inner 2; set index '$inner'; set -e values[$index]",
+		'set values first second; touch /1; set -e values[*]',
+	]) {
+		const result = await runResult(command);
+		expect(result.exitCode).not.toBe(0);
+		expect(result.stderr).toContain('Invalid index value');
+	}
+});
+
 // set.fish test16res pattern: append by self-reference
 test('fish set: set.fish - lists append by self-reference', async () => {
 	const script = [
@@ -268,7 +333,11 @@ test('fish set: set.fish - set -a -p applies both directions', async () => {
 
 // set.fish:641-652: append/prepend cannot target a slice.
 test('fish set: set.fish - set -a on a slice is an error', async () => {
-	for (const command of ['set -a foo[1]', 'set -p foo[1]']) {
+	for (const command of [
+		'set -a foo[1]',
+		'set -p foo[1]',
+		'set index 1; set -a foo[$index[1]] value',
+	]) {
 		const result = await runResult(command);
 		expect(result.exitCode).not.toBe(0);
 		expect(result.stderr).toContain(

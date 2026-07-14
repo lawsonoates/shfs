@@ -19,7 +19,7 @@ import {
 import type { FS } from '../fs/fs';
 import { formatRecord } from '../record';
 import { collectRecordStream, toShellFailure } from './record-stream';
-import { lookupVariable, selectByIndex } from './variables';
+import { lookupVariable, resolveIndexPositions } from './variables';
 
 function toShellErrorCause(cause: unknown): ShellErrorCause {
 	return toShellFailure(cause) as ShellErrorCause;
@@ -586,13 +586,14 @@ function indexWordsEffect(
 	});
 }
 
-function selectExpandedIndexEffect(
-	values: string[],
+/** Expand deferred Fish slice atoms, then resolve their 1-based positions. */
+export const resolveExpandedIndexPositionsEffect: (
 	index: string,
+	length: number,
 	fs: FS,
 	context: BuiltinContext
-): ShellResult<string[], ShellErrorCause> {
-	return Result.gen(async function* () {
+) => ShellResult<number[], ShellErrorCause> = (index, length, fs, context) =>
+	Result.gen(async function* () {
 		const words = yield* await indexWordsEffect(index);
 		const expanded: string[] = [];
 		for (const word of words) {
@@ -607,9 +608,32 @@ function selectExpandedIndexEffect(
 				return yield* invalidIndexError();
 			}
 		}
-		return selectByIndex(context, values, expanded.join(' '), {
+		return resolveIndexPositions(context, expanded.join(' '), length, {
 			allowVariableReferences: false,
 		});
+	});
+
+function selectExpandedIndexEffect(
+	values: string[],
+	index: string,
+	fs: FS,
+	context: BuiltinContext
+): ShellResult<string[], ShellErrorCause> {
+	return Result.gen(async function* () {
+		const positions = yield* await resolveExpandedIndexPositionsEffect(
+			index,
+			values.length,
+			fs,
+			context
+		);
+		const selected: string[] = [];
+		for (const position of positions) {
+			const value = values[position - 1];
+			if (value !== undefined) {
+				selected.push(value);
+			}
+		}
+		return Result.ok(selected);
 	});
 }
 
