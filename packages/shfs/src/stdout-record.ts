@@ -12,6 +12,8 @@ export interface LineRecord {
 	lineNum?: number;
 	/** Preserve this record as one command-substitution value. */
 	separation?: 'explicit';
+	/** Whether this record ends with a newline. Omitted means true. */
+	terminated?: false;
 }
 
 export interface JsonRecord {
@@ -36,4 +38,21 @@ export function formatStdoutRecord(record: StdoutRecord): string {
 		default:
 			throw new Error('Unknown record kind');
 	}
+}
+
+export function formatStdoutRecords(
+	records: readonly StdoutRecord[],
+	options: { trailingNewline?: boolean } = {}
+): string {
+	let text = '';
+	for (const record of records) {
+		text += formatStdoutRecord(record);
+		if (record.kind !== 'line' || record.terminated !== false) {
+			text += '\n';
+		}
+	}
+	if (options.trailingNewline || !text.endsWith('\n')) {
+		return text;
+	}
+	return text.slice(0, -1);
 }

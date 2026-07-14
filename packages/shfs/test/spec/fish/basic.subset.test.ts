@@ -215,6 +215,38 @@ test('fish basic: basic.fish - return above 255 clamps to 255', async () => {
 	expect(await run(script)).toBe('255');
 });
 
+// basic.fish:130-163: echo leaves escapes literal unless -e enables them.
+test('fish basic: basic.fish - echo -e interprets supported escapes', async () => {
+	expect(await run("echo 'abc\\ndef'")).toBe('abc\\ndef');
+	expect(await run("echo -e 'abc\\ndef'")).toBe('abc\ndef');
+	expect(await run("echo -e 'abc\\zdef'")).toBe('abc\\zdef');
+	expect(await run("echo -e 'abc\\041def'")).toBe('abc!def');
+	expect(await run("echo -e 'abc\\x21def'")).toBe('abc!def');
+});
+
+// basic.fish:151-152: \c stops output and suppresses the newline.
+test('fish basic: basic.fish - echo -e stops output at backslash c', async () => {
+	expect(await run("echo -e 'abc\\cdef'; echo after")).toBe('abcafter');
+});
+
+// basic.fish:177: -n suppresses the newline before the next command output.
+test('fish basic: basic.fish - echo -n suppresses its trailing newline', async () => {
+	expect(await run('echo -n first; echo second')).toBe('firstsecond');
+});
+
+// basic.fish:545-550: an invalid option-shaped operand is printed literally
+// and stops option parsing.
+test('fish basic: basic.fish - echo prints invalid option-shaped operands', async () => {
+	expect(await run("echo '-ne \\tart'; echo '-n art'; echo banana")).toBe(
+		'-ne \\tart\n-n art\nbanana'
+	);
+});
+
+// Fish echo docs/source: -- ends option parsing so -n is data.
+test('fish basic: basic.fish - echo double dash ends option parsing', async () => {
+	expect(await run('echo -- -n')).toBe('-n');
+});
+
 // basic.fish:175-178: a backslash at the end of a comment does not join lines.
 test('fish basic: basic.fish - backslash inside a comment does not continue the line', async () => {
 	expect(await run('echo visible # comment\\\necho second')).toBe(

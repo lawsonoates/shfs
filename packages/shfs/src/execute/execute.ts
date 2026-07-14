@@ -17,7 +17,7 @@ import {
 	ShellRuntimeError,
 } from '../diagnostics';
 import type { FS } from '../fs/fs';
-import { formatRecord, type Record as ShellRecord } from '../record';
+import { formatRecords, type Record as ShellRecord } from '../record';
 import { BufferedOutputStream, type OutputStream } from '../stderr';
 import type { Stream } from '../stream';
 import { createShellInput, type ShellInput } from './io';
@@ -1052,7 +1052,7 @@ function stderrLinesToRecords(lines: readonly string[]): ShellRecord[] {
 }
 
 function recordsToText(records: readonly ShellRecord[]): string {
-	return records.map((record) => formatRecord(record)).join('\n');
+	return formatRecords(records);
 }
 
 function mergeChannelText(stdoutText: string, stderrText: string): string {

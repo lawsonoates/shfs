@@ -959,7 +959,7 @@ CommandRegistry.register('count', {
 	handler: ({ step, fs, input, context }) => {
 		return fromRecordGenerator(
 			(async function* (): Stream<ShellRecord> {
-				const values: string[] = [];
+				let count = 0;
 				for (const word of step.args.values) {
 					const expanded = await runOrReport(
 						expandWordToValuesEffect(word, fs, context, {
@@ -971,20 +971,26 @@ CommandRegistry.register('count', {
 					if (!expanded.ok) {
 						return;
 					}
-					values.push(...expanded.value);
+					count += expanded.value.length;
 				}
 				// Fish counts arguments plus stdin lines when both are present
 				// (tests/checks/count.fish).
 				if (input) {
 					for await (const record of input) {
-						values.push(formatRecord(record));
+						count += formatRecord(record).split('\n').length - 1;
+						if (
+							record.kind !== 'line' ||
+							record.terminated !== false
+						) {
+							count++;
+						}
 					}
 				}
 				yield {
 					kind: 'line',
-					text: String(values.length),
+					text: String(count),
 				} as const;
-				context.status = values.length > 0 ? 0 : 1;
+				context.status = count > 0 ? 0 : 1;
 			})()
 		);
 	},

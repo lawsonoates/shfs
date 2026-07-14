@@ -1,10 +1,9 @@
 import type { Record as ShellRecord } from '../record';
-import { formatRecord } from '../record';
+import { formatRecord, formatRecords } from '../record';
 import type { OutputStream as DiagnosticOutputStream } from '../stderr';
 import type { Stream } from '../stream';
 
 const UTF8_ENCODER = new TextEncoder();
-const NEWLINE = '\n';
 
 export interface ShellInput {
 	records(): Stream<ShellRecord>;
@@ -74,17 +73,14 @@ export class RecordInput implements ShellInput {
 	async bytes(
 		options: { trailingNewline?: boolean } = {}
 	): Promise<Uint8Array> {
-		const lines: string[] = [];
-		for await (const line of this.lines()) {
-			lines.push(line);
+		const records: ShellRecord[] = [];
+		for await (const record of this.records()) {
+			records.push(record);
 		}
-		if (lines.length === 0) {
+		if (records.length === 0) {
 			return new Uint8Array();
 		}
-		const text = options.trailingNewline
-			? `${lines.join(NEWLINE)}${NEWLINE}`
-			: lines.join(NEWLINE);
-		return UTF8_ENCODER.encode(text);
+		return UTF8_ENCODER.encode(formatRecords(records, options));
 	}
 }
 

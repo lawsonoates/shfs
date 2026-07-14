@@ -4,4 +4,7 @@ export type {
 	LineRecord,
 	StdoutRecord as Record,
 } from './stdout-record';
-export { formatStdoutRecord as formatRecord } from './stdout-record';
+export {
+	formatStdoutRecord as formatRecord,
+	formatStdoutRecords as formatRecords,
+} from './stdout-record';

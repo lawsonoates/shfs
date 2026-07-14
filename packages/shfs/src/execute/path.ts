@@ -17,7 +17,7 @@ import {
 	ShellRuntimeError,
 } from '../diagnostics';
 import type { FS } from '../fs/fs';
-import { formatRecord } from '../record';
+import { formatRecord, type Record as ShellRecord } from '../record';
 import { collectRecordStream, toShellFailure } from './record-stream';
 import { lookupVariable, selectByIndex } from './variables';
 
@@ -39,6 +39,35 @@ const MULTIPLE_SLASH_REGEX = /\/+/g;
 const ROOT_DIRECTORY = '/';
 const TRAILING_SLASH_REGEX = /\/+$/;
 const NO_GLOB_MATCH_MESSAGE = 'no matches found';
+
+function separate(records: readonly ShellRecord[]): string[] {
+	const lines: string[] = [];
+	let inferred = '';
+	const flush = () => {
+		if (inferred === '') {
+			return;
+		}
+		const split = inferred.split('\n');
+		if (inferred.endsWith('\n')) {
+			split.pop();
+		}
+		lines.push(...split);
+		inferred = '';
+	};
+	for (const record of records) {
+		if (record.kind === 'line' && record.separation === 'explicit') {
+			flush();
+			lines.push(record.text);
+			continue;
+		}
+		inferred += formatRecord(record);
+		if (record.kind !== 'line' || record.terminated !== false) {
+			inferred += '\n';
+		}
+	}
+	flush();
+	return lines;
+}
 
 /**
  * Execute a command substitution and return its output lines.
@@ -68,27 +97,7 @@ function evaluateCommandSubstitutionEffect(
 			),
 			toShellErrorCause
 		);
-		const lines: string[] = [];
-		let inferred = '';
-		for (const record of records) {
-			if (record.kind === 'line' && record.separation === 'explicit') {
-				if (inferred !== '') {
-					const split = inferred.split('\n');
-					split.pop();
-					lines.push(...split);
-					inferred = '';
-				}
-				lines.push(record.text);
-				continue;
-			}
-			inferred += `${formatRecord(record)}\n`;
-		}
-		if (inferred !== '') {
-			const split = inferred.split('\n');
-			split.pop();
-			lines.push(...split);
-		}
-		return Result.ok(lines);
+		return Result.ok(separate(records));
 	});
 }
 

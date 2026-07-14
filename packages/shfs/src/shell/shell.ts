@@ -11,7 +11,7 @@ import {
 	ShellError,
 	ShellOutput,
 } from '../output-channels';
-import { formatRecord, type Record } from '../record';
+import { formatRecords, type Record } from '../record';
 import { BufferedOutputStream, formatStderr } from '../stderr';
 
 const ROOT_DIRECTORY = '/';
@@ -81,7 +81,7 @@ function normalizeCwd(cwd: string): string {
 }
 
 function buildStdoutText(records: readonly Record[]): string {
-	return records.map((record) => formatRecord(record)).join('\n');
+	return formatRecords(records);
 }
 
 function createShellOutput(result: OutputChannels<Record>): ShellOutput {
