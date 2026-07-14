@@ -15,6 +15,8 @@ export interface CatOptions {
 	squeezeBlank?: boolean;
 }
 
+const NEWLINE_BYTE = 0x0a;
+
 function isLineRecord(record: Record): record is LineRecord {
 	return record.kind === 'line';
 }
@@ -154,20 +156,43 @@ async function* emitFileLines(
 		return;
 	}
 
+	let pendingText: string | undefined;
 	let sourceLineNum = 1;
-	for await (const rawText of fs.readLines(record.path)) {
+	const emit = async function* (
+		rawText: string,
+		terminated: boolean
+	): AsyncIterable<LineRecord> {
 		const rendered = nextRenderedLine(rawText, state, options);
 		if (rendered.isSkipped) {
-			continue;
+			return;
 		}
 
-		yield {
+		const renderedRecord: LineRecord = {
 			file: record.path,
 			kind: 'line',
 			lineNum: sourceLineNum++,
 			text: renderLineText(rendered.text, rendered.lineNumber, options),
 		};
+		yield terminated
+			? renderedRecord
+			: { ...renderedRecord, terminated: false };
+	};
+
+	for await (const rawText of fs.readLines(record.path)) {
+		if (pendingText !== undefined) {
+			yield* emit(pendingText, true);
+		}
+		pendingText = rawText;
 	}
+	if (pendingText === undefined) {
+		return;
+	}
+
+	// readLines intentionally drops the trailing empty sentinel, so the final
+	// byte is the only way to distinguish a terminated last line.
+	const content = await fs.readFile(record.path);
+	const terminated = content.at(-1) === NEWLINE_BYTE;
+	yield* emit(pendingText, terminated);
 }
 
 export function cat(

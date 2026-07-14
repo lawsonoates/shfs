@@ -186,6 +186,14 @@ test('fish string: string.fish - regex replace expands captures and escapes', as
 	expect(await run("string replace -r -a '(\\w)' '$1$1' ab")).toBe('aabb');
 });
 
+// string.fish:513-515 adapted through a line-oriented consumer: a replacement
+// newline creates two stdout lines, not one record containing a newline.
+test('fish string: string.fish - regex replacement newlines compose in pipelines', async () => {
+	expect(await run("string replace -r x '\\n' axb | string match b")).toBe(
+		'b'
+	);
+});
+
 // string.fish:522-526: no regex replacement returns status 1 while passing
 // the input through.
 test('fish string: string.fish - regex replace reports no replacement', async () => {

@@ -1,7 +1,7 @@
 import type { EchoStep } from '@shfs/compiler';
 import { runOrReport } from '../../diagnostics';
 import { evaluateExpandedPathWordsEffect } from '../../execute/path';
-import type { LineRecord } from '../../record';
+import { textToLineRecords } from '../../stdout-record';
 import type { Builtin } from '../types';
 
 const HEX_REGEX = /^[\dA-Fa-f]$/;
@@ -123,25 +123,6 @@ function decode(value: string): { stopped: boolean; text: string } {
 	return { stopped: false, text };
 }
 
-function toLineRecords(text: string, terminated: boolean): LineRecord[] {
-	if (text === '' && !terminated) {
-		return [];
-	}
-	const lines = text.split('\n');
-	const endsWithDecodedNewline = text.endsWith('\n');
-	if (!terminated && endsWithDecodedNewline) {
-		lines.pop();
-	}
-	return lines.map((line, index) => {
-		const isUnterminatedFinalLine =
-			!(terminated || endsWithDecodedNewline) &&
-			index === lines.length - 1;
-		return isUnterminatedFinalLine
-			? { kind: 'line', terminated: false, text: line }
-			: { kind: 'line', text: line };
-	});
-}
-
 export const echo: Builtin<EchoStep['args']> = (runtime, args) => {
 	return (async function* () {
 		const values = await runOrReport(
@@ -171,7 +152,7 @@ export const echo: Builtin<EchoStep['args']> = (runtime, args) => {
 		}
 		const text = output.join(parsed.opts.spaces ? ' ' : '');
 		const terminated = parsed.opts.newline && !stopped;
-		for (const record of toLineRecords(text, terminated)) {
+		for (const record of textToLineRecords(text, terminated)) {
 			yield record;
 		}
 		runtime.context.status = 0;

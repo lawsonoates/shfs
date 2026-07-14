@@ -27,6 +27,28 @@ export interface JsonRecord {
  */
 export type StdoutRecord = FileRecord | LineRecord | JsonRecord;
 
+/** Convert physical text lines into records, preserving final-line termination. */
+export function textToLineRecords(
+	text: string,
+	terminated: boolean
+): LineRecord[] {
+	if (text === '' && !terminated) {
+		return [];
+	}
+	const lines = text.split('\n');
+	const endsWithNewline = text.endsWith('\n');
+	if (!terminated && endsWithNewline) {
+		lines.pop();
+	}
+	return lines.map((line, index) => {
+		const isUnterminatedFinalLine =
+			!(terminated || endsWithNewline) && index === lines.length - 1;
+		return isUnterminatedFinalLine
+			? { kind: 'line', terminated: false, text: line }
+			: { kind: 'line', text: line };
+	});
+}
+
 export function formatStdoutRecord(record: StdoutRecord): string {
 	switch (record.kind) {
 		case 'line':

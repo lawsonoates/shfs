@@ -79,7 +79,7 @@ test('writes stream output to redirected file', async () => {
 	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('output.txt'))).toBe(
-		'alpha\nbeta\ngamma\n'
+		'alpha\nbeta\ngamma'
 	);
 });
 
@@ -143,7 +143,7 @@ test('supports combined input and output redirection', async () => {
 	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('copy.txt'))).toBe(
-		'alpha\nbeta\ngamma\n'
+		'alpha\nbeta\ngamma'
 	);
 });
 
@@ -261,6 +261,58 @@ test('output redirection preserves line termination metadata', async () => {
 	expect(textDecoder.decode(await fs.readFile('/unterminated.txt'))).toBe(
 		'tail'
 	);
+});
+
+// GNU coreutils tests/cat/cat-E.sh compares terminated and unterminated
+// printf fixtures without adding an EOF newline.
+test('cat redirection preserves empty, terminated, and unterminated file endings', async () => {
+	const fs = new MemoryFS();
+	const cases = [
+		{
+			expected: '',
+			input: '',
+			name: 'empty',
+		},
+		{
+			expected: 'abc\n',
+			input: 'abc\n',
+			name: 'terminated',
+		},
+		{
+			expected: 'abc',
+			input: 'abc',
+			name: 'unterminated',
+		},
+	] as const;
+
+	for (const { expected, input, name } of cases) {
+		fs.setFile(`/cat-${name}.txt`, input);
+		const result = execute(
+			compile(parse(`cat /cat-${name}.txt > /cat-${name}-copy.txt`)),
+			fs
+		);
+		(await collectRecordStream(result)).unwrap();
+		expect(
+			textDecoder.decode(await fs.readFile(`/cat-${name}-copy.txt`))
+		).toBe(expected);
+	}
+
+	fs.setFile('/cat-append-terminated.txt', 'abc\n');
+	fs.setFile('/cat-append-unterminated.txt', 'abc');
+	const appendScript = [
+		'cat /cat-append-terminated.txt > /terminated-copy.txt',
+		'echo -n tail >> /terminated-copy.txt',
+		'cat /cat-append-unterminated.txt > /unterminated-copy.txt',
+		'echo -n tail >> /unterminated-copy.txt',
+	].join('; ');
+	const append = execute(compile(parse(appendScript)), fs);
+	(await collectRecordStream(append)).unwrap();
+	expect(textDecoder.decode(await fs.readFile('/terminated-copy.txt'))).toBe(
+		'abc\ntail'
+	);
+	expect(
+		textDecoder.decode(await fs.readFile('/unterminated-copy.txt'))
+	).toBe('abctail');
 });
 
 test('append redirection concatenates exact terminated and unterminated output', async () => {

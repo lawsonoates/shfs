@@ -29,6 +29,45 @@ test('string replace emits replaced value', async () => {
 	expect(runtime.context.status).toBe(0);
 });
 
+test('string regex replacement emits one record per physical output line', async () => {
+	const runtime = createBuiltinRuntime();
+	const records = await collect<ShellRecord>()(
+		string(runtime, {
+			operands: [
+				literal('-r'),
+				literal('x'),
+				literal('\\n'),
+				literal('axb'),
+			],
+			subcommand: literal('replace'),
+		})
+	);
+
+	expect(records).toEqual([
+		{ kind: 'line', text: 'a' },
+		{ kind: 'line', text: 'b' },
+	]);
+	expect(runtime.context.status).toBe(0);
+
+	const captureRuntime = createBuiltinRuntime();
+	const captureRecords = await collect<ShellRecord>()(
+		string(captureRuntime, {
+			operands: [
+				literal('-r'),
+				literal('([\\s\\S]+)'),
+				literal('$1'),
+				literal('a\nb'),
+			],
+			subcommand: literal('replace'),
+		})
+	);
+	expect(captureRecords).toEqual([
+		{ kind: 'line', text: 'a' },
+		{ kind: 'line', text: 'b' },
+	]);
+	expect(captureRuntime.context.status).toBe(0);
+});
+
 // fish string-replace.rst: numeric captures accept ${n} references.
 test('string replace expands braced numeric capture references', async () => {
 	const runtime = createBuiltinRuntime();
