@@ -248,3 +248,13 @@ test('scanner keeps escaped wildcard characters as literal metadata', () => {
 		{ escaped: false, kind: 'literal', text: 'bar' },
 	]);
 });
+
+test('scanner rejects octal escapes above the Fish ASCII limit', () => {
+	expect(scanFirstWord('\\177').spelling).toBe('\u007f');
+
+	for (const escapeSequence of ['\\200', '\\400', '\\777']) {
+		expect(() =>
+			new Scanner(`echo ${escapeSequence}`).tokenize()
+		).toThrow();
+	}
+});

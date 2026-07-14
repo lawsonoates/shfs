@@ -1,3 +1,4 @@
+import { InvalidEscapeError } from '../parser/syntax-error';
 import { LexerState, StateContext } from './context';
 import { type SourcePosition, SourceSpan } from './position';
 import { type SourceReader, StringSourceReader } from './source-reader';
@@ -14,6 +15,7 @@ const BYTE_DECODER = new TextDecoder();
 const ASCII_LETTER_REGEX = /^[A-Za-z]$/;
 const HEX_DIGIT_REGEX = /^[\dA-Fa-f]$/;
 const OCTAL_DIGIT_REGEX = /^[0-7]$/;
+const MAX_OCTAL_ESCAPE_VALUE = 0o177;
 
 const CHARACTER_ESCAPES: Readonly<Record<string, string>> = {
 	a: '\u0007',
@@ -604,7 +606,7 @@ export class Scanner {
 
 		// Outside quotes, fish decodes character, byte, numeric, and Unicode
 		// escapes. Unknown escapes still quote the following character.
-		const escaped = this.readUnquotedEscape();
+		const escaped = this.readUnquotedEscape(start);
 		return {
 			chars: escaped,
 			flags: createEmptyFlags(),
@@ -619,7 +621,7 @@ export class Scanner {
 		};
 	}
 
-	private readUnquotedEscape(): string {
+	private readUnquotedEscape(start: SourcePosition): string {
 		const marker = this.source.peek();
 		const character = CHARACTER_ESCAPES[marker];
 		if (character !== undefined) {
@@ -643,9 +645,15 @@ export class Scanner {
 		}
 
 		if (OCTAL_DIGIT_REGEX.test(marker)) {
-			return String.fromCodePoint(
-				Number.parseInt(this.readDigits(OCTAL_DIGIT_REGEX, 3), 8)
-			);
+			const digits = this.readDigits(OCTAL_DIGIT_REGEX, 3);
+			const value = Number.parseInt(digits, 8);
+			if (value > MAX_OCTAL_ESCAPE_VALUE) {
+				throw new InvalidEscapeError(
+					`\\${digits}`,
+					start.span(this.source.position)
+				);
+			}
+			return String.fromCodePoint(value);
 		}
 
 		if (marker === 'c' && ASCII_LETTER_REGEX.test(this.source.peek(1))) {

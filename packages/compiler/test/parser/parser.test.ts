@@ -231,3 +231,11 @@ test('parseEffect yields syntax failures on the result error channel', () => {
 		expect(result.error).toBeInstanceOf(ParseSyntaxError);
 	}
 });
+
+test('parseEffect rejects octal escapes above the Fish ASCII limit', () => {
+	const result = parseEffect('echo \\400');
+	expect(result.isErr()).toBeTrue();
+	if (result.isErr()) {
+		expect(result.error.diagnostic.code).toBe('invalid-escape');
+	}
+});
