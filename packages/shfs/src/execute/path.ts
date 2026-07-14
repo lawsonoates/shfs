@@ -48,7 +48,7 @@ function separate(records: readonly ShellRecord[]): string[] {
 			return;
 		}
 		const split = inferred.split('\n');
-		if (inferred.endsWith('\n')) {
+		while (split.at(-1) === '') {
 			split.pop();
 		}
 		lines.push(...split);

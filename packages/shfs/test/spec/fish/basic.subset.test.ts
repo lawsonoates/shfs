@@ -224,6 +224,11 @@ test('fish basic: basic.fish - echo -e interprets supported escapes', async () =
 	expect(await run("echo -e 'abc\\x21def'")).toBe('abc!def');
 });
 
+// basic.fish:132-134: escaped newlines are physical output lines.
+test('fish basic: basic.fish - echo -e exposes escaped newlines to pipelines', async () => {
+	expect(await run("echo -e 'a\\nb' | string match b")).toBe('b');
+});
+
 // basic.fish:151-152: \c stops output and suppresses the newline.
 test('fish basic: basic.fish - echo -e stops output at backslash c', async () => {
 	expect(await run("echo -e 'abc\\cdef'; echo after")).toBe('abcafter');

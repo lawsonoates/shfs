@@ -44,6 +44,9 @@ test('echo applies escape-mode options in order', async () => {
 		})
 	);
 
-	expect(on).toEqual([{ kind: 'line', text: 'a\nb' }]);
+	expect(on).toEqual([
+		{ kind: 'line', text: 'a' },
+		{ kind: 'line', text: 'b' },
+	]);
 	expect(off).toEqual([{ kind: 'line', text: 'a\\nb' }]);
 });
