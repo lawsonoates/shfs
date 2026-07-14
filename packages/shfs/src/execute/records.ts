@@ -2,6 +2,7 @@ import { Result } from 'better-result';
 
 import type { FS } from '../fs/fs';
 import {
+	byteRecordToLineRecords,
 	type FileRecord,
 	formatRecord as formatShellRecord,
 	type LineRecord,
@@ -16,6 +17,10 @@ export async function* toLineStream(
 	for await (const record of input) {
 		if (record.kind === 'line') {
 			yield record;
+			continue;
+		}
+		if (record.kind === 'bytes') {
+			yield* byteRecordToLineRecords(record);
 			continue;
 		}
 		if (record.kind === 'file') {
@@ -39,6 +44,26 @@ export async function* toFormattedLineStream(
 ): Stream<LineRecord> {
 	for await (const record of input) {
 		if (record.kind === 'line') {
+			yield record;
+			continue;
+		}
+		if (record.kind === 'bytes') {
+			yield* byteRecordToLineRecords(record);
+			continue;
+		}
+		yield {
+			kind: 'line',
+			text: formatShellRecord(record),
+		};
+	}
+}
+
+/** Format structured records while preserving exact byte chunks. */
+export async function* toFormattedRecordStream(
+	input: Stream<ShellRecord>
+): Stream<ShellRecord> {
+	for await (const record of input) {
+		if (record.kind === 'line' || record.kind === 'bytes') {
 			yield record;
 			continue;
 		}

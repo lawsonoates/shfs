@@ -319,19 +319,29 @@ export async function writeTextToFile(
 		append?: boolean;
 	}
 ): Promise<void> {
+	await writeBytesToFile(fs, path, textEncoder.encode(content), options);
+}
+
+export async function writeBytesToFile(
+	fs: FS,
+	path: string,
+	content: Uint8Array,
+	options: {
+		append?: boolean;
+	}
+): Promise<void> {
 	if (isNullDevicePath(path)) {
 		return;
 	}
 	const append = options.append ?? false;
 	if (!append) {
-		await fs.writeFile(path, textEncoder.encode(content));
+		await fs.writeFile(path, content);
 		return;
 	}
 	const existing = await readExistingFileBytes(fs, path);
-	const appended = textEncoder.encode(content);
-	const combined = new Uint8Array(existing.length + appended.length);
+	const combined = new Uint8Array(existing.length + content.length);
 	combined.set(existing);
-	combined.set(appended, existing.length);
+	combined.set(content, existing.length);
 	await fs.writeFile(path, combined);
 }
 

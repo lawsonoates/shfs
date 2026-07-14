@@ -2,7 +2,12 @@ import { Result } from 'better-result';
 
 import { isDirectoryRecord } from '../../execute/records';
 import type { FS } from '../../fs/fs';
-import type { FileRecord, LineRecord, Record } from '../../record';
+import {
+	byteRecordToLineRecords,
+	type FileRecord,
+	type LineRecord,
+	type Record,
+} from '../../record';
 import type { Transducer } from '../types';
 
 export interface CatOptions {
@@ -78,6 +83,18 @@ function normalizeOptions(options?: CatOptions): Required<CatOptions> {
 		showTabs: options?.showTabs ?? false,
 		squeezeBlank: options?.squeezeBlank ?? false,
 	};
+}
+
+function transformsLines(options: Required<CatOptions>): boolean {
+	return (
+		options.numberLines ||
+		options.numberNonBlank ||
+		options.showAll ||
+		options.showEnds ||
+		options.showNonprinting ||
+		options.showTabs ||
+		options.squeezeBlank
+	);
 }
 
 interface CatState {
@@ -199,7 +216,7 @@ export function cat(
 	fs: FS,
 	options?: CatOptions,
 	onMissingFile?: (path: string) => void
-): Transducer<Record, LineRecord> {
+): Transducer<Record, Record> {
 	const normalized = normalizeOptions(options);
 	const state: CatState = {
 		previousWasBlank: false,
@@ -210,6 +227,16 @@ export function cat(
 		for await (const record of input) {
 			if (isLineRecord(record)) {
 				yield* emitLineRecord(record, state, normalized);
+				continue;
+			}
+			if (record.kind === 'bytes') {
+				if (!transformsLines(normalized)) {
+					yield record;
+					continue;
+				}
+				for (const line of byteRecordToLineRecords(record)) {
+					yield* emitLineRecord(line, state, normalized);
+				}
 				continue;
 			}
 			if (record.kind === 'json') {

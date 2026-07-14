@@ -17,7 +17,11 @@ import {
 	ShellRuntimeError,
 } from '../diagnostics';
 import type { FS } from '../fs/fs';
-import { formatRecords, type Record as ShellRecord } from '../record';
+import {
+	formatRecords,
+	recordsToBytes,
+	type Record as ShellRecord,
+} from '../record';
 import { BufferedOutputStream, type OutputStream } from '../stderr';
 import type { Stream } from '../stream';
 import { createShellInput, type ShellInput } from './io';
@@ -36,7 +40,7 @@ import {
 	ensureNoclobberWritable,
 	getRedirectionMode,
 	isNullDevicePath,
-	writeTextToFile,
+	writeBytesToFile,
 } from './redirection';
 import {
 	type ActionStep,
@@ -99,6 +103,8 @@ interface ExecutedStepResult extends RoutedOutput {
 
 const ROOT_DIRECTORY = '/';
 const FD_TARGET_REGEX = /^&[0-9]+$/;
+const NEWLINE_BYTE = 0x0a;
+const UTF8_ENCODER = new TextEncoder();
 
 function isScriptIR(ir: PipelineIR | ScriptIR): ir is ScriptIR {
 	return 'statements' in ir;
@@ -1055,33 +1061,54 @@ function recordsToText(records: readonly ShellRecord[]): string {
 	return formatRecords(records);
 }
 
-function recordsToFileText(records: readonly ShellRecord[]): string {
-	return formatRecords(records, { trailingNewline: true });
+function recordsToFileBytes(records: readonly ShellRecord[]): Uint8Array {
+	return recordsToBytes(records, { trailingNewline: true });
 }
 
-function mergeChannelText(stdoutText: string, stderrText: string): string {
-	if (stdoutText === '') {
-		return stderrText;
+function concatenateBytes(
+	first: Uint8Array,
+	second: Uint8Array,
+	separator: Uint8Array = new Uint8Array()
+): Uint8Array {
+	const bytes = new Uint8Array(
+		first.length + separator.length + second.length
+	);
+	bytes.set(first);
+	bytes.set(separator, first.length);
+	bytes.set(second, first.length + separator.length);
+	return bytes;
+}
+
+function mergeChannelBytes(
+	stdoutBytes: Uint8Array,
+	stderrBytes: Uint8Array
+): Uint8Array {
+	if (stdoutBytes.length === 0) {
+		return stderrBytes;
 	}
-	if (stderrText === '') {
-		return stdoutText;
+	if (stderrBytes.length === 0) {
+		return stdoutBytes;
 	}
-	if (stdoutText.endsWith('\n')) {
-		return `${stdoutText}${stderrText}`;
+	if (stdoutBytes.at(-1) === NEWLINE_BYTE) {
+		return concatenateBytes(stdoutBytes, stderrBytes);
 	}
-	return `${stdoutText}\n${stderrText}`;
+	return concatenateBytes(
+		stdoutBytes,
+		stderrBytes,
+		new Uint8Array([NEWLINE_BYTE])
+	);
 }
 
 async function writeToFileOrReport(params: {
 	append: boolean;
-	content: string;
+	content: Uint8Array;
 	context: NormalizedExecuteContext;
 	fs: FS;
 	path: string;
 }): Promise<void> {
 	const { append, content, context, fs, path } = params;
 	try {
-		await writeTextToFile(fs, path, content, { append });
+		await writeBytesToFile(fs, path, content, { append });
 	} catch (error) {
 		context.status = 1;
 		context.stderr.append(
@@ -1126,13 +1153,13 @@ async function routeStepOutput(params: {
 		stderrDestination.kind === 'file' &&
 		stdoutDestination.path === stderrDestination.path;
 	if (writesToSameFile) {
-		const mergedText = mergeChannelText(
-			recordsToFileText(stdoutRecords),
-			stderrLines.join('\n')
+		const mergedBytes = mergeChannelBytes(
+			recordsToFileBytes(stdoutRecords),
+			UTF8_ENCODER.encode(stderrLines.join('\n'))
 		);
 		await writeToFileOrReport({
 			append: stdoutDestination.append && stderrDestination.append,
-			content: mergedText,
+			content: mergedBytes,
 			context,
 			fs,
 			path: stdoutDestination.path,
@@ -1164,6 +1191,15 @@ async function routeStepOutput(params: {
 	};
 }
 
+function clearExplicitSeparation(record: ShellRecord): ShellRecord {
+	if (record.kind !== 'line' || record.separation !== 'explicit') {
+		return record;
+	}
+	const downstreamRecord = { ...record };
+	downstreamRecord.separation = undefined;
+	return downstreamRecord;
+}
+
 async function routeStdout(
 	stdoutRecords: readonly ShellRecord[],
 	destination: OutputDestination,
@@ -1178,7 +1214,7 @@ async function routeStdout(
 	}
 
 	if (shouldPipe(destination, hasNextStep)) {
-		pipeRecords.push(...stdoutRecords);
+		pipeRecords.push(...stdoutRecords.map(clearExplicitSeparation));
 		return;
 	}
 
@@ -1199,7 +1235,7 @@ async function routeStdout(
 		case 'file':
 			await writeToFileOrReport({
 				append: destination.append,
-				content: recordsToFileText(stdoutRecords),
+				content: recordsToFileBytes(stdoutRecords),
 				context,
 				fs,
 				path: destination.path,
@@ -1249,7 +1285,7 @@ async function routeStderr(
 		case 'file':
 			await writeToFileOrReport({
 				append: destination.append,
-				content: stderrLines.join('\n'),
+				content: UTF8_ENCODER.encode(stderrLines.join('\n')),
 				context,
 				fs,
 				path: destination.path,

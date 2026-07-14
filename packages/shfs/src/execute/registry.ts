@@ -31,7 +31,11 @@ import { touch } from '../operator/touch/touch';
 import { createTreeResolvedArgs, runTreeCommand } from '../operator/tree/tree';
 import { runWcCommand } from '../operator/wc/wc';
 import { runXargsCommand } from '../operator/xargs/xargs';
-import { formatRecord, type Record as ShellRecord } from '../record';
+import {
+	byteRecordToLineRecords,
+	formatRecord,
+	type Record as ShellRecord,
+} from '../record';
 import type { Stream } from '../stream';
 import { BufferedShellOutput, createShellInput } from './io';
 import {
@@ -44,7 +48,7 @@ import {
 } from './path';
 import { files } from './producers';
 import { empty, fromRecordGenerator, type RecordStream } from './record-stream';
-import { toFormattedLineStream } from './records';
+import { toFormattedLineStream, toFormattedRecordStream } from './records';
 import {
 	resolveInputRedirectEffect,
 	resolveRedirectPathEffect,
@@ -460,7 +464,7 @@ CommandRegistry.register('cat', {
 						fs,
 						options,
 						onMissingFile
-					)(toFormattedLineStream(input));
+					)(toFormattedRecordStream(input));
 				}
 				context.status = hadReadError ? 1 : 0;
 			})()
@@ -954,6 +958,15 @@ CommandRegistry.register('false', {
 	},
 });
 
+function countInputRecordLines(record: ShellRecord): number {
+	if (record.kind === 'bytes') {
+		return byteRecordToLineRecords(record).length;
+	}
+	const embeddedNewlines = formatRecord(record).split('\n').length - 1;
+	const hasTerminator = record.kind !== 'line' || record.terminated !== false;
+	return embeddedNewlines + (hasTerminator ? 1 : 0);
+}
+
 CommandRegistry.register('count', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
@@ -977,13 +990,7 @@ CommandRegistry.register('count', {
 				// (tests/checks/count.fish).
 				if (input) {
 					for await (const record of input) {
-						count += formatRecord(record).split('\n').length - 1;
-						if (
-							record.kind !== 'line' ||
-							record.terminated !== false
-						) {
-							count++;
-						}
+						count += countInputRecordLines(record);
 					}
 				}
 				yield {

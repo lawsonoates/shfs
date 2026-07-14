@@ -1,3 +1,9 @@
+export interface ByteRecord {
+	/** Exact physical stdout bytes, including any delimiters or newlines. */
+	bytes: Uint8Array;
+	kind: 'bytes';
+}
+
 export interface FileRecord {
 	kind: 'file';
 	isDirectory?: boolean;
@@ -23,9 +29,13 @@ export interface JsonRecord {
 
 /**
  * Stdout records are the unit of data flowing through pipelines.
- * Commands operate on records, not bytes.
+ * Records carry either logical values or exact physical byte chunks.
  */
-export type StdoutRecord = FileRecord | LineRecord | JsonRecord;
+export type StdoutRecord = ByteRecord | FileRecord | LineRecord | JsonRecord;
+
+const NEWLINE_BYTE = 0x0a;
+const UTF8_DECODER = new TextDecoder();
+const UTF8_ENCODER = new TextEncoder();
 
 /** Convert physical text lines into records, preserving final-line termination. */
 export function textToLineRecords(
@@ -49,8 +59,21 @@ export function textToLineRecords(
 	});
 }
 
+/** Decode an exact byte chunk for a line-oriented consumer. */
+export function byteRecordToLineRecords(record: ByteRecord): LineRecord[] {
+	if (record.bytes.length === 0) {
+		return [];
+	}
+	const terminated = record.bytes.at(-1) === NEWLINE_BYTE;
+	const decoded = UTF8_DECODER.decode(record.bytes);
+	const text = terminated ? decoded.slice(0, -1) : decoded;
+	return textToLineRecords(text, terminated);
+}
+
 export function formatStdoutRecord(record: StdoutRecord): string {
 	switch (record.kind) {
+		case 'bytes':
+			return UTF8_DECODER.decode(record.bytes);
 		case 'line':
 			return record.text;
 		case 'file':
@@ -62,19 +85,50 @@ export function formatStdoutRecord(record: StdoutRecord): string {
 	}
 }
 
+function concatenateBytes(chunks: readonly Uint8Array[]): Uint8Array {
+	let length = 0;
+	for (const chunk of chunks) {
+		length += chunk.length;
+	}
+	const bytes = new Uint8Array(length);
+	let offset = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset);
+		offset += chunk.length;
+	}
+	return bytes;
+}
+
+/** Serialize records to their physical stdout byte representation. */
+export function recordsToBytes(
+	records: readonly StdoutRecord[],
+	options: { trailingNewline?: boolean } = {}
+): Uint8Array {
+	const chunks: Uint8Array[] = [];
+	for (const record of records) {
+		if (record.kind === 'bytes') {
+			chunks.push(record.bytes);
+			continue;
+		}
+		const text = formatStdoutRecord(record);
+		const terminated =
+			record.kind !== 'line' || record.terminated !== false;
+		chunks.push(UTF8_ENCODER.encode(terminated ? `${text}\n` : text));
+	}
+	const bytes = concatenateBytes(chunks);
+	if (
+		options.trailingNewline ||
+		bytes.length === 0 ||
+		bytes.at(-1) !== NEWLINE_BYTE
+	) {
+		return bytes;
+	}
+	return bytes.slice(0, -1);
+}
+
 export function formatStdoutRecords(
 	records: readonly StdoutRecord[],
 	options: { trailingNewline?: boolean } = {}
 ): string {
-	let text = '';
-	for (const record of records) {
-		text += formatStdoutRecord(record);
-		if (record.kind !== 'line' || record.terminated !== false) {
-			text += '\n';
-		}
-	}
-	if (options.trailingNewline || !text.endsWith('\n')) {
-		return text;
-	}
-	return text.slice(0, -1);
+	return UTF8_DECODER.decode(recordsToBytes(records, options));
 }

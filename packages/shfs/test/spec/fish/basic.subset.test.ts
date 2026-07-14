@@ -24,6 +24,10 @@ async function run(command: string): Promise<string> {
 	return await shell.$`${command}`.text();
 }
 
+async function runBytes(command: string): Promise<Uint8Array> {
+	return await shell.$`${command}`.bytes();
+}
+
 async function runResult(command: string) {
 	const result = await shell.$`${command}`.nothrow();
 	return {
@@ -223,6 +227,22 @@ test('fish basic: basic.fish - echo -e interprets supported escapes', async () =
 	expect(await run("echo -e 'abc\\41def'")).toBe('abc!def');
 	expect(await run("echo -e 'abc\\041def'")).toBe('abc!def');
 	expect(await run("echo -e 'abc\\x21def'")).toBe('abc!def');
+});
+
+// basic.fish:148-159 pipes numeric escapes through display_bytes. Adapted to
+// the Shell byte API because display_bytes is outside the shfs subset.
+test('fish basic: basic.fish - echo numeric escapes emit raw bytes', async () => {
+	expect(await runBytes("echo -ne '\\376'")).toEqual(new Uint8Array([0xfe]));
+	expect(await runBytes("echo -ne '\\5555'")).toEqual(
+		new Uint8Array([0o155, 0o65])
+	);
+	// An ordinary Unicode operand remains UTF-8; it must not inherit the raw
+	// byte interpretation used by numeric escapes.
+	expect(await runBytes("echo -ne 'ÿ'")).toEqual(
+		new Uint8Array([0xc3, 0xbf])
+	);
+	expect(await run("echo -ne '\\376' | wc -c")).toBe('1');
+	expect(await run("echo -ne '\\141\\nb' | string match b")).toBe('b');
 });
 
 // basic.fish:132-134: escaped newlines are physical output lines.

@@ -312,6 +312,14 @@ test('fish string: string.fish - split preserves empty fields in command substit
 	expect(await run('count (string split / /)')).toBe('2');
 });
 
+// Fish's explicit split separation applies only when split is the terminal
+// command in a substitution. Once another command consumes the records, its
+// physical newline output is inferred normally by command substitution.
+test('fish string: explicit split separation expires across a pipe boundary', async () => {
+	expect(await run("count (string split / 'a\nb/c')")).toBe('2');
+	expect(await run("count (string split / 'a\nb/c' | head -n 10)")).toBe('3');
+});
+
 // string.fish:851-873,896-897: split0 consumes NUL-delimited input, ignores
 // one trailing NUL, and explicitly preserves empty fields in substitutions.
 test('fish string: string.fish - split0 preserves NUL-delimited fields', async () => {

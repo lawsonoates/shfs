@@ -60,6 +60,10 @@ function separate(records: readonly ShellRecord[]): string[] {
 			lines.push(record.text);
 			continue;
 		}
+		if (record.kind === 'bytes') {
+			inferred += formatRecord(record);
+			continue;
+		}
 		inferred += formatRecord(record);
 		if (record.kind !== 'line' || record.terminated !== false) {
 			inferred += '\n';

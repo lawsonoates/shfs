@@ -1,9 +1,11 @@
 import type { Record as ShellRecord } from '../record';
-import { formatRecord, formatRecords } from '../record';
+import {
+	byteRecordToLineRecords,
+	formatRecord,
+	recordsToBytes,
+} from '../record';
 import type { OutputStream as DiagnosticOutputStream } from '../stderr';
 import type { Stream } from '../stream';
-
-const UTF8_ENCODER = new TextEncoder();
 
 export interface ShellInput {
 	records(): Stream<ShellRecord>;
@@ -44,6 +46,7 @@ export class EmptyInput implements ShellInput {
 
 export class RecordInput implements ShellInput {
 	private readonly input: AsyncIterator<ShellRecord>;
+	private readonly pendingLines: string[] = [];
 
 	constructor(input: Stream<ShellRecord>) {
 		this.input = input[Symbol.asyncIterator]();
@@ -60,14 +63,31 @@ export class RecordInput implements ShellInput {
 	}
 
 	async *lines(): Stream<string> {
-		for await (const record of this.records()) {
-			yield formatRecord(record);
+		while (true) {
+			const line = await this.readLine();
+			if (line === null) {
+				return;
+			}
+			yield line;
 		}
 	}
 
 	async readLine(): Promise<string | null> {
-		const next = await this.input.next();
-		return next.done ? null : formatRecord(next.value);
+		while (this.pendingLines.length === 0) {
+			const next = await this.input.next();
+			if (next.done) {
+				return null;
+			}
+			if (next.value.kind !== 'bytes') {
+				return formatRecord(next.value);
+			}
+			this.pendingLines.push(
+				...byteRecordToLineRecords(next.value).map(
+					(record) => record.text
+				)
+			);
+		}
+		return this.pendingLines.shift() ?? null;
 	}
 
 	async bytes(
@@ -80,7 +100,7 @@ export class RecordInput implements ShellInput {
 		if (records.length === 0) {
 			return new Uint8Array();
 		}
-		return UTF8_ENCODER.encode(formatRecords(records, options));
+		return recordsToBytes(records, options);
 	}
 }
 

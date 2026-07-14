@@ -360,6 +360,23 @@ test('append redirection concatenates exact terminated and unterminated output',
 	);
 });
 
+// fish-shell tests/checks/basic.fish:148-159 verifies numeric echo escapes
+// with display_bytes. Redirect assertions exercise the same byte contract.
+test('numeric echo escapes redirect and append as exact bytes', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/raw.bin', new Uint8Array([0x00]));
+
+	const result = execute(
+		compile(
+			parse("echo -ne '\\376' > /raw.bin; echo -ne '\\377' >> /raw.bin")
+		),
+		fs
+	);
+	(await collectRecordStream(result)).unwrap();
+
+	expect(await fs.readFile('/raw.bin')).toEqual(new Uint8Array([0xfe, 0xff]));
+});
+
 test('variable-expanded input redirection resolves relative to cwd', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/workspace/input.txt', 'alpha\nbeta\ngamma');
