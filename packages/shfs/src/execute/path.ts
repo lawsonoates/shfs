@@ -612,7 +612,9 @@ function expandPartToCandidatesEffect(
 				if (part.index !== null) {
 					values = yield* selectByIndex(context, values, part.index);
 				}
-				return Result.ok(part.quoted ? [values.join(' ')] : values);
+				return Result.ok(
+					part.quoted ? [joinVariable(part.name, values)] : values
+				);
 			}
 			case 'commandSub': {
 				let lines = yield* await evaluateCommandSubstitutionEffect(
@@ -634,4 +636,14 @@ function expandPartToCandidatesEffect(
 			}
 		}
 	});
+}
+
+function joinVariable(name: string, values: readonly string[]): string {
+	if (!name.endsWith('PATH')) {
+		return values.join(' ');
+	}
+	if (name === 'MANPATH') {
+		return values.join(':');
+	}
+	return values.map((value) => (value === '' ? '.' : value)).join(':');
 }

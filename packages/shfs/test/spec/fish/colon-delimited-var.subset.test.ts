@@ -23,19 +23,17 @@ async function run(command: string): Promise<string> {
 
 // colon-delimited-var.fish: set PATH abc '' def; echo "$PATH"
 test('fish path variables: colon-delimited-var.fish - quoted PATH joins with colons and maps empty entries to dot', async () => {
-	expect(await run("set PATH abc '' def; echo \"$PATH\"")).toBe(
-		'abc:.:def'
-	);
+	expect(await run('set PATH abc \'\' def; echo "$PATH"')).toBe('abc:.:def');
 });
 
 // colon-delimited-var.fish: set CDPATH '' qqq; echo "$CDPATH"
 test('fish path variables: colon-delimited-var.fish - quoted CDPATH maps a leading empty entry to dot', async () => {
-	expect(await run("set CDPATH '' qqq; echo \"$CDPATH\"")).toBe('.:qqq');
+	expect(await run('set CDPATH \'\' qqq; echo "$CDPATH"')).toBe('.:qqq');
 });
 
 // colon-delimited-var.fish: set MANPATH 123 '' 456; echo "$MANPATH"
 test('fish path variables: colon-delimited-var.fish - quoted MANPATH preserves empty entries', async () => {
-	expect(await run("set MANPATH 123 '' 456; echo \"$MANPATH\"")).toBe(
+	expect(await run('set MANPATH 123 \'\' 456; echo "$MANPATH"')).toBe(
 		'123::456'
 	);
 });
