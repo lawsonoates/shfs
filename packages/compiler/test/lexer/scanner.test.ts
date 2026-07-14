@@ -138,6 +138,16 @@ test('scanner preserves escaped hashes inside command substitutions', () => {
 	]);
 });
 
+test('scanner requires a real command substitution closing delimiter', () => {
+	for (const input of ['(echo #)', '(echo (echo nested) #))']) {
+		expect(() => scanFirstWord(input)).toThrow();
+	}
+
+	for (const input of ['(echo #)\n)', '(echo (echo nested) #))\n)']) {
+		expect(scanFirstWord(input).spelling).toBe(input);
+	}
+});
+
 test('scanner keeps brackets inside indexed command substitutions', () => {
 	const cases = [
 		{

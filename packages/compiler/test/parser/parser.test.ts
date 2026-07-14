@@ -232,6 +232,14 @@ test('parseEffect yields syntax failures on the result error channel', () => {
 	}
 });
 
+test('parseEffect rejects substitutions closed only inside EOF comments', () => {
+	const result = parseEffect('echo (echo #)');
+	expect(result.isErr()).toBeTrue();
+	if (result.isErr()) {
+		expect(result.error.diagnostic.code).toBe('unmatched-parenthesis');
+	}
+});
+
 test('parseEffect rejects octal escapes above the Fish ASCII limit', () => {
 	const result = parseEffect('echo \\400');
 	expect(result.isErr()).toBeTrue();

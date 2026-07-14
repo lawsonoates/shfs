@@ -1,4 +1,7 @@
-import { InvalidEscapeError } from '../parser/syntax-error';
+import {
+	InvalidEscapeError,
+	UnmatchedParenError,
+} from '../parser/syntax-error';
 import { LexerState, StateContext } from './context';
 import { type SourcePosition, SourceSpan } from './position';
 import { type SourceReader, StringSourceReader } from './source-reader';
@@ -976,9 +979,11 @@ export class Scanner {
 			result += chunk.chars;
 		}
 
-		const source = result.endsWith(')')
-			? result.slice(1, -1)
-			: result.slice(1);
+		const closed = depth === 0;
+		if (!closed) {
+			throw new UnmatchedParenError(start.span(this.source.position));
+		}
+		const source = result.slice(1, -1);
 
 		const suffix = this.readIndexSuffix();
 		let raw = `${prefix}${result}`;
