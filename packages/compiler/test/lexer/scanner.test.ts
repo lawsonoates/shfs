@@ -188,6 +188,33 @@ test('scanner tracks nested and escaped substitution delimiters in indexes', () 
 	}
 });
 
+test('scanner keeps nested substitution terminators inside variable indexes', () => {
+	const cases = [
+		{
+			expectedIndex: '(echo 1\n)',
+			expectedSpelling: '$vals[(echo 1\n)]',
+			input: '$vals[(echo 1\n)]',
+		},
+		{
+			expectedIndex: '(echo "1")',
+			expectedSpelling: '$vals[(echo "1")]',
+			input: '"$vals[(echo "1")]"',
+		},
+	];
+
+	for (const { expectedIndex, expectedSpelling, input } of cases) {
+		const token = scanFirstWord(input);
+		const part = token.wordParts.find(
+			(wordPart) => wordPart.kind === 'variable'
+		);
+		if (part?.kind !== 'variable') {
+			throw new Error('Expected indexed variable word part');
+		}
+		expect(token.spelling).toBe(expectedSpelling);
+		expect(part.index).toBe(expectedIndex);
+	}
+});
+
 test('scanner keeps quoted wildcard characters as literal metadata', () => {
 	const token = scanFirstWord('prefix"*"suffix');
 

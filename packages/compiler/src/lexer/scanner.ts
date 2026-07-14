@@ -788,7 +788,10 @@ export class Scanner {
 				continue;
 			}
 
-			if (this.endsIndexBeforeCharacter(char, outerQuote)) {
+			if (
+				state.commandSubstitutionDepth === 0 &&
+				this.endsIndexBeforeCharacter(char, outerQuote)
+			) {
 				return { raw: state.raw, text: `[${state.index}` };
 			}
 
