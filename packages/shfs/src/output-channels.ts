@@ -45,7 +45,10 @@ export class ShellOutput {
 	}
 
 	text(encoding: BufferEncoding = 'utf8'): string {
-		return this.stdoutText.toString(encoding);
+		if (encoding === 'utf8' || encoding === 'utf-8') {
+			return this.stdoutText.toString(encoding);
+		}
+		return this.stdout.toString(encoding);
 	}
 }
 

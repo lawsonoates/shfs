@@ -68,6 +68,25 @@ test('string regex replacement emits one record per physical output line', async
 	expect(captureRuntime.context.status).toBe(0);
 });
 
+// fish string-match.rst: regex output has one item for the full match and
+// one for each capture group, including an unmatched optional capture.
+test('string match preserves unmatched capture positions', async () => {
+	const runtime = createBuiltinRuntime();
+	const records = await collect<ShellRecord>()(
+		string(runtime, {
+			operands: [literal('-r'), literal('(a)?(b)'), literal('b')],
+			subcommand: literal('match'),
+		})
+	);
+
+	expect(records).toEqual([
+		{ kind: 'line', text: 'b' },
+		{ kind: 'line', text: '' },
+		{ kind: 'line', text: 'b' },
+	]);
+	expect(runtime.context.status).toBe(0);
+});
+
 // fish string-replace.rst: numeric captures accept ${n} references.
 test('string replace expands braced numeric capture references', async () => {
 	const runtime = createBuiltinRuntime();

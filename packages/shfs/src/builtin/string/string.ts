@@ -260,9 +260,7 @@ function captures(regex: RegExp, value: string, invert: boolean) {
 	if (invert) {
 		return null;
 	}
-	return [...found].filter(
-		(capture): capture is string => capture !== undefined
-	);
+	return [...found].map((capture) => capture ?? '');
 }
 
 function casing(value: string, mode: 'lower' | 'upper' | null): string {
