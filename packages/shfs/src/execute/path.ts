@@ -497,6 +497,8 @@ export interface ExpandWordOptions {
 	command?: string;
 	/** Expand unmatched globs to an empty list instead of failing. */
 	emptyGlobOk?: boolean;
+	/** Expand glob parts against the filesystem. */
+	expandGlobs?: boolean;
 }
 
 /**
@@ -529,7 +531,7 @@ export const expandWordToValuesEffect: (
 		}
 
 		const products = cartesianProduct(partCandidates);
-		if (!hasGlob) {
+		if (!hasGlob || options?.expandGlobs === false) {
 			return Result.ok(products);
 		}
 		return await expandGlobProductsEffect(products, fs, context, options);
@@ -588,8 +590,7 @@ function selectExpandedIndexEffect(
 		for (const word of words) {
 			expanded.push(
 				...(yield* await expandWordToValuesEffect(word, fs, context, {
-					command: '<index>',
-					emptyGlobOk: true,
+					expandGlobs: false,
 				}))
 			);
 		}

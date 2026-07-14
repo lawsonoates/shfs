@@ -76,6 +76,19 @@ test('expanded index items preserve embedded whitespace boundaries', async () =>
 	}
 });
 
+test('variable indexes do not glob wildcard atoms', async () => {
+	const withoutMatch = await run('set values first second; echo $values[*]');
+	expect(withoutMatch.stdout.toString()).toBe('');
+	expect(withoutMatch.exitCode).not.toBe(0);
+	expect(withoutMatch.stderr.toString()).toContain('Invalid index value');
+
+	await run('touch /1');
+	const withMatch = await run('set values first second; echo $values[*]');
+	expect(withMatch.stdout.toString()).toBe('');
+	expect(withMatch.exitCode).not.toBe(0);
+	expect(withMatch.stderr.toString()).toContain('Invalid index value');
+});
+
 test('2> redirects an expansion-failure diagnostic to a file, not shell stderr', async () => {
 	await run('mkdir -p /w');
 	await run('cd /w');
