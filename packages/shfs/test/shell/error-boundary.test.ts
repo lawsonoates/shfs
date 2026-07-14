@@ -110,6 +110,22 @@ test('expanded index atoms are not recursively resolved', async () => {
 	expect(commandSubstitution.stdout.toString()).toBe('second');
 });
 
+test('top-level index comments are not silently truncated', async () => {
+	const topLevel = await run(
+		'set values first second; echo $values[1 #ignored]'
+	);
+	expect(topLevel.stdout.toString()).toBe('');
+	expect(topLevel.exitCode).not.toBe(0);
+	expect(topLevel.stderr.toString()).toContain('Invalid index value');
+
+	const nested = await run(`set values first second
+echo $values[(echo 1 # ) ] "
+)]`);
+	expect(nested.stdout.toString()).toBe('first');
+	expect(nested.exitCode).toBe(0);
+	expect(nested.stderr.toString()).toBe('');
+});
+
 test('2> redirects an expansion-failure diagnostic to a file, not shell stderr', async () => {
 	await run('mkdir -p /w');
 	await run('cd /w');

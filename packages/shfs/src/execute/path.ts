@@ -40,6 +40,7 @@ const ROOT_DIRECTORY = '/';
 const TRAILING_SLASH_REGEX = /\/+$/;
 const NO_GLOB_MATCH_MESSAGE = 'no matches found';
 const INDEX_ATOM_WHITESPACE_REGEX = /\s/;
+const INDEX_PARSE_BOUNDARY = '__shfs_index_boundary__';
 
 /**
  * Execute a command substitution and return its output lines.
@@ -550,7 +551,7 @@ function indexWordsEffect(
 	return Result.gen(function* () {
 		const parsed = yield* Result.mapError(
 			Result.try({
-				try: () => parse(`count ${index}`),
+				try: () => parse(`count ${index} ${INDEX_PARSE_BOUNDARY}`),
 				catch: toShellErrorCause,
 			}),
 			toShellErrorCause
@@ -574,7 +575,14 @@ function indexWordsEffect(
 		if (step?.cmd !== 'count' || (step.redirections?.length ?? 0) > 0) {
 			return yield* invalidIndexError();
 		}
-		return Result.ok(step.args.values);
+		const boundary = step.args.values.at(-1);
+		if (
+			boundary?.kind !== 'literal' ||
+			boundary.value !== INDEX_PARSE_BOUNDARY
+		) {
+			return yield* invalidIndexError();
+		}
+		return Result.ok(step.args.values.slice(0, -1));
 	});
 }
 
