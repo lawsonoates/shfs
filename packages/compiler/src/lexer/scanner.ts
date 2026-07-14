@@ -149,6 +149,7 @@ interface IndexSuffix {
 }
 
 interface IndexState {
+	commandSubstitutionDepth: number;
 	depth: number;
 	index: string;
 	quote: "'" | '"' | null;
@@ -773,6 +774,7 @@ export class Scanner {
 
 		const outerQuote = this.currentWordPartQuote();
 		const state: IndexState = {
+			commandSubstitutionDepth: 0,
 			depth: 1,
 			index: '',
 			quote: null,
@@ -786,11 +788,13 @@ export class Scanner {
 				continue;
 			}
 
-			const closesOuterQuote =
-				(outerQuote === 'double' && char === '"') ||
-				(outerQuote === 'single' && char === "'");
-			if (char === '\n' || char === '\0' || closesOuterQuote) {
+			if (this.endsIndexBeforeCharacter(char, outerQuote)) {
 				return { raw: state.raw, text: `[${state.index}` };
+			}
+
+			if (char === '\\') {
+				this.readEscapedIndexChar(state);
+				continue;
 			}
 
 			if (char === "'" || char === '"') {
@@ -800,12 +804,7 @@ export class Scanner {
 				continue;
 			}
 
-			if (char === '[') {
-				state.depth += 1;
-			}
-			if (char === ']') {
-				state.depth -= 1;
-			}
+			this.updateIndexDelimiterDepths(state, char);
 			state.raw += this.source.advance();
 			if (state.depth === 0) {
 				return { raw: state.raw, text: state.index };
@@ -814,6 +813,50 @@ export class Scanner {
 		}
 
 		return { raw: state.raw, text: `[${state.index}` };
+	}
+
+	private endsIndexBeforeCharacter(
+		char: string,
+		outerQuote: TokenWordPartQuote
+	): boolean {
+		return (
+			char === '\n' ||
+			char === '\0' ||
+			(outerQuote === 'double' && char === '"') ||
+			(outerQuote === 'single' && char === "'")
+		);
+	}
+
+	private readEscapedIndexChar(state: IndexState): void {
+		const escapeMarker = this.source.advance();
+		state.raw += escapeMarker;
+		state.index += escapeMarker;
+		if (this.source.eof || this.source.peek() === '\n') {
+			return;
+		}
+
+		const escaped = this.source.advance();
+		state.raw += escaped;
+		state.index += escaped;
+	}
+
+	private updateIndexDelimiterDepths(state: IndexState, char: string): void {
+		if (char === '(') {
+			state.commandSubstitutionDepth += 1;
+			return;
+		}
+		if (char === ')' && state.commandSubstitutionDepth > 0) {
+			state.commandSubstitutionDepth -= 1;
+			return;
+		}
+		if (state.commandSubstitutionDepth > 0) {
+			return;
+		}
+		if (char === '[') {
+			state.depth += 1;
+		} else if (char === ']') {
+			state.depth -= 1;
+		}
 	}
 
 	private readQuotedIndexChar(state: IndexState): void {
