@@ -3,6 +3,7 @@ import {
 	UnmatchedParenError,
 } from '../parser/syntax-error';
 import { LexerState, StateContext } from './context';
+import { OPERATORS, type OperatorEntry, SINGLE_CHAR_OPS } from './operators';
 import { type SourcePosition, SourceSpan } from './position';
 import { type SourceReader, StringSourceReader } from './source-reader';
 import {
@@ -74,21 +75,6 @@ function classifySpellingKind(spelling: string): TokenKind {
 		}
 	}
 	return TokenKind.NAME;
-}
-
-function singleCharOperatorKind(c: string): TokenKind | null {
-	switch (c) {
-		case '|':
-			return TokenKind.PIPE;
-		case ';':
-			return TokenKind.SEMICOLON;
-		case '<':
-			return TokenKind.LESS;
-		case '>':
-			return TokenKind.GREAT;
-		default:
-			return null;
-	}
 }
 
 function isSpecialChar(c: string): boolean {
@@ -166,6 +152,13 @@ interface IndexState {
 	raw: string;
 }
 
+interface SubstitutionBoundaryState {
+	atTokenStart: boolean;
+	comment: boolean;
+	index: number;
+	quote: "'" | '"' | null;
+}
+
 /**
  * Merge two flags objects, combining their values.
  */
@@ -187,6 +180,7 @@ function mergeFlags(
  *
  * This lexer implements a fish-inspired subset with:
  * - Pipelines (|)
+ * - Statement and logical separators (;, &&, ||)
  * - Command substitution (...)
  * - Globbing (* ? [...])
  * - Single quotes (literal, no escapes)
@@ -200,7 +194,6 @@ function mergeFlags(
  * - Control flow (if, for, while, etc.)
  * - Functions
  * - Background (&)
- * - Semicolons (;)
  * - and/or/not keywords
  * - Tilde expansion (~)
  * - Recursive globbing (**)
@@ -275,20 +268,22 @@ export class Scanner {
 			return this.makeToken(TokenKind.NEWLINE, '\n', start);
 		}
 
-		// Multi-char operators: && and ||
-		if (c0 === '&' && this.source.peek(1) === '&') {
-			this.source.advance();
-			this.source.advance();
-			return this.makeToken(TokenKind.AND_AND, '&&', start);
-		}
-		if (c0 === '|' && this.source.peek(1) === '|') {
-			this.source.advance();
-			this.source.advance();
-			return this.makeToken(TokenKind.OR_OR, '||', start);
+		const multiCharOperator = this.peekMultiCharOperator();
+		if (multiCharOperator !== null) {
+			let remainingCharacters = multiCharOperator.pattern.length;
+			while (remainingCharacters > 0) {
+				this.source.advance();
+				remainingCharacters--;
+			}
+			return this.makeToken(
+				multiCharOperator.kind,
+				multiCharOperator.pattern,
+				start
+			);
 		}
 
 		// Single-char operators
-		const singleOp = singleCharOperatorKind(c0);
+		const singleOp = SINGLE_CHAR_OPS.get(c0) ?? null;
 		if (singleOp !== null) {
 			this.source.advance();
 			return this.makeToken(singleOp, c0, start);
@@ -400,11 +395,10 @@ export class Scanner {
 				break;
 			}
 
-			// && ends a word (|| is covered by "|" being a boundary).
+			// Multi-character operators end a word.
 			if (
 				!this.stateCtx.inQuotes &&
-				c === '&' &&
-				this.source.peek(1) === '&'
+				this.peekMultiCharOperator() !== null
 			) {
 				break;
 			}
@@ -1038,26 +1032,95 @@ export class Scanner {
 	}
 
 	private canStartSubstitutionComment(source: string): boolean {
-		const previous = source.at(-1);
-		const followsTokenBoundary =
-			previous === '(' ||
-			previous === ';' ||
-			previous === '|' ||
-			previous === '&' ||
-			previous === ' ' ||
-			previous === '\t' ||
-			previous === '\n';
-		if (!followsTokenBoundary) {
-			return false;
+		const state: SubstitutionBoundaryState = {
+			atTokenStart: false,
+			comment: false,
+			index: 0,
+			quote: null,
+		};
+
+		while (state.index < source.length) {
+			this.advanceSubstitutionBoundaryState(source, state);
 		}
 
-		let precedingBackslashCount = 0;
-		let index = source.length - 2;
-		while (index >= 0 && source[index] === '\\') {
-			precedingBackslashCount++;
-			index--;
+		return state.atTokenStart;
+	}
+
+	private advanceSubstitutionBoundaryState(
+		source: string,
+		state: SubstitutionBoundaryState
+	): void {
+		if (state.comment) {
+			this.advanceSubstitutionCommentBoundary(source, state);
+			return;
 		}
-		return precedingBackslashCount % 2 === 0;
+		if (state.quote !== null) {
+			this.advanceQuotedSubstitutionBoundary(source, state);
+			return;
+		}
+		this.advanceUnquotedSubstitutionBoundary(source, state);
+	}
+
+	private advanceSubstitutionCommentBoundary(
+		source: string,
+		state: SubstitutionBoundaryState
+	): void {
+		if (source[state.index] === '\n') {
+			state.comment = false;
+			state.atTokenStart = true;
+		}
+		state.index++;
+	}
+
+	private advanceQuotedSubstitutionBoundary(
+		source: string,
+		state: SubstitutionBoundaryState
+	): void {
+		const char = source[state.index] ?? '';
+		if (char === state.quote) {
+			state.quote = null;
+		} else if (state.quote === '"' && char === '\\') {
+			state.index++;
+		}
+		state.atTokenStart = false;
+		state.index++;
+	}
+
+	private advanceUnquotedSubstitutionBoundary(
+		source: string,
+		state: SubstitutionBoundaryState
+	): void {
+		const char = source[state.index] ?? '';
+		if (char === "'" || char === '"') {
+			state.quote = char;
+			state.atTokenStart = false;
+			state.index++;
+			return;
+		}
+		if (char === '\\') {
+			state.atTokenStart = false;
+			state.index += state.index + 1 < source.length ? 2 : 1;
+			return;
+		}
+		if (char === '#' && state.atTokenStart) {
+			state.comment = true;
+			state.index++;
+			return;
+		}
+		if (char === ' ' || char === '\t' || char === '\n') {
+			state.atTokenStart = true;
+			state.index++;
+			return;
+		}
+		if (char === '(') {
+			state.atTokenStart = true;
+			state.index++;
+			return;
+		}
+
+		const operatorLength = this.operatorLengthAt(source, state.index);
+		state.atTokenStart = operatorLength > 0;
+		state.index += operatorLength || 1;
 	}
 
 	private readSubstitutionComment(): string {
@@ -1175,6 +1238,31 @@ export class Scanner {
 			spelling += this.source.advance();
 		}
 		return this.makeToken(TokenKind.COMMENT, spelling, start);
+	}
+
+	private operatorLengthAt(source: string, index: number): number {
+		for (const operator of OPERATORS) {
+			if (source.startsWith(operator.pattern, index)) {
+				return operator.pattern.length;
+			}
+		}
+		return SINGLE_CHAR_OPS.has(source[index] ?? '') ? 1 : 0;
+	}
+
+	private peekMultiCharOperator(): OperatorEntry | null {
+		for (const operator of OPERATORS) {
+			let matches = true;
+			for (let index = 0; index < operator.pattern.length; index++) {
+				if (this.source.peek(index) !== operator.pattern[index]) {
+					matches = false;
+					break;
+				}
+			}
+			if (matches) {
+				return operator;
+			}
+		}
+		return null;
 	}
 
 	private isSpecialChar(c: string): boolean {

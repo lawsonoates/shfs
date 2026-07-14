@@ -138,6 +138,48 @@ test('scanner preserves escaped hashes inside command substitutions', () => {
 	]);
 });
 
+test('scanner preserves hashes after non-separator characters', () => {
+	// features-ampersand-nobg-in-token1.fish keeps a lone `&` inside a word.
+	const innerWords = [
+		'a&#b',
+		'a&&&#b',
+		'a\\&&#b',
+		'a\\|#b',
+		'a\\;#b',
+		'a\\<#b',
+		'a\\>#b',
+		'a\\\n#b',
+	];
+
+	for (const innerWord of innerWords) {
+		const input = `echo (echo ${innerWord}) after`;
+		const tokens = new Scanner(input).tokenize();
+
+		expect(tokens.map((token) => token.spelling)).toEqual([
+			'echo',
+			`(echo ${innerWord})`,
+			'after',
+			'',
+		]);
+	}
+});
+
+test('scanner recognizes substitution comments after lexer separators', () => {
+	const separators = ['&&', '|', '||', ';', '<', '>', '\n'];
+
+	for (const separator of separators) {
+		const substitution = `(echo ok${separator}#comment\n echo after)`;
+		const tokens = new Scanner(`echo ${substitution} tail`).tokenize();
+
+		expect(tokens.map((token) => token.spelling)).toEqual([
+			'echo',
+			substitution,
+			'tail',
+			'',
+		]);
+	}
+});
+
 test('scanner requires a real command substitution closing delimiter', () => {
 	for (const input of ['(echo #)', '(echo (echo nested) #))']) {
 		expect(() => scanFirstWord(input)).toThrow();
