@@ -72,4 +72,11 @@ test('fish count: count.fish - counts stdin records like wc -l', async () => {
 	expect(empty.stdout).toBe('0');
 	expect(empty.exitCode).toBe(1);
 	expect(await run('echo 1 | count')).toBe('1');
+
+	// Adapt the same newline-counting contract to echo's exact-byte output.
+	const unterminatedBytes = await runStatus("echo -ne '\\141' | count");
+	expect(unterminatedBytes.stdout).toBe('0');
+	expect(unterminatedBytes.exitCode).toBe(1);
+	expect(await run("echo -ne '\\141\\nb' | count")).toBe('1');
+	expect(await run("echo -ne '\\141\\n\\nb' | count")).toBe('2');
 });

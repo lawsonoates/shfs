@@ -31,11 +31,7 @@ import { touch } from '../operator/touch/touch';
 import { createTreeResolvedArgs, runTreeCommand } from '../operator/tree/tree';
 import { runWcCommand } from '../operator/wc/wc';
 import { runXargsCommand } from '../operator/xargs/xargs';
-import {
-	byteRecordToLineRecords,
-	formatRecord,
-	type Record as ShellRecord,
-} from '../record';
+import { formatRecord, type Record as ShellRecord } from '../record';
 import type { Stream } from '../stream';
 import { BufferedShellOutput, createShellInput } from './io';
 import {
@@ -58,6 +54,8 @@ import {
 	resolveRedirectPathEffect,
 	withInputRedirect,
 } from './redirection';
+
+const NEWLINE_BYTE = 0x0a;
 
 export type ActionStep = Extract<
 	StepIR,
@@ -957,7 +955,13 @@ CommandRegistry.register('false', {
 
 function countInputRecordLines(record: ShellRecord): number {
 	if (record.kind === 'bytes') {
-		return byteRecordToLineRecords(record).length;
+		let newlineCount = 0;
+		for (const byte of record.bytes) {
+			if (byte === NEWLINE_BYTE) {
+				newlineCount += 1;
+			}
+		}
+		return newlineCount;
 	}
 	const embeddedNewlines = formatRecord(record).split('\n').length - 1;
 	const hasTerminator = record.kind !== 'line' || record.terminated !== false;
