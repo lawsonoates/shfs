@@ -94,6 +94,17 @@ test('switch wildcard patterns match across path separators', async () => {
 	expect(await run(script)).toBe('pass');
 });
 
+test('switch wildcard patterns match multiline values', async () => {
+	const script = [
+		'switch "$(echo first; echo second)"',
+		'case "*second"',
+		'    echo pass',
+		'end',
+	].join('\n');
+
+	expect(await run(script)).toBe('pass');
+});
+
 test('switch command-scoped assignments do not escape the block', async () => {
 	const script = [
 		'set -g choice outer',

@@ -104,6 +104,7 @@ const FD_TARGET_REGEX = /^&[0-9]+$/;
 const GLOB_OPTIONS = {
 	bash: true,
 	dot: true,
+	flags: 's',
 	nobrace: true,
 	noext: true,
 	nonegate: true,
