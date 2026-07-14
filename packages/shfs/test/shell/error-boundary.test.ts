@@ -89,6 +89,27 @@ test('variable indexes do not glob wildcard atoms', async () => {
 	expect(withMatch.stderr.toString()).toContain('Invalid index value');
 });
 
+test('expanded index atoms are not recursively resolved', async () => {
+	for (const indexExpression of ['$index', '\\$inner', "'$inner'"]) {
+		const result = await run(
+			`set values first second; set inner 2; set index '$inner'; echo $values[${indexExpression}]`
+		);
+		expect(result.stdout.toString()).toBe('');
+		expect(result.exitCode).not.toBe(0);
+		expect(result.stderr.toString()).toContain('Invalid index value');
+	}
+
+	const directVariable = await run(
+		'set values first second; set inner 2; echo $values[$inner]'
+	);
+	expect(directVariable.stdout.toString()).toBe('second');
+
+	const commandSubstitution = await run(
+		'set values first second; echo $values[(echo 2)]'
+	);
+	expect(commandSubstitution.stdout.toString()).toBe('second');
+});
+
 test('2> redirects an expansion-failure diagnostic to a file, not shell stderr', async () => {
 	await run('mkdir -p /w');
 	await run('cd /w');

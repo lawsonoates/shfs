@@ -18,6 +18,11 @@ const READ_ONLY_VARIABLES = new Set(['status']);
 
 export type VariableScope = 'auto' | 'global' | 'local';
 
+export interface ResolveIndexOptions {
+	/** Resolve raw `$name` atoms through the variable context. */
+	allowVariableReferences?: boolean;
+}
+
 export function isValidVariableName(name: string): boolean {
 	return VARIABLE_NAME_REGEX.test(name);
 }
@@ -228,10 +233,11 @@ function tokenizeIndexExpression(
 
 function resolveIndexValue(
 	context: BuiltinContext,
-	text: string
+	text: string,
+	allowVariableReferences: boolean
 ): Result<number, ShellErrorCause> {
 	let raw = text;
-	if (raw.startsWith('$')) {
+	if (allowVariableReferences && raw.startsWith('$')) {
 		const name = raw.slice(1);
 		if (!isValidVariableName(name)) {
 			return Result.err(invalidIndexError());
@@ -305,8 +311,10 @@ function appendRangePositions(
 export function resolveIndexPositions(
 	context: BuiltinContext,
 	indexText: string,
-	length: number
+	length: number,
+	options?: ResolveIndexOptions
 ): Result<number[], ShellErrorCause> {
+	const allowVariableReferences = options?.allowVariableReferences ?? true;
 	return Result.gen(function* () {
 		const tokens = yield* tokenizeIndexExpression(indexText);
 		const positions: number[] = [];
@@ -316,7 +324,11 @@ export function resolveIndexPositions(
 			let start: number | null = null;
 			const startToken = tokens[cursor];
 			if (startToken?.kind === 'value') {
-				start = yield* resolveIndexValue(context, startToken.text);
+				start = yield* resolveIndexValue(
+					context,
+					startToken.text,
+					allowVariableReferences
+				);
 				cursor++;
 			}
 
@@ -332,7 +344,11 @@ export function resolveIndexPositions(
 			let end: number | null = null;
 			const endToken = tokens[cursor];
 			if (endToken?.kind === 'value') {
-				end = yield* resolveIndexValue(context, endToken.text);
+				end = yield* resolveIndexValue(
+					context,
+					endToken.text,
+					allowVariableReferences
+				);
 				cursor++;
 			}
 
@@ -356,13 +372,15 @@ export function resolveIndexPositions(
 export function selectByIndex(
 	context: BuiltinContext,
 	values: string[],
-	indexText: string
+	indexText: string,
+	options?: ResolveIndexOptions
 ): Result<string[], ShellErrorCause> {
 	return Result.gen(function* () {
 		const positions = yield* resolveIndexPositions(
 			context,
 			indexText,
-			values.length
+			values.length,
+			options
 		);
 		const selected: string[] = [];
 		for (const position of positions) {

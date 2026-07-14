@@ -599,7 +599,9 @@ function selectExpandedIndexEffect(
 				return yield* invalidIndexError();
 			}
 		}
-		return selectByIndex(context, values, expanded.join(' '));
+		return selectByIndex(context, values, expanded.join(' '), {
+			allowVariableReferences: false,
+		});
 	});
 }
 
