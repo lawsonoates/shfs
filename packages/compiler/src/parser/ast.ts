@@ -5,7 +5,7 @@
  * - Pipelines (command | command | ...)
  * - Simple commands with arguments and command-scoped assignments
  * - Statement chaining (&&, ||, `; and`, `; or`) and negation (not/!)
- * - Blocks and control flow (begin, if, while, for, function)
+ * - Blocks and control flow (begin, if, switch, while, for, function)
  * - Command substitution (...) and $(...)
  * - Variable expansion ($name, $name[...])
  * - Globbing patterns
@@ -26,6 +26,7 @@ export interface Visitor<T> {
 	visitProgram(node: Program): T;
 	visitStatement(node: Statement): T;
 	visitIfStatement(node: IfStatement): T;
+	visitSwitchStatement(node: SwitchStatement): T;
 	visitWhileStatement(node: WhileStatement): T;
 	visitForStatement(node: ForStatement): T;
 	visitBeginStatement(node: BeginStatement): T;
@@ -93,6 +94,7 @@ export type StatementChainMode = 'always' | 'and' | 'or';
 export type StatementNode =
 	| Statement
 	| IfStatement
+	| SwitchStatement
 	| WhileStatement
 	| ForStatement
 	| BeginStatement
@@ -180,6 +182,45 @@ export class IfStatement extends ASTNode {
 
 	accept<T>(visitor: Visitor<T>): T {
 		return visitor.visitIfStatement(this);
+	}
+}
+
+/**
+ * One `case` clause: patterns and the body selected by their first match.
+ */
+export interface SwitchCase {
+	readonly patterns: Word[];
+	readonly body: StatementNode[];
+}
+
+/**
+ * A `switch value ... case pattern ... end` statement.
+ */
+export class SwitchStatement extends ASTNode {
+	readonly value: Word;
+	readonly cases: SwitchCase[];
+	readonly chainMode: StatementChainMode;
+	readonly negated: boolean;
+	readonly assignments: Assignment[];
+
+	constructor(
+		span: SourceSpan,
+		value: Word,
+		cases: SwitchCase[],
+		chainMode: StatementChainMode = 'always',
+		negated = false,
+		assignments: Assignment[] = []
+	) {
+		super(span);
+		this.value = value;
+		this.cases = cases;
+		this.chainMode = chainMode;
+		this.negated = negated;
+		this.assignments = assignments;
+	}
+
+	accept<T>(visitor: Visitor<T>): T {
+		return visitor.visitSwitchStatement(this);
 	}
 }
 
