@@ -210,11 +210,6 @@ test('fish command substitution: cmdsub.fish - quoted $() trims trailing newline
 	expect(await run('echo x "$(echo)" y')).toBe('x  y');
 });
 
-// Unquoted substitutions trim inferred trailing newlines to an empty list.
-test('fish command substitution: cmdsub.fish - inferred empty output is elided', async () => {
-	expect(await run('echo before (echo) after')).toBe('before after');
-});
-
 // cmdsub.fish: echo "$(echo index\nrange\nexpansion)[2]"
 test('fish command substitution: cmdsub.fish - quoted $() output can be indexed', async () => {
 	const script = [

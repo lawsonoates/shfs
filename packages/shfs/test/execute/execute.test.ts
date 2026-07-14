@@ -263,6 +263,51 @@ test('output redirection preserves line termination metadata', async () => {
 	);
 });
 
+test('append redirection concatenates exact terminated and unterminated output', async () => {
+	const fs = new MemoryFS();
+	const cases = [
+		{
+			expected: 'first\nsecond\n',
+			path: '/terminated.txt',
+			script: 'echo first > /terminated.txt; echo second >> /terminated.txt',
+		},
+		{
+			expected: 'firstsecond',
+			path: '/unterminated.txt',
+			script: 'echo -n first > /unterminated.txt; echo -n second >> /unterminated.txt',
+		},
+		{
+			expected: 'firstsecond\n',
+			path: '/unterminated-then-terminated.txt',
+			script: 'echo -n first > /unterminated-then-terminated.txt; echo second >> /unterminated-then-terminated.txt',
+		},
+		{
+			expected: 'first\nsecond',
+			path: '/terminated-then-unterminated.txt',
+			script: 'echo first > /terminated-then-unterminated.txt; echo -n second >> /terminated-then-unterminated.txt',
+		},
+	] as const;
+
+	for (const { expected, path, script } of cases) {
+		const result = execute(compile(parse(script)), fs);
+		(await collectRecordStream(result)).unwrap();
+		expect(textDecoder.decode(await fs.readFile(path))).toBe(expected);
+	}
+
+	const existingBytes = new Uint8Array([0xff]);
+	fs.setFile('/binary-prefix.txt', existingBytes);
+	const binaryAppend = execute(
+		compile(parse('echo -n tail >> /binary-prefix.txt')),
+		fs
+	);
+	(await collectRecordStream(binaryAppend)).unwrap();
+	const appendedBytes = await fs.readFile('/binary-prefix.txt');
+	expect(appendedBytes.slice(0, existingBytes.length)).toEqual(existingBytes);
+	expect(textDecoder.decode(appendedBytes.slice(existingBytes.length))).toBe(
+		'tail'
+	);
+});
+
 test('variable-expanded input redirection resolves relative to cwd', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/workspace/input.txt', 'alpha\nbeta\ngamma');
@@ -1310,6 +1355,54 @@ test('mixed command substitution words concatenate literal prefixes and suffixes
 		.map((record) => record.text);
 
 	expect(lines).toEqual(['foobarbaz']);
+});
+
+test('command substitution keeps inferred output separate from explicit fields', async () => {
+	const fs = new MemoryFS();
+	const runLines = async (command: string): Promise<string[]> => {
+		const result = execute(compile(parse(command)), fs);
+		const records = (await collectRecordStream(result)).unwrap();
+		return records
+			.filter((record): record is LineRecord => record.kind === 'line')
+			.map((record) => record.text);
+	};
+
+	// Fish src/io.rs SeparatedBuffer::append and src/exec.rs
+	// populate_subshell_output keep an inferred element distinct when an
+	// explicitly separated field follows it.
+	expect(await runLines('count (echo -n foo; string split / a/b)')).toEqual([
+		'3',
+	]);
+	// Fish's inferred splitter removes only the synthetic field after a final
+	// newline, preserving any preceding blank at end-of-stream or before an
+	// explicit field.
+	expect(await runLines(String.raw`count (echo -ne 'one\n')`)).toEqual(['1']);
+	expect(await runLines(String.raw`count (echo -ne 'one\n\n')`)).toEqual([
+		'2',
+	]);
+	expect(
+		await runLines(
+			String.raw`count (echo -ne 'one\n\n'; string split / a/b)`
+		)
+	).toEqual(['4']);
+});
+
+test('command substitution distinguishes no output from an empty line', async () => {
+	const fs = new MemoryFS();
+	const runLines = async (command: string): Promise<string[]> => {
+		const result = execute(compile(parse(command)), fs);
+		const records = (await collectRecordStream(result)).unwrap();
+		return records
+			.filter((record): record is LineRecord => record.kind === 'line')
+			.map((record) => record.text);
+	};
+
+	expect(await runLines('echo before (echo -n) after')).toEqual([
+		'before after',
+	]);
+	expect(await runLines('echo before (echo) after')).toEqual([
+		'before  after',
+	]);
 });
 
 test('mixed glob words preserve literal prefixes and suffixes at execution', async () => {

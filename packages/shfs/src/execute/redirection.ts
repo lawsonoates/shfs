@@ -10,7 +10,6 @@ import type { FS } from '../fs/fs';
 import { evaluateExpandedSinglePathEffect, resolvePathFromCwd } from './path';
 
 const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
 const FD_TARGET_REGEX = /^&[0-9]+$/;
 const NULL_DEVICE_PATH = '/dev/null';
 
@@ -301,11 +300,14 @@ export function withInputRedirect(
 	return [inputPath];
 }
 
-async function readExistingFileText(fs: FS, path: string): Promise<string> {
+async function readExistingFileBytes(
+	fs: FS,
+	path: string
+): Promise<Uint8Array> {
 	try {
-		return textDecoder.decode(await fs.readFile(path));
+		return await fs.readFile(path);
 	} catch {
-		return '';
+		return new Uint8Array();
 	}
 }
 
@@ -325,12 +327,12 @@ export async function writeTextToFile(
 		await fs.writeFile(path, textEncoder.encode(content));
 		return;
 	}
-	const existing = await readExistingFileText(fs, path);
-	const separator = existing === '' || content === '' ? '' : '\n';
-	await fs.writeFile(
-		path,
-		textEncoder.encode(`${existing}${separator}${content}`)
-	);
+	const existing = await readExistingFileBytes(fs, path);
+	const appended = textEncoder.encode(content);
+	const combined = new Uint8Array(existing.length + appended.length);
+	combined.set(existing);
+	combined.set(appended, existing.length);
+	await fs.writeFile(path, combined);
 }
 
 export async function ensureNoclobberWritable(

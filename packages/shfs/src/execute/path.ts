@@ -48,7 +48,7 @@ function separate(records: readonly ShellRecord[]): string[] {
 			return;
 		}
 		const split = inferred.split('\n');
-		while (split.at(-1) === '') {
+		if (split.at(-1) === '') {
 			split.pop();
 		}
 		lines.push(...split);
@@ -71,7 +71,7 @@ function separate(records: readonly ShellRecord[]): string[] {
 
 /**
  * Execute a command substitution and return its output lines.
- * Trailing empty lines are dropped, mirroring fish's trailing-newline trim.
+ * A final newline terminates a field without creating another synthetic one.
  */
 function evaluateCommandSubstitutionEffect(
 	command: string,
