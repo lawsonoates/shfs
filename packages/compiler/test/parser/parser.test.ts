@@ -239,3 +239,11 @@ test('parseEffect rejects octal escapes above the Fish ASCII limit', () => {
 		expect(result.error.diagnostic.code).toBe('invalid-escape');
 	}
 });
+
+test('parseEffect rejects Unicode escapes above U+10FFFF', () => {
+	const result = parseEffect('echo \\U00110000');
+	expect(result.isErr()).toBeTrue();
+	if (result.isErr()) {
+		expect(result.error.diagnostic.code).toBe('invalid-escape');
+	}
+});

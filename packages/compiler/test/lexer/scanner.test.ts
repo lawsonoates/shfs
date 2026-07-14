@@ -272,3 +272,22 @@ test('scanner rejects octal escapes above the Fish ASCII limit', () => {
 		).toThrow();
 	}
 });
+
+test('scanner applies Fish Unicode escape boundaries', () => {
+	expect(scanFirstWord('\\U0010FFFF').spelling).toBe(
+		String.fromCodePoint(0x10_ff_ff)
+	);
+	expect(scanFirstWord('\\U1').spelling).toBe('\u0001');
+	expect(scanFirstWord('\\uD800').spelling).toBe('\ufffd');
+
+	for (const escapeSequence of [
+		'\\U00110000',
+		'\\UFFFFFFFF',
+		'\\U',
+		'\\utest',
+	]) {
+		expect(() =>
+			new Scanner(`echo ${escapeSequence}`).tokenize()
+		).toThrow();
+	}
+});

@@ -16,6 +16,10 @@ const ASCII_LETTER_REGEX = /^[A-Za-z]$/;
 const HEX_DIGIT_REGEX = /^[\dA-Fa-f]$/;
 const OCTAL_DIGIT_REGEX = /^[0-7]$/;
 const MAX_OCTAL_ESCAPE_VALUE = 0o177;
+const MAX_SHORT_UNICODE_ESCAPE_VALUE = 0xff_ff;
+const MAX_UNICODE_ESCAPE_VALUE = 0x10_ff_ff;
+const MIN_UNICODE_SURROGATE = 0xd8_00;
+const MAX_UNICODE_SURROGATE = 0xdf_ff;
 
 const CHARACTER_ESCAPES: Readonly<Record<string, string>> = {
 	a: '\u0007',
@@ -636,12 +640,16 @@ export class Scanner {
 			return this.readByteEscapes();
 		}
 
-		if (marker === 'u' && HEX_DIGIT_REGEX.test(this.source.peek(1))) {
-			return this.readCodePointEscape(4);
+		if (marker === 'u') {
+			return this.readCodePointEscape(
+				start,
+				4,
+				MAX_SHORT_UNICODE_ESCAPE_VALUE
+			);
 		}
 
-		if (marker === 'U' && HEX_DIGIT_REGEX.test(this.source.peek(1))) {
-			return this.readCodePointEscape(8);
+		if (marker === 'U') {
+			return this.readCodePointEscape(start, 8, MAX_UNICODE_ESCAPE_VALUE);
 		}
 
 		if (OCTAL_DIGIT_REGEX.test(marker)) {
@@ -685,13 +693,24 @@ export class Scanner {
 		return BYTE_DECODER.decode(Uint8Array.from(bytes));
 	}
 
-	private readCodePointEscape(maxDigits: number): string {
-		this.source.advance(); // u / U
-		const value = Number.parseInt(
-			this.readDigits(HEX_DIGIT_REGEX, maxDigits),
-			16
-		);
-		return value <= 0x10_ff_ff ? String.fromCodePoint(value) : '\ufffd';
+	private readCodePointEscape(
+		start: SourcePosition,
+		maxDigits: number,
+		maxValue: number
+	): string {
+		const prefix = this.source.advance(); // u / U
+		const digits = this.readDigits(HEX_DIGIT_REGEX, maxDigits);
+		const value = Number.parseInt(digits, 16);
+		if (digits === '' || value > maxValue) {
+			throw new InvalidEscapeError(
+				`\\${prefix}${digits}`,
+				start.span(this.source.position)
+			);
+		}
+		if (value >= MIN_UNICODE_SURROGATE && value <= MAX_UNICODE_SURROGATE) {
+			return '\ufffd';
+		}
+		return String.fromCodePoint(value);
 	}
 
 	private readDigits(pattern: RegExp, limit: number): string {
