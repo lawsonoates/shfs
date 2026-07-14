@@ -568,7 +568,7 @@ function indexWordsEffect(
 			return yield* invalidIndexError();
 		}
 		const step = statement.pipeline.steps[0];
-		if (step?.cmd !== 'count') {
+		if (step?.cmd !== 'count' || (step.redirections?.length ?? 0) > 0) {
 			return yield* invalidIndexError();
 		}
 		return Result.ok(step.args.values);

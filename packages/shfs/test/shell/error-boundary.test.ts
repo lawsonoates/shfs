@@ -56,6 +56,14 @@ test("$status reflects a command's expansion failure", async () => {
 	expect(result.stdout.toString()).toBe('1');
 });
 
+test('variable indexes reject embedded redirections', async () => {
+	const result = await run('set values first second; echo $values[1 >out]');
+
+	expect(result.stdout.toString()).toBe('');
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr.toString()).toContain('Invalid index value');
+});
+
 test('2> redirects an expansion-failure diagnostic to a file, not shell stderr', async () => {
 	await run('mkdir -p /w');
 	await run('cd /w');
