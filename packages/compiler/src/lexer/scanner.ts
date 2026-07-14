@@ -796,6 +796,10 @@ export class Scanner {
 				continue;
 			}
 
+			if (this.readIndexSubstitutionComment(state, char)) {
+				continue;
+			}
+
 			if (
 				state.commandSubstitutionDepth === 0 &&
 				this.endsIndexBeforeCharacter(char, outerQuote)
@@ -824,6 +828,24 @@ export class Scanner {
 		}
 
 		return { raw: state.raw, text: `[${state.index}` };
+	}
+
+	private readIndexSubstitutionComment(
+		state: IndexState,
+		char: string
+	): boolean {
+		if (
+			char !== '#' ||
+			state.commandSubstitutionDepth === 0 ||
+			!this.canStartSubstitutionComment(state.index)
+		) {
+			return false;
+		}
+
+		const comment = this.readSubstitutionComment();
+		state.raw += comment;
+		state.index += comment;
+		return true;
 	}
 
 	private endsIndexBeforeCharacter(

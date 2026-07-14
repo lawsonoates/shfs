@@ -215,6 +215,20 @@ test('scanner keeps nested substitution terminators inside variable indexes', ()
 	}
 });
 
+test('scanner ignores delimiters in indexed substitution comments', () => {
+	const cases = ['$vals[(echo 1 #)\n)]', '$vals[(echo 1 # ) ] "\n)]'];
+
+	for (const input of cases) {
+		const token = scanFirstWord(input);
+		const [part] = token.wordParts;
+		if (part?.kind !== 'variable') {
+			throw new Error('Expected indexed variable word part');
+		}
+		expect(token.spelling).toBe(input);
+		expect(part.index).toBe(input.slice('$vals['.length, -1));
+	}
+});
+
 test('scanner keeps quoted wildcard characters as literal metadata', () => {
 	const token = scanFirstWord('prefix"*"suffix');
 
