@@ -17,7 +17,7 @@ const bashTool = tool({
 		Use this tool to execute filesystem-related fish shell commands.
 
 		--
-		
+
 		Strict fish-inspired subset for filesystem commands. Not POSIX, not full fish. Deterministic, stream-based, no ambient state.
 
 		**Commands**: \`cat\`, \`cp\`, \`head\`, \`ls\`, \`mkdir\`, \`mv\`, \`rm\`, \`tail\`, \`touch\` (built-ins only, no external binaries, no \`$PATH\`)
@@ -40,11 +40,12 @@ const bashTool = tool({
 		`,
 	execute: async ({ command }: { command: string }) => {
 		console.log(`Executing command: ${command}`);
-		const result = await $`${command}`.text();
+		const result = await $`${command}`.nothrow();
 		console.log(`Command output: ${result}`);
 
 		return {
-			output: result,
+			output: result.text(),
+			code: result.exitCode,
 		};
 	},
 	inputSchema: z.object({
