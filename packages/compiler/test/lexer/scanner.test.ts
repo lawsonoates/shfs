@@ -127,6 +127,17 @@ test('scanner emits mixed command substitution words as one token with ordered p
 	]);
 });
 
+test('scanner preserves escaped hashes inside command substitutions', () => {
+	const tokens = new Scanner('echo (echo foo\\ #bar) after').tokenize();
+
+	expect(tokens.map((token) => token.spelling)).toEqual([
+		'echo',
+		'(echo foo\\ #bar)',
+		'after',
+		'',
+	]);
+});
+
 test('scanner keeps quoted wildcard characters as literal metadata', () => {
 	const token = scanFirstWord('prefix"*"suffix');
 

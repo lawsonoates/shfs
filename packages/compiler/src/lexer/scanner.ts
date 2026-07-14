@@ -934,15 +934,25 @@ export class Scanner {
 
 	private canStartSubstitutionComment(source: string): boolean {
 		const previous = source.at(-1);
-		return (
+		const followsTokenBoundary =
 			previous === '(' ||
 			previous === ';' ||
 			previous === '|' ||
 			previous === '&' ||
 			previous === ' ' ||
 			previous === '\t' ||
-			previous === '\n'
-		);
+			previous === '\n';
+		if (!followsTokenBoundary) {
+			return false;
+		}
+
+		let precedingBackslashCount = 0;
+		let index = source.length - 2;
+		while (index >= 0 && source[index] === '\\') {
+			precedingBackslashCount++;
+			index--;
+		}
+		return precedingBackslashCount % 2 === 0;
 	}
 
 	private readSubstitutionComment(): string {
