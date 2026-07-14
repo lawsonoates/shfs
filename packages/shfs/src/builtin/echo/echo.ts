@@ -1,7 +1,7 @@
 import type { EchoStep } from '@shfs/compiler';
 import { runOrReport } from '../../diagnostics';
 import { evaluateExpandedPathWordsEffect } from '../../execute/path';
-import { textToLineRecords } from '../../stdout-record';
+import { textToStdoutRecords } from '../../stdout-record';
 import type { Builtin } from '../types';
 
 const HEX_REGEX = /^[\dA-Fa-f]$/;
@@ -218,7 +218,7 @@ export const echo: Builtin<EchoStep['args']> = (runtime, args) => {
 		const text = output.parts
 			.map((part) => (part.kind === 'text' ? part.value : ''))
 			.join('');
-		for (const record of textToLineRecords(text, terminated)) {
+		for (const record of textToStdoutRecords(text, terminated)) {
 			yield record;
 		}
 		runtime.context.status = 0;

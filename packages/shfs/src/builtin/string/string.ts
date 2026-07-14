@@ -6,7 +6,7 @@ import {
 	evaluateExpandedWords,
 } from '../../execute/path';
 import type { Record as ShellRecord } from '../../record';
-import { textToLineRecords } from '../../stdout-record';
+import { textToStdoutRecords } from '../../stdout-record';
 import type { Builtin, BuiltinRuntime } from '../types';
 
 const INTEGER_REGEX = /^[+-]?\d+$/;
@@ -473,7 +473,7 @@ function replace(runtime: BuiltinRuntime, operands: string[]) {
 				? substitute(input, regex, replacement, all)
 				: plain(input, pattern, replacement, all);
 			replaced ||= result.changed;
-			yield* textToLineRecords(result.text, true);
+			yield* textToStdoutRecords(result.text, true);
 		}
 		runtime.context.status = replaced ? 0 : 1;
 	})();

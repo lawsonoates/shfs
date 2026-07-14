@@ -229,9 +229,12 @@ test('fish basic: basic.fish - echo -e interprets supported escapes', async () =
 	expect(await run("echo -e 'abc\\x21def'")).toBe('abc!def');
 });
 
-// basic.fish:148-159 pipes numeric escapes through display_bytes. Adapted to
-// the Shell byte API because display_bytes is outside the shfs subset.
-test('fish basic: basic.fish - echo numeric escapes emit raw bytes', async () => {
+// basic.fish:130-159 verifies interpreted newlines and numeric bytes. Adapted
+// to the Shell byte API because display_bytes is outside the shfs subset.
+test('fish basic: basic.fish - echo escapes emit exact bytes', async () => {
+	expect(await runBytes("echo -ne 'a\\n'")).toEqual(
+		new Uint8Array([0x61, 0x0a])
+	);
 	expect(await runBytes("echo -ne '\\376'")).toEqual(new Uint8Array([0xfe]));
 	expect(await runBytes("echo -ne '\\x41\\x0a'")).toEqual(
 		new Uint8Array([0x41, 0x0a])

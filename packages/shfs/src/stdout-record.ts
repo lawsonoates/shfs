@@ -37,26 +37,30 @@ const NEWLINE_BYTE = 0x0a;
 const UTF8_DECODER = new TextDecoder();
 const UTF8_ENCODER = new TextEncoder();
 
-/** Convert physical text lines into records, preserving final-line termination. */
-export function textToLineRecords(
+/** Convert physical text into records, preserving who owns the final newline. */
+export function textToStdoutRecords(
 	text: string,
 	terminated: boolean
-): LineRecord[] {
+): StdoutRecord[] {
 	if (text === '' && !terminated) {
 		return [];
 	}
 	const lines = text.split('\n');
-	const endsWithNewline = text.endsWith('\n');
-	if (!terminated && endsWithNewline) {
+	const hasContentTerminator = !terminated && text.endsWith('\n');
+	if (hasContentTerminator) {
 		lines.pop();
 	}
-	return lines.map((line, index) => {
+	const records: StdoutRecord[] = lines.map((line, index) => {
 		const isUnterminatedFinalLine =
-			!(terminated || endsWithNewline) && index === lines.length - 1;
+			!terminated && index === lines.length - 1;
 		return isUnterminatedFinalLine
 			? { kind: 'line', terminated: false, text: line }
 			: { kind: 'line', text: line };
 	});
+	if (hasContentTerminator) {
+		records.push({ bytes: new Uint8Array([NEWLINE_BYTE]), kind: 'bytes' });
+	}
+	return records;
 }
 
 class PhysicalLineDecoder {
