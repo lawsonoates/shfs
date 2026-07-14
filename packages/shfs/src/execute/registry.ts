@@ -973,7 +973,9 @@ CommandRegistry.register('count', {
 					}
 					values.push(...expanded.value);
 				}
-				if (step.args.values.length === 0 && input) {
+				// Fish counts arguments plus stdin lines when both are present
+				// (tests/checks/count.fish).
+				if (input) {
 					for await (const record of input) {
 						values.push(formatRecord(record));
 					}
@@ -993,17 +995,20 @@ CommandRegistry.register('call', {
 	handler: ({ step, fs, input, context, vars }) => {
 		return fromRecordGenerator(
 			(async function* (): Stream<ShellRecord> {
-				const definition = context.functions.get(step.args.name);
-				if (!definition) {
-					context.status = 127;
-					context.stderr.append(`Unknown command: ${step.args.name}`);
-					return;
-				}
 				const args = await runOrReport(
 					evaluateExpandedWordsEffect(step.args.words, fs, context),
 					context
 				);
 				if (!args.ok) {
+					return;
+				}
+				// Resolve the function after expanding arguments: a
+				// substitution in the arguments may redefine the function
+				// being called (tests/checks/function.fish).
+				const definition = context.functions.get(step.args.name);
+				if (!definition) {
+					context.status = 127;
+					context.stderr.append(`Unknown command: ${step.args.name}`);
 					return;
 				}
 				const resolved = await runOrReport(

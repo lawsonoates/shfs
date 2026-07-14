@@ -1,9 +1,16 @@
 # SHFS Subset Boundary (Decision)
 
-`shfs` is a fish-inspired subset for deterministic, agent-friendly scripting over a virtual filesystem.  
+`shfs` is a fish-inspired subset for deterministic, agent-friendly scripting over a virtual filesystem.
 It is not a full fish shell and does not target host OS parity.
 
+This revision (2026-07-12) replaces the post-scripting-subset draft. It was
+verified against the implementation (`packages/compiler` grammar and
+`packages/shfs` registry/builtins) and against a runtime probe battery, not
+inferred from older notes.
+
 ## Included (must support)
+
+### Language and expansion
 
 - Variable expansion and assignment:
   - `$var` with fish list semantics: element counts (`count`), indexing and
@@ -13,33 +20,79 @@ It is not a full fish shell and does not target host OS parity.
   - `set` with `-l`/`-g`/unscoped assignment, erase (`-e`), query (`-q`),
     append/prepend (`-a`/`-p`), and index/slice assignment and erasure
   - command-scoped assignment prefixes (`name=value command`, PATH-like
-    colon splitting)
+    colon splitting), including prefixes on control-flow statements
   - `$status`, function-local `$argv`; `status` is read-only
 - Command substitution:
   - `(cmd)` and `$(cmd)` execute and capture output; `$(cmd)` also inside
     double quotes; unquoted substitutions split output lines into arguments;
-    substitution output can be sliced (`(cmd)[2]`)
+    substitution output can be sliced (`(cmd)[2]`); substitutions nest
 - Multi-statement scripts:
-  - newline and `;` statement chaining
+  - newline and `;` statement chaining, comments (`#`), backslash escapes
 - Boolean chaining, combiners, and status:
   - `and`, `or`, `&&`, `||` (with newline continuation), `not`/`!` negation,
     `$status`
 - Control flow and blocks:
   - `if`/`else if`/`else`/`end`, `while`, `for ... in`, `begin ... end`,
-    `break`, `continue` (fish block scoping for local variables)
+    `break`, `continue` (fish block scoping for local variables; the `for`
+    loop variable persists after the loop as in fish)
 - Functions:
   - `function name [-a names]`/`end`, `$argv`, `return [status]`,
-    function-local scope with caller-local isolation
-- Script-core builtins:
-  - `test` (and its `[` alias), `echo`, `read`, `string`, `true`, `false`,
-    `count`
-  - `test` supports string/numeric/file predicates, `!`, `-a`/`-o`, and
-    fish's `test-require-arg` behavior (missing operands are errors; bare
-    `-n`/`-z` treat the missing operand as empty)
-  - `string` supports `match`/`replace` glob basics plus `length`, `sub`,
-    `split`, `join`, `trim`, `repeat`, `lower`, `upper`
-- Core path semantics:
-  - `cd` / `pwd` with `.`, `..`, absolute and relative path handling
+    function-local scope with caller-local isolation, reserved-keyword name
+    rejection
+  - function invocation participates fully in execution contexts:
+    command-scoped assignments are visible inside the call, pipeline stdin is
+    inherited by the body, explicit input redirection on the call overrides
+    pipeline stdin, and sequential `read`s share one stdin cursor
+- Globbing and wildcard expansion (fish-style):
+  - full pattern support for `*`, `?`, `[ ... ]`, and `**`
+  - recursive glob behavior and trailing-slash directory matching semantics
+  - hidden-file matching behavior consistent with fish glob rules
+  - quoted wildcard characters are treated as literal text (no expansion)
+  - parity target is fish glob behavior from `tests/checks/glob.fish`, limited
+    by out-of-scope features below
+
+### Pipelines and redirection
+
+- Pipelines with `|` between simple commands and function calls
+- Output redirection: `> file`, append `>> file`, noclobber `>? file` and
+  `>>? file` (writing over an existing file is a deterministic error)
+- Input redirection: `< file`, optional-input `<? file`
+- Stderr routing: `2> file`, merge `2>&1`, stderr-to-pipe `2>|`
+- Descriptor duplication and closing: `>&2`, `>&-`, `<&-`, `<&N` forms
+  supported by the parser; closed stdin is represented and reported (for
+  example `read` fails deterministically on closed stdin)
+- Redirection precedence: explicit redirects override pipeline defaults
+
+### Shell state across invocations
+
+- One `Shell` instance persists global variables, defined functions, `$status`,
+  and the working directory across separate `Shell.$` invocations
+- Each invocation gets fresh local frames and fresh stdin
+
+### Builtins (fish-derived)
+
+- `echo` (joins arguments with spaces; no option flags — see out of scope),
+  `true`, `false`, `count` (arguments plus stdin records when piped, as in
+  fish)
+- `test` and its `[` alias: string/numeric/file predicates, `!`, `-a`/`-o`,
+  and fish's `test-require-arg` behavior (missing operands are errors; bare
+  `-n`/`-z` treat the missing operand as empty)
+- `read NAME`: exactly one variable name, consuming one record from pipeline
+  stdin or `< file` input; deterministic error on closed stdin
+- `string` subcommands: `match` (`-q`, `-v`; glob patterns), `replace`
+  (literal substring, first occurrence; `-a`/`--all` for every occurrence),
+  `length`, `sub` (`-s`, `-l`, `-e`), `split`, `join`, `trim`, `repeat`,
+  `lower`, `upper`
+- `set` as described under variables
+- `cd` / `pwd` with `.`, `..`, absolute and relative path handling; `cd`
+  without arguments goes to the filesystem root (there is no `$HOME`)
+
+### Filesystem and stream commands (GNU-inspired deterministic subsets)
+
+- File management actions: `cp` (`-r`, `-f`, `-i`), `mv` (`-f`, `-i`),
+  `mkdir` (`-p`), `rm` (`-r`, `-f`, `-i`), `touch` (`-a`, `-m`)
+- Listing and reading: `ls` (`-a`, `-l`), `cat` (numbering/ends/tabs/squeeze
+  display flags), `head` / `tail` (`-n`, files or stdin)
 - Recursive file discovery with `find`:
   - starting paths or default current directory
   - deterministic recursive traversal over the virtual filesystem
@@ -74,25 +127,62 @@ It is not a full fish shell and does not target host OS parity.
   - default command is `echo` when no command is provided
   - batching controls `-n`, `-L`, and `-I` are mutually exclusive; last option wins
   - malformed quote/escape input is a deterministic parse failure
-- Globbing and wildcard expansion (fish-style):
-  - full pattern support for `*`, `?`, `[ ... ]`, and `**`
-  - recursive glob behavior and trailing-slash directory matching semantics
-  - hidden-file matching behavior consistent with fish glob rules
-  - quoted wildcard characters are treated as literal text (no expansion)
-  - parity target is fish glob behavior from `tests/checks/glob.fish`, limited by out-of-scope features below
-- Stable error model:
-  - deterministic errors (not fish-verbatim compatibility)
+
+### Error model
+
+- Stable, deterministic errors (not fish-verbatim compatibility); unknown
+  commands fail with status 127
 
 ## Not Included (explicitly out of scope)
 
-- `switch` / `case`, `eval`, brace expansion (`{a,b}`), tilde expansion,
-  and indirect variable expansion (`$$name`)
-- Exported (`-x`/`-u`) and universal (`-U`) variables, variable event hooks
+### Language
+
+- `switch` / `case`, `eval`, `source`, brace expansion (`{a,b}`), tilde
+  expansion, and indirect variable expansion (`$$name`)
 - Blocks as pipeline components or redirection targets
-  (`begin ... end | cmd`, `begin ... end > file`)
-- `CDPATH`
+  (`begin ... end | cmd`, `cmd | begin ... end`, `begin ... end > file`),
+  and brace command blocks (`{ ...; }`)
+- `$pipestatus` and pipeline process-group/buffering semantics
+- Exported (`-x`/`-u`) and universal (`-U`) variables, path/unpath variable
+  flags, variable event hooks, `set --show`
+- `exit` as a command (scripts end by falling off the end; `return` exits
+  functions)
+- Fish special variables beyond `$status`/`$argv` (for example `$HOME`,
+  `$hostname`, `$fish_pid`, `$history`, `$umask`)
+
+### Builtins and commands
+
+- Command-resolution and introspection helpers: `command`, `builtin`, `type`,
+  `functions`, `alias`, `abbr`, `status`, `time`
+- Additional fish builtins: `argparse`, `contains`, `math`, `path`, `printf`,
+  `random`, `realpath`, `set_color`, `ulimit`, `umask`, `version`, `psub`
+- `echo` option flags (`-n`, `-s`, `-e`, `-E`) — arguments starting with `-`
+  are printed literally
+- `read` flags and multi-variable forms (`-l`/`-g`, `-n`, `-z`, `-d`,
+  `--list`, prompts, multiple names)
+- `string` subcommands and flags beyond the documented set: regex modes
+  (`-r`), `escape`, `unescape`, `collect`, `pad`, `shorten`, `split0`,
+  `join0`, visible-width/color handling
+- `cd -`, `$CDPATH`, `$HOME`-relative `cd`, `prevd`/`nextd`, `pwd -P`/`-L`
+
+### Environment and host behavior
+
 - Symlink support and symlink-focused commands/behavior
   - this remains out of scope even when a glob would otherwise match/traverse symlinks
+- Permission model beyond basic virtual FS behavior
+- The `env` command (command-scoped assignment uses the fish
+  `name=value cmd` form instead)
+- Interactive shell features: completion (`complete -C`), prompt/history
+  behavior, dir stack UX, key bindings, variable event hooks
+- Host OS emulation / external process behavior: external command lookup,
+  `exec`, shebangs, `uname`, `sysctl`, `/bin/pwd`, job control, background
+  jobs (`&`), signals/traps, TTY semantics
+- Locale, terminal-width, and color/formatting behavior
+- Startup/config/environment initialization (config files, XDG paths,
+  `fish_add_path`, universal variable storage)
+
+### GNU tool parity limits
+
 - Full GNU/POSIX `find` compatibility
   - metadata and host-identity predicates such as `-inum`, `-uid`, `-gid`, `-user`, `-group`, `-links`
   - GNU-specific input and formatting features such as `-files0-from` and `-printf`
@@ -110,17 +200,11 @@ It is not a full fish shell and does not target host OS parity.
   - locale-specific collation, month/version/random/human/general-numeric modes,
     merge-only mode, compression/temp/parallel tuning, debug annotations,
     `--files0-from`, `-z`, and `-o` output-file behavior are out of scope
-- Permission model beyond basic virtual FS behavior
-- The `env` command (command-scoped assignment uses the fish
-  `name=value cmd` form instead)
-- Interactive shell features:
-  - completion (`complete -C`), prompt/history behavior
-  - dir stack UX (`prevd`, `nextd`)
-  - variable event hooks (for example `--on-variable`)
-- Host OS emulation / external process behavior:
-  - `uname`, `sysctl`, `/bin/pwd`, job control, TTY/signal semantics
-- Fish conformance goals:
-  - full compatibility, fish-specific stack traces, fish-exact error wording
+
+### Diagnostics
+
+- Fish conformance goals: full compatibility, fish-specific stack traces,
+  fish-exact error wording, localized messages, caret spans
 
 ## Rule
 

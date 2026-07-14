@@ -161,3 +161,74 @@ test('fish basic: basic.fish - continue outside of a loop reports an error', asy
 	expect(result.exitCode).not.toBe(0);
 	expect(result.stderr).toContain('continue: Not inside of loop');
 });
+
+// basic.fish:11-17: comments on the command line and inside loop bodies.
+test('fish basic: basic.fish - comments in odd places do not break loops', async () => {
+	const script = [
+		'for i in 1 2 # Comment on same line as command',
+		'# Comment inside loop',
+		'    for j in a b',
+		'        # Double loop',
+		'        echo $i$j',
+		'    end;',
+		'end',
+	].join('\n');
+	expect(await run(script)).toBe('1a\n1b\n2a\n2b');
+});
+
+// basic.fish:24: echo foo\ bar
+test('fish basic: basic.fish - escaped space joins words', async () => {
+	expect(await run('echo foo\\ bar')).toBe('foo bar');
+});
+
+// basic.fish:25-26: a backslash-newline continues the word.
+test('fish basic: basic.fish - backslash-newline joins across lines', async () => {
+	expect(await run('echo foo\\\nbar')).toBe('foobar');
+});
+
+// basic.fish:27-28: backslash-newline also joins inside double quotes.
+test('fish basic: basic.fish - backslash-newline joins inside double quotes', async () => {
+	expect(await run('echo "foo\\\nbar"')).toBe('foobar');
+});
+
+// basic.fish:29-30: single quotes keep the backslash and newline literal.
+test('fish basic: basic.fish - single quotes keep backslash-newline literal', async () => {
+	expect(await run("echo 'foo\\\nbar'")).toBe('foo\\\nbar');
+});
+
+// basic.fish:37-43: continuation before the for-loop word list.
+test('fish basic: basic.fish - continuation before the for list', async () => {
+	expect(await run('for i in \\\n    a b c\n    echo $i\nend')).toBe(
+		'a\nb\nc'
+	);
+});
+
+// basic.fish:118-123: return values above 255 clamp to 255.
+test('fish basic: basic.fish - return above 255 clamps to 255', async () => {
+	const script = [
+		'function test_builtin_status_clamp_to_255',
+		'    return 300',
+		'end',
+		'test_builtin_status_clamp_to_255',
+		'echo $status',
+	].join('\n');
+	expect(await run(script)).toBe('255');
+});
+
+// basic.fish:175-178: a backslash at the end of a comment does not join lines.
+test('fish basic: basic.fish - backslash inside a comment does not continue the line', async () => {
+	expect(await run('echo visible # comment\\\necho second')).toBe(
+		'visible\nsecond'
+	);
+});
+
+// basic.fish:510-514: comments abut text only at word boundaries.
+test('fish basic: basic.fish - # inside a word is not a comment', async () => {
+	expect(await run('echo not#a#comment')).toBe('not#a#comment');
+	expect(await run('echo is # a # comment')).toBe('is');
+});
+
+// basic.fish:554-556: a trailing escaped backslash inside a substitution.
+test('fish basic: basic.fish - command substitution keeps a trailing escaped backslash', async () => {
+	expect(await run('echo (echo hello\\\\)')).toBe('hello\\');
+});

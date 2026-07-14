@@ -243,13 +243,10 @@ function match(runtime: BuiltinRuntime, operands: string[]) {
 
 function replace(runtime: BuiltinRuntime, operands: string[]) {
 	return (async function* () {
-		if (operands[0]?.startsWith('-')) {
-			throw new StringUsageError(
-				`string replace: unsupported flag: ${operands[0]}`
-			);
-		}
-
-		const [pattern, replacement, ...rest] = operands;
+		const { options, positional } = parseOptions('replace', operands, [
+			{ name: 'all', short: 'a', long: 'all', takesValue: false },
+		]);
+		const [pattern, replacement, ...rest] = positional;
 		if (pattern === undefined || replacement === undefined) {
 			throw new StringUsageError(
 				'string replace requires pattern replacement text'
@@ -267,10 +264,19 @@ function replace(runtime: BuiltinRuntime, operands: string[]) {
 			return;
 		}
 
+		const all = options.has('all');
+		let replaced = false;
 		for (const input of inputs) {
-			yield line(input.replaceAll(pattern, replacement));
+			if (input.includes(pattern)) {
+				replaced = true;
+			}
+			yield line(
+				all
+					? input.replaceAll(pattern, replacement)
+					: input.replace(pattern, replacement)
+			);
 		}
-		runtime.context.status = 0;
+		runtime.context.status = replaced ? 0 : 1;
 	})();
 }
 

@@ -21,14 +21,30 @@ substitutions, and child commands, see `docs/execution-boundary-audit.md`.
 > job control, external processes, interactive UX, fish-exact diagnostics,
 > and so on) stay out of scope.
 
-Local `shfs` fish-derived coverage directly ports 23 of 208 upstream check
+> **Update 2026-07-12**: a full audit of all 208 upstream check files against
+> the refreshed boundary (`notes/shfs-subset-boundary.md`) is recorded in
+> `docs/fish-test-audit.md`. It added nine new subset ports
+> (`count.fish`, `empty.fish`, `command-vars-persist.fish`,
+> `line-continuation.fish`, `scoping.fish`, `wildcard.fish`,
+> `deep-cmdsub.fish`, `directory-redirect.fish`,
+> `exit-status-with-closing-stderr.fish`) and fixed six divergences:
+> empty-function `$status`, `count` with piped input, `string replace`
+> first-match semantics with `-a`, top-level unscoped `set`/`read` creating
+> globals, partial glob-product expansion, and negative `return` mapping.
+> The `count` entry in item 26 below is resolved. Remaining divergences are
+> tabulated in the audit document.
+
+Local `shfs` fish-derived coverage directly ports 32 of 208 upstream check
 scripts: `andandoror.fish`, `andor.fish`, `basic.fish`, `cd.fish`,
-`cmdsub.fish`, `disown-parent.fish`, `expansion.fish`, `fish_add_path.fish`,
-`for.fish`, `function-definition.fish`, `function.fish`, `glob.fish`,
-`loops.fish`, `not.fish`, `read.fish`, `redirect.fish`, `return.fish`,
+`cmdsub.fish`, `command-vars-persist.fish`, `count.fish`,
+`deep-cmdsub.fish`, `directory-redirect.fish`, `disown-parent.fish`,
+`empty.fish`, `exit-status-with-closing-stderr.fish`, `expansion.fish`,
+`fish_add_path.fish`, `for.fish`, `function-definition.fish`,
+`function.fish`, `glob.fish`, `line-continuation.fish`, `loops.fish`,
+`not.fish`, `read.fish`, `redirect.fish`, `return.fish`, `scoping.fish`,
 `set.fish`, `slices.fish`, `string.fish`, `test.fish`,
-`variable-assignment.fish`, and `zero_based_array.fish`. Those ports are subset
-ports, not full parity ports.
+`variable-assignment.fish`, `wildcard.fish`, and `zero_based_array.fish`.
+Those ports are subset ports, not full parity ports.
 
 1. `&&` and `||` command combiners are missing. `shfs` supports `; and` and
    `; or`, but not symbolic combiners, continuation after combiners, or use of

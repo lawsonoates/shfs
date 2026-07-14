@@ -109,6 +109,67 @@ test('fish function: function.fish - redefinition replaces the function', async 
 	expect(await run(script)).toBe('second');
 });
 
+// function.fish:200-205: --argument-names may rebind argv.
+test('fish function: function.fish - a named argument called argv overrides the argument list', async () => {
+	const script = [
+		'function t --argument-names a argv c',
+		'    echo $argv',
+		'end',
+		't 1 2 3',
+	].join('\n');
+	expect(await run(script)).toBe('2');
+});
+
+// function.fish:207-211: -a argv binds the first argument only.
+test('fish function: function.fish - -a argv binds the first argument', async () => {
+	const script = [
+		'function t -a argv',
+		'    echo $argv',
+		'end',
+		't 1 2 3',
+	].join('\n');
+	expect(await run(script)).toBe('1');
+});
+
+// function.fish:160-163: --argument-names status is rejected as read-only.
+test('fish function: function.fish - -a status is a read-only variable error', async () => {
+	const result = await runResult('function foo --argument-names status\nend');
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain("function: variable 'status' is read-only");
+});
+
+// function.fish:61-65: the function name must come before options.
+test('fish function: function.fish - an option in name position is an invalid function name', async () => {
+	const result = await runResult('function -a arg1 arg2 name2\nend');
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain('function: -a: invalid function name');
+});
+
+// function.fish:75-79: positional arguments after the name are rejected.
+test('fish function: function.fish - stray positional argument is an error', async () => {
+	const result = await runResult(
+		'function name5 abc --argument-names def\nend'
+	);
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain(
+		'function: abc: unexpected positional argument'
+	);
+});
+
+// function.fish:182-186: a function redefined inside its own argument list is
+// resolved after the arguments are expanded (codified historic behavior).
+test('fish function: function.fish - redefinition in its own arguments is visible to the call', async () => {
+	const script = [
+		'function foo',
+		'    echo before',
+		'end',
+		'foo (function foo',
+		'    echo after',
+		'end)',
+	].join('\n');
+	expect(await run(script)).toBe('after');
+});
+
 // Functions can call other functions.
 test('fish function: function.fish - functions can call functions', async () => {
 	const script = [
