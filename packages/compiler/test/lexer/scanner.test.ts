@@ -263,6 +263,10 @@ test('scanner keeps escaped wildcard characters as literal metadata', () => {
 	]);
 });
 
+test('scanner decodes Fish backspace escapes', () => {
+	expect(scanFirstWord('A\\bB').spelling).toBe('A\bB');
+});
+
 test('scanner rejects octal escapes above the Fish ASCII limit', () => {
 	expect(scanFirstWord('\\177').spelling).toBe('\u007f');
 

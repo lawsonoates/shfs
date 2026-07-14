@@ -23,6 +23,7 @@ const MAX_UNICODE_SURROGATE = 0xdf_ff;
 
 const CHARACTER_ESCAPES: Readonly<Record<string, string>> = {
 	a: '\u0007',
+	b: '\b',
 	e: '\u001b',
 	f: '\f',
 	n: '\n',
