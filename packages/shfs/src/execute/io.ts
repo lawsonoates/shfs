@@ -1,9 +1,5 @@
-import type { Record as ShellRecord } from '../record';
-import {
-	byteRecordToLineRecords,
-	formatRecord,
-	recordsToBytes,
-} from '../record';
+import type { LineRecord, Record as ShellRecord } from '../record';
+import { recordsToBytes, toPhysicalLineRecords } from '../record';
 import type { OutputStream as DiagnosticOutputStream } from '../stderr';
 import type { Stream } from '../stream';
 
@@ -46,10 +42,15 @@ export class EmptyInput implements ShellInput {
 
 export class RecordInput implements ShellInput {
 	private readonly input: AsyncIterator<ShellRecord>;
-	private readonly pendingLines: string[] = [];
+	private readonly lineInput: AsyncIterator<LineRecord>;
 
 	constructor(input: Stream<ShellRecord>) {
 		this.input = input[Symbol.asyncIterator]();
+		const remainingInput: Stream<ShellRecord> = {
+			[Symbol.asyncIterator]: () => this.input,
+		};
+		this.lineInput =
+			toPhysicalLineRecords(remainingInput)[Symbol.asyncIterator]();
 	}
 
 	async *records(): Stream<ShellRecord> {
@@ -73,21 +74,8 @@ export class RecordInput implements ShellInput {
 	}
 
 	async readLine(): Promise<string | null> {
-		while (this.pendingLines.length === 0) {
-			const next = await this.input.next();
-			if (next.done) {
-				return null;
-			}
-			if (next.value.kind !== 'bytes') {
-				return formatRecord(next.value);
-			}
-			this.pendingLines.push(
-				...byteRecordToLineRecords(next.value).map(
-					(record) => record.text
-				)
-			);
-		}
-		return this.pendingLines.shift() ?? null;
+		const next = await this.lineInput.next();
+		return next.done ? null : next.value.text;
 	}
 
 	async bytes(

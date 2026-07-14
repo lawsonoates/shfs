@@ -6,8 +6,8 @@ export type {
 	StdoutRecord as Record,
 } from './stdout-record';
 export {
-	byteRecordToLineRecords,
 	formatStdoutRecord as formatRecord,
 	formatStdoutRecords as formatRecords,
 	recordsToBytes,
+	toPhysicalLineRecords,
 } from './stdout-record';

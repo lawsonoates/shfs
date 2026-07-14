@@ -59,15 +59,111 @@ export function textToLineRecords(
 	});
 }
 
-/** Decode an exact byte chunk for a line-oriented consumer. */
-export function byteRecordToLineRecords(record: ByteRecord): LineRecord[] {
-	if (record.bytes.length === 0) {
-		return [];
+class PhysicalLineDecoder {
+	private decodingBytes = false;
+	private pendingLine: LineRecord | undefined;
+	private readonly utf8Decoder = new TextDecoder();
+
+	push(record: StdoutRecord): LineRecord[] {
+		if (record.kind === 'bytes') {
+			this.decodingBytes = true;
+			return this.appendPhysicalText(
+				this.utf8Decoder.decode(record.bytes, { stream: true })
+			);
+		}
+
+		const lines = this.flushByteDecoder();
+		const line =
+			record.kind === 'line'
+				? record
+				: { kind: 'line' as const, text: formatStdoutRecord(record) };
+		if (line.separation === 'explicit' && this.pendingLine) {
+			lines.push(this.takePendingLine(false));
+		}
+		lines.push(...this.appendPhysicalText(line.text, line));
+		if (line.terminated !== false) {
+			lines.push(this.takePendingLine(true, line));
+		} else if (line.separation === 'explicit' && !this.pendingLine) {
+			this.pendingLine = { ...line };
+		}
+		return lines;
 	}
-	const terminated = record.bytes.at(-1) === NEWLINE_BYTE;
-	const decoded = UTF8_DECODER.decode(record.bytes);
-	const text = terminated ? decoded.slice(0, -1) : decoded;
-	return textToLineRecords(text, terminated);
+
+	finish(): LineRecord[] {
+		const lines = this.flushByteDecoder();
+		if (this.pendingLine) {
+			lines.push(this.takePendingLine(false));
+		}
+		return lines;
+	}
+
+	private appendPhysicalText(
+		text: string,
+		template?: LineRecord
+	): LineRecord[] {
+		const lines: LineRecord[] = [];
+		let start = 0;
+		let newlineIndex = text.indexOf('\n');
+		while (newlineIndex !== -1) {
+			this.appendSegment(text.slice(start, newlineIndex), template);
+			lines.push(this.takePendingLine(true, template));
+			start = newlineIndex + 1;
+			newlineIndex = text.indexOf('\n', start);
+		}
+		if (start < text.length) {
+			this.appendSegment(text.slice(start), template);
+		}
+		return lines;
+	}
+
+	private appendSegment(text: string, template?: LineRecord): void {
+		if (!this.pendingLine) {
+			this.pendingLine = template
+				? { ...template, terminated: false, text: '' }
+				: { kind: 'line', terminated: false, text: '' };
+		}
+		this.pendingLine.text += text;
+	}
+
+	private flushByteDecoder(): LineRecord[] {
+		if (!this.decodingBytes) {
+			return [];
+		}
+		this.decodingBytes = false;
+		return this.appendPhysicalText(this.utf8Decoder.decode());
+	}
+
+	private takePendingLine(
+		terminated: boolean,
+		fallback?: LineRecord
+	): LineRecord {
+		const line = this.pendingLine ?? {
+			...(fallback ?? { kind: 'line' as const }),
+			text: '',
+		};
+		this.pendingLine = undefined;
+		if (!terminated) {
+			return { ...line, terminated: false };
+		}
+		const completed = { ...line };
+		completed.terminated = undefined;
+		return completed;
+	}
+}
+
+/** Decode ordered physical stdout into lines across record boundaries. */
+export async function* toPhysicalLineRecords(
+	records: AsyncIterable<StdoutRecord>
+): AsyncGenerator<LineRecord> {
+	const decoder = new PhysicalLineDecoder();
+	for await (const record of records) {
+		for (const line of decoder.push(record)) {
+			yield line;
+		}
+	}
+	for (const line of decoder.finish()) {
+		yield line;
+	}
 }
 
 export function formatStdoutRecord(record: StdoutRecord): string {

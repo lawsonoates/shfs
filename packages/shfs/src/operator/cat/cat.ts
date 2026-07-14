@@ -3,11 +3,12 @@ import { Result } from 'better-result';
 import { fileRecordToLines } from '../../execute/records';
 import type { FS } from '../../fs/fs';
 import {
-	byteRecordToLineRecords,
 	type FileRecord,
 	type LineRecord,
 	type Record,
+	toPhysicalLineRecords,
 } from '../../record';
+import type { Stream } from '../../stream';
 import type { Transducer } from '../types';
 
 export interface CatOptions {
@@ -157,6 +158,23 @@ async function* emitFileLines(
 	options: Required<CatOptions>,
 	onMissingFile?: (path: string) => void
 ): AsyncIterable<LineRecord> {
+	for await (const line of readFileLines(fs, record, onMissingFile)) {
+		const rendered = nextRenderedLine(line.text, state, options);
+		if (rendered.isSkipped) {
+			continue;
+		}
+		yield {
+			...line,
+			text: renderLineText(rendered.text, rendered.lineNumber, options),
+		};
+	}
+}
+
+async function* readFileLines(
+	fs: FS,
+	record: FileRecord,
+	onMissingFile?: (path: string) => void
+): AsyncIterable<LineRecord> {
 	if (onMissingFile) {
 		const stat = await Result.tryPromise({
 			try: () => fs.stat(record.path),
@@ -167,15 +185,24 @@ async function* emitFileLines(
 			return;
 		}
 	}
-	for await (const line of fileRecordToLines(fs, record)) {
-		const rendered = nextRenderedLine(line.text, state, options);
-		if (rendered.isSkipped) {
+	yield* fileRecordToLines(fs, record);
+}
+
+async function* expandTransformInput(
+	fs: FS,
+	input: Stream<Record>,
+	onMissingFile?: (path: string) => void
+): Stream<Record> {
+	for await (const record of input) {
+		if (record.kind === 'file') {
+			yield* readFileLines(fs, record, onMissingFile);
 			continue;
 		}
-		yield {
-			...line,
-			text: renderLineText(rendered.text, rendered.lineNumber, options),
-		};
+		if (record.kind === 'json') {
+			yield { kind: 'line', text: JSON.stringify(record.value) };
+			continue;
+		}
+		yield record;
 	}
 }
 
@@ -191,19 +218,25 @@ export function cat(
 	};
 
 	return async function* (input) {
+		if (transformsLines(normalized)) {
+			const expandedInput = expandTransformInput(
+				fs,
+				input,
+				onMissingFile
+			);
+			for await (const line of toPhysicalLineRecords(expandedInput)) {
+				yield* emitLineRecord(line, state, normalized);
+			}
+			return;
+		}
+
 		for await (const record of input) {
 			if (isLineRecord(record)) {
 				yield* emitLineRecord(record, state, normalized);
 				continue;
 			}
 			if (record.kind === 'bytes') {
-				if (!transformsLines(normalized)) {
-					yield record;
-					continue;
-				}
-				for (const line of byteRecordToLineRecords(record)) {
-					yield* emitLineRecord(line, state, normalized);
-				}
+				yield record;
 				continue;
 			}
 			if (record.kind === 'json') {

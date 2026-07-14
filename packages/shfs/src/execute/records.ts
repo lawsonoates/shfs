@@ -2,11 +2,11 @@ import { Result } from 'better-result';
 
 import type { FS } from '../fs/fs';
 import {
-	byteRecordToLineRecords,
 	type FileRecord,
 	formatRecord as formatShellRecord,
 	type LineRecord,
 	type Record as ShellRecord,
+	toPhysicalLineRecords,
 } from '../record';
 import type { Stream } from '../stream';
 
@@ -14,24 +14,16 @@ export async function* toLineStream(
 	fs: FS,
 	input: Stream<ShellRecord>
 ): Stream<LineRecord> {
-	for await (const record of input) {
-		if (record.kind === 'line') {
+	const expandedInput = (async function* (): Stream<ShellRecord> {
+		for await (const record of input) {
+			if (record.kind === 'file') {
+				yield* fileRecordToLines(fs, record);
+				continue;
+			}
 			yield record;
-			continue;
 		}
-		if (record.kind === 'bytes') {
-			yield* byteRecordToLineRecords(record);
-			continue;
-		}
-		if (record.kind === 'file') {
-			yield* fileRecordToLines(fs, record);
-			continue;
-		}
-		yield {
-			kind: 'line',
-			text: JSON.stringify(record.value),
-		};
-	}
+	})();
+	yield* toPhysicalLineRecords(expandedInput);
 }
 
 /**
@@ -42,20 +34,7 @@ export async function* toLineStream(
 export async function* toFormattedLineStream(
 	input: Stream<ShellRecord>
 ): Stream<LineRecord> {
-	for await (const record of input) {
-		if (record.kind === 'line') {
-			yield record;
-			continue;
-		}
-		if (record.kind === 'bytes') {
-			yield* byteRecordToLineRecords(record);
-			continue;
-		}
-		yield {
-			kind: 'line',
-			text: formatShellRecord(record),
-		};
-	}
+	yield* toPhysicalLineRecords(toFormattedRecordStream(input));
 }
 
 /** Format structured records while preserving exact byte chunks. */
