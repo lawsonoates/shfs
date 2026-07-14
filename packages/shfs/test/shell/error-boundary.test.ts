@@ -64,6 +64,18 @@ test('variable indexes reject embedded redirections', async () => {
 	expect(result.stderr.toString()).toContain('Invalid index value');
 });
 
+test('expanded index items preserve embedded whitespace boundaries', async () => {
+	for (const command of [
+		"set values first second; set index '1 2'; echo $values[$index]",
+		"set values first second; echo $values[(echo '1 2')]",
+	]) {
+		const result = await run(command);
+		expect(result.stdout.toString()).toBe('');
+		expect(result.exitCode).not.toBe(0);
+		expect(result.stderr.toString()).toContain('Invalid index value');
+	}
+});
+
 test('2> redirects an expansion-failure diagnostic to a file, not shell stderr', async () => {
 	await run('mkdir -p /w');
 	await run('cd /w');

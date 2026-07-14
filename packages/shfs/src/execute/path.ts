@@ -39,6 +39,7 @@ const MULTIPLE_SLASH_REGEX = /\/+/g;
 const ROOT_DIRECTORY = '/';
 const TRAILING_SLASH_REGEX = /\/+$/;
 const NO_GLOB_MATCH_MESSAGE = 'no matches found';
+const INDEX_ATOM_WHITESPACE_REGEX = /\s/;
 
 /**
  * Execute a command substitution and return its output lines.
@@ -591,6 +592,11 @@ function selectExpandedIndexEffect(
 					emptyGlobOk: true,
 				}))
 			);
+		}
+		for (const atom of expanded) {
+			if (INDEX_ATOM_WHITESPACE_REGEX.test(atom)) {
+				return yield* invalidIndexError();
+			}
 		}
 		return selectByIndex(context, values, expanded.join(' '));
 	});
