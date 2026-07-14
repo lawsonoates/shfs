@@ -9,6 +9,7 @@ import type { Record as ShellRecord } from '../../record';
 import type { Builtin, BuiltinRuntime } from '../types';
 
 const INTEGER_REGEX = /^[+-]?\d+$/;
+const CAPTURE_INDEX_REGEX = /^\d+$/;
 const PCRE_BACKREF_REGEX = /\\g(\d+)/g;
 const REPLACEMENT_TOKEN_REGEX =
 	/\\[ELUabefnrtv\\]|\$\$|\$\d+|\$\{[^}]*\}|[\s\S]/g;
@@ -268,12 +269,25 @@ function casing(value: string, mode: 'lower' | 'upper' | null): string {
 	return value;
 }
 
+function numericReference(value: string, found: RegExpExecArray): string {
+	const index = Number.parseInt(value, 10);
+	if (index >= found.length) {
+		throw new StringUsageError(
+			'string replace: Regular expression substitute error: unknown substring'
+		);
+	}
+	return found[index] ?? '';
+}
+
 function reference(token: string, found: RegExpExecArray): string | undefined {
 	if (token === '$$') {
 		return '$';
 	}
 	if (token.startsWith('${')) {
 		const name = token.slice(2, -1);
+		if (CAPTURE_INDEX_REGEX.test(name)) {
+			return numericReference(name, found);
+		}
 		if (!Object.hasOwn(found.groups ?? {}, name)) {
 			throw new StringUsageError(
 				'string replace: Regular expression substitute error: unknown substring'
@@ -284,13 +298,7 @@ function reference(token: string, found: RegExpExecArray): string | undefined {
 	if (!token.startsWith('$') || token.length === 1) {
 		return undefined;
 	}
-	const index = Number.parseInt(token.slice(1), 10);
-	if (index >= found.length) {
-		throw new StringUsageError(
-			'string replace: Regular expression substitute error: unknown substring'
-		);
-	}
-	return found[index] ?? '';
+	return numericReference(token.slice(1), found);
 }
 
 function expand(template: string, found: RegExpExecArray): string {

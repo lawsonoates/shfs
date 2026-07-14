@@ -220,6 +220,7 @@ test('fish basic: basic.fish - echo -e interprets supported escapes', async () =
 	expect(await run("echo 'abc\\ndef'")).toBe('abc\\ndef');
 	expect(await run("echo -e 'abc\\ndef'")).toBe('abc\ndef');
 	expect(await run("echo -e 'abc\\zdef'")).toBe('abc\\zdef');
+	expect(await run("echo -e 'abc\\41def'")).toBe('abc!def');
 	expect(await run("echo -e 'abc\\041def'")).toBe('abc!def');
 	expect(await run("echo -e 'abc\\x21def'")).toBe('abc!def');
 });
