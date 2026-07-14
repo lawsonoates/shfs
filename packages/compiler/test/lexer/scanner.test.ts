@@ -267,6 +267,20 @@ test('scanner decodes Fish backspace escapes', () => {
 	expect(scanFirstWord('A\\bB').spelling).toBe('A\bB');
 });
 
+test('scanner applies Fish byte escape boundaries', () => {
+	expect(scanFirstWord('\\x1').spelling).toBe('\u0001');
+	expect(scanFirstWord('\\X41').spelling).toBe('A');
+	expect(scanFirstWord('\\x1G').spelling).toBe('\u0001G');
+	expect(scanFirstWord('\\X41Z').spelling).toBe('AZ');
+	expect(scanFirstWord('\\xC3\\xB6').spelling).toBe('ö');
+
+	for (const escapeSequence of ['\\x', '\\X', '\\xNotHex', '\\X-not']) {
+		expect(() =>
+			new Scanner(`echo ${escapeSequence}`).tokenize()
+		).toThrow();
+	}
+});
+
 test('scanner rejects octal escapes above the Fish ASCII limit', () => {
 	expect(scanFirstWord('\\177').spelling).toBe('\u007f');
 

@@ -240,6 +240,14 @@ test('parseEffect rejects octal escapes above the Fish ASCII limit', () => {
 	}
 });
 
+test('parseEffect rejects byte escapes without hex digits', () => {
+	const result = parseEffect('echo \\xNotHex');
+	expect(result.isErr()).toBeTrue();
+	if (result.isErr()) {
+		expect(result.error.diagnostic.code).toBe('invalid-escape');
+	}
+});
+
 test('parseEffect rejects Unicode escapes above U+10FFFF', () => {
 	const result = parseEffect('echo \\U00110000');
 	expect(result.isErr()).toBeTrue();

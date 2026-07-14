@@ -634,10 +634,14 @@ export class Scanner {
 			return character;
 		}
 
-		if (
-			(marker === 'x' || marker === 'X') &&
-			HEX_DIGIT_REGEX.test(this.source.peek(1))
-		) {
+		if (marker === 'x' || marker === 'X') {
+			if (!HEX_DIGIT_REGEX.test(this.source.peek(1))) {
+				this.source.advance();
+				throw new InvalidEscapeError(
+					`\\${marker}`,
+					start.span(this.source.position)
+				);
+			}
 			return this.readByteEscapes();
 		}
 
