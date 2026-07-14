@@ -49,6 +49,7 @@ test('fish line-continuation: line-continuation.fish - escapes and continuations
 		'    echo if true',
 		'\\145n\\',
 		'd\\',
+		'',
 	].join('\n');
 	expect(await run(script)).toBe('if true');
 });

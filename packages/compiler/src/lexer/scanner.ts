@@ -10,6 +10,21 @@ import {
 	type TokenWordPartQuote,
 } from './token';
 
+const BYTE_DECODER = new TextDecoder();
+const ASCII_LETTER_REGEX = /^[A-Za-z]$/;
+const HEX_DIGIT_REGEX = /^[\dA-Fa-f]$/;
+const OCTAL_DIGIT_REGEX = /^[0-7]$/;
+
+const CHARACTER_ESCAPES: Readonly<Record<string, string>> = {
+	a: '\u0007',
+	e: '\u001b',
+	f: '\f',
+	n: '\n',
+	r: '\r',
+	t: '\t',
+	v: '\v',
+};
+
 function isDigitCode(code: number): boolean {
 	return code >= 48 && code <= 57;
 }
@@ -574,20 +589,96 @@ export class Scanner {
 			};
 		}
 
-		// Outside quotes, backslash escapes any character (removes special meaning)
-		this.source.advance();
+		// Outside quotes, fish decodes character, byte, numeric, and Unicode
+		// escapes. Unknown escapes still quote the following character.
+		const escaped = this.readUnquotedEscape();
 		return {
-			chars: next,
+			chars: escaped,
 			flags: createEmptyFlags(),
 			done: false,
 			part: this.createWordPart(
 				'literal',
-				next,
+				escaped,
 				start.span(this.source.position),
 				quote,
 				true
 			),
 		};
+	}
+
+	private readUnquotedEscape(): string {
+		const marker = this.source.peek();
+		const character = CHARACTER_ESCAPES[marker];
+		if (character !== undefined) {
+			this.source.advance();
+			return character;
+		}
+
+		if (
+			(marker === 'x' || marker === 'X') &&
+			HEX_DIGIT_REGEX.test(this.source.peek(1))
+		) {
+			return this.readByteEscapes();
+		}
+
+		if (marker === 'u' && HEX_DIGIT_REGEX.test(this.source.peek(1))) {
+			return this.readCodePointEscape(4);
+		}
+
+		if (marker === 'U' && HEX_DIGIT_REGEX.test(this.source.peek(1))) {
+			return this.readCodePointEscape(8);
+		}
+
+		if (OCTAL_DIGIT_REGEX.test(marker)) {
+			return String.fromCodePoint(
+				Number.parseInt(this.readDigits(OCTAL_DIGIT_REGEX, 3), 8)
+			);
+		}
+
+		if (marker === 'c' && ASCII_LETTER_REGEX.test(this.source.peek(1))) {
+			this.source.advance();
+			return String.fromCodePoint(
+				this.source.advance().toUpperCase().charCodeAt(0) % 32
+			);
+		}
+
+		return this.source.advance();
+	}
+
+	private readByteEscapes(): string {
+		const bytes: number[] = [];
+		while (true) {
+			this.source.advance(); // x / X
+			bytes.push(
+				Number.parseInt(this.readDigits(HEX_DIGIT_REGEX, 2), 16)
+			);
+			if (
+				this.source.peek() !== '\\' ||
+				!['x', 'X'].includes(this.source.peek(1)) ||
+				!HEX_DIGIT_REGEX.test(this.source.peek(2))
+			) {
+				break;
+			}
+			this.source.advance(); // backslash before the next byte
+		}
+		return BYTE_DECODER.decode(Uint8Array.from(bytes));
+	}
+
+	private readCodePointEscape(maxDigits: number): string {
+		this.source.advance(); // u / U
+		const value = Number.parseInt(
+			this.readDigits(HEX_DIGIT_REGEX, maxDigits),
+			16
+		);
+		return value <= 0x10_ff_ff ? String.fromCodePoint(value) : '\ufffd';
+	}
+
+	private readDigits(pattern: RegExp, limit: number): string {
+		let digits = '';
+		while (digits.length < limit && pattern.test(this.source.peek())) {
+			digits += this.source.advance();
+		}
+		return digits;
 	}
 
 	// ─────────────────────────────────────────────────────────
@@ -729,25 +820,9 @@ export class Scanner {
 
 		let depth = 1;
 		while (depth > 0 && !this.source.eof) {
-			const c = this.source.peek();
-
-			if (c === '(') {
-				depth++;
-				result += this.source.advance();
-			} else if (c === ')') {
-				depth--;
-				result += this.source.advance();
-			} else if (c === "'" || c === '"') {
-				// Skip quoted content
-				result += this.skipQuotedContent(c);
-			} else if (c === '\\' && !this.source.eof) {
-				result += this.source.advance();
-				if (!this.source.eof) {
-					result += this.source.advance();
-				}
-			} else {
-				result += this.source.advance();
-			}
+			const chunk = this.readSubstitutionChunk(result);
+			depth += chunk.depth;
+			result += chunk.chars;
 		}
 
 		const source = result.endsWith(')')
@@ -777,6 +852,54 @@ export class Scanner {
 				text: raw,
 			},
 		};
+	}
+
+	private readSubstitutionChunk(source: string): {
+		chars: string;
+		depth: number;
+	} {
+		const char = this.source.peek();
+		if (char === '#' && this.canStartSubstitutionComment(source)) {
+			return { chars: this.readSubstitutionComment(), depth: 0 };
+		}
+		if (char === '(') {
+			return { chars: this.source.advance(), depth: 1 };
+		}
+		if (char === ')') {
+			return { chars: this.source.advance(), depth: -1 };
+		}
+		if (char === "'" || char === '"') {
+			return { chars: this.skipQuotedContent(char), depth: 0 };
+		}
+		if (char === '\\') {
+			let chars = this.source.advance();
+			if (!this.source.eof) {
+				chars += this.source.advance();
+			}
+			return { chars, depth: 0 };
+		}
+		return { chars: this.source.advance(), depth: 0 };
+	}
+
+	private canStartSubstitutionComment(source: string): boolean {
+		const previous = source.at(-1);
+		return (
+			previous === '(' ||
+			previous === ';' ||
+			previous === '|' ||
+			previous === '&' ||
+			previous === ' ' ||
+			previous === '\t' ||
+			previous === '\n'
+		);
+	}
+
+	private readSubstitutionComment(): string {
+		let comment = '';
+		while (!this.source.eof && this.source.peek() !== '\n') {
+			comment += this.source.advance();
+		}
+		return comment;
 	}
 
 	private readCharacterClass(start: SourcePosition): CharProcessResult {
