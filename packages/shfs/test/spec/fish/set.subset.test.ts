@@ -358,3 +358,25 @@ test('fish set: set.fish - assigning index zero is an error', async () => {
 	expect(result.exitCode).not.toBe(0);
 	expect(result.stderr).toContain('array indices start at 1');
 });
+
+// set.fish:994-1006: invalid slices are diagnosed even when the variable is
+// undefined; syntactically valid open slices remain accepted.
+test('fish set: set.fish - erase validates indexes on undefined variables', async () => {
+	for (const command of [
+		'set -e undefined[x..]',
+		'set -e undefined[..y]',
+	]) {
+		const result = await runResult(command);
+		expect(result.exitCode).not.toBe(0);
+		expect(result.stderr).toContain('Invalid index value');
+	}
+
+	for (const command of [
+		'set -e undefined[1..]',
+		'set -e undefined[..]',
+		'set -e undefined[..1]',
+	]) {
+		const result = await runResult(command);
+		expect(result.stderr).toBe('');
+	}
+});

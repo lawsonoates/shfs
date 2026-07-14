@@ -5,8 +5,8 @@
 
 // Note: shfs supports both bare () and $() command substitution, including
 // $() inside double quotes. Bare () inside double quotes stays literal,
-// matching fish semantics. Upstream's escape sequences (\n) and brace
-// expansion cases are adapted with functions that emit multiple lines.
+// matching fish semantics. Brace-expansion cases remain adapted; unquoted
+// escape sequences use their upstream spelling.
 
 import { beforeEach, expect, test } from 'bun:test';
 
@@ -147,16 +147,8 @@ test('fish command substitution: cmdsub.fish - command substitution as set value
 // ── $() form ────────────────────────────────────────────────
 
 // cmdsub.fish: echo $(echo 1\n2)
-// Adapted: a function emits the two lines instead of echo with \n escapes.
 test('fish command substitution: cmdsub.fish - unquoted $() splits output lines into arguments', async () => {
-	const script = [
-		'function two',
-		'    echo 1',
-		'    echo 2',
-		'end',
-		'echo $(two)',
-	].join('\n');
-	expect(await run(script)).toBe('1 2');
+	expect(await run('echo $(echo 1\\n2)')).toBe('1 2');
 });
 
 // cmdsub.fish: echo "a$(echo b)c"
