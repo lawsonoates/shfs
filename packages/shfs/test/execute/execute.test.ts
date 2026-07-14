@@ -315,6 +315,33 @@ test('cat redirection preserves empty, terminated, and unterminated file endings
 	).toBe('abctail');
 });
 
+// GNU coreutils tests/head/head.pl idem-1/idem-3 and tests/tail/tail.pl
+// obs-l1/obs-l2/obs-l3 require pass-through readers to preserve EOF bytes.
+test('head and tail redirection preserve final-line termination', async () => {
+	const fs = new MemoryFS();
+	const cases = [
+		{ expected: new Uint8Array([0x61, 0x62, 0x63]), name: 'unterminated' },
+		{
+			expected: new Uint8Array([0x61, 0x62, 0x63, 0x0a]),
+			name: 'terminated',
+		},
+	] as const;
+	for (const { expected, name } of cases) {
+		fs.setFile(`/line-${name}.txt`, expected);
+		for (const command of ['head', 'tail'] as const) {
+			const outputPath = `/${command}-${name}.txt`;
+			const result = execute(
+				compile(
+					parse(`${command} -n 1 /line-${name}.txt > ${outputPath}`)
+				),
+				fs
+			);
+			(await collectRecordStream(result)).unwrap();
+			expect(await fs.readFile(outputPath)).toEqual(expected);
+		}
+	}
+});
+
 test('append redirection concatenates exact terminated and unterminated output', async () => {
 	const fs = new MemoryFS();
 	const cases = [

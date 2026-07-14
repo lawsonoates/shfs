@@ -19,13 +19,20 @@ test('byte records serialize empty chunks and physical line endings exactly', ()
 	expect(formatRecords(records)).toBe('a\n\nb');
 });
 
-test('byte records trim only one final LF for display serialization', () => {
-	const records: ByteRecord[] = [
+test('display serialization trims logical LF but preserves byte-owned LF', () => {
+	const byteRecords: ByteRecord[] = [
 		{ bytes: new Uint8Array([0x61, 0x0a, 0x0a]), kind: 'bytes' },
 	];
+	const lineRecords = [
+		{ kind: 'line', text: 'a' },
+		{ kind: 'line', text: '' },
+	] as const;
 
-	expect(recordsToBytes(records)).toEqual(new Uint8Array([0x61, 0x0a]));
-	expect(recordsToBytes(records, { trailingNewline: true })).toEqual(
+	expect(recordsToBytes(byteRecords)).toEqual(
+		new Uint8Array([0x61, 0x0a, 0x0a])
+	);
+	expect(recordsToBytes(lineRecords)).toEqual(new Uint8Array([0x61, 0x0a]));
+	expect(recordsToBytes(lineRecords, { trailingNewline: true })).toEqual(
 		new Uint8Array([0x61, 0x0a, 0x0a])
 	);
 });

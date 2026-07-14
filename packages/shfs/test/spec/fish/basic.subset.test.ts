@@ -233,6 +233,9 @@ test('fish basic: basic.fish - echo -e interprets supported escapes', async () =
 // the Shell byte API because display_bytes is outside the shfs subset.
 test('fish basic: basic.fish - echo numeric escapes emit raw bytes', async () => {
 	expect(await runBytes("echo -ne '\\376'")).toEqual(new Uint8Array([0xfe]));
+	expect(await runBytes("echo -ne '\\x41\\x0a'")).toEqual(
+		new Uint8Array([0x41, 0x0a])
+	);
 	expect(await runBytes("echo -ne '\\5555'")).toEqual(
 		new Uint8Array([0o155, 0o65])
 	);

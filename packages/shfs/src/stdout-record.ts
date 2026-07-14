@@ -105,19 +105,28 @@ export function recordsToBytes(
 	options: { trailingNewline?: boolean } = {}
 ): Uint8Array {
 	const chunks: Uint8Array[] = [];
+	let finalBytesAreByteOwned = false;
 	for (const record of records) {
 		if (record.kind === 'bytes') {
 			chunks.push(record.bytes);
+			if (record.bytes.length > 0) {
+				finalBytesAreByteOwned = true;
+			}
 			continue;
 		}
 		const text = formatStdoutRecord(record);
 		const terminated =
 			record.kind !== 'line' || record.terminated !== false;
-		chunks.push(UTF8_ENCODER.encode(terminated ? `${text}\n` : text));
+		const chunk = UTF8_ENCODER.encode(terminated ? `${text}\n` : text);
+		chunks.push(chunk);
+		if (chunk.length > 0) {
+			finalBytesAreByteOwned = false;
+		}
 	}
 	const bytes = concatenateBytes(chunks);
 	if (
 		options.trailingNewline ||
+		finalBytesAreByteOwned ||
 		bytes.length === 0 ||
 		bytes.at(-1) !== NEWLINE_BYTE
 	) {
@@ -130,5 +139,11 @@ export function formatStdoutRecords(
 	records: readonly StdoutRecord[],
 	options: { trailingNewline?: boolean } = {}
 ): string {
-	return UTF8_DECODER.decode(recordsToBytes(records, options));
+	const text = UTF8_DECODER.decode(
+		recordsToBytes(records, { trailingNewline: true })
+	);
+	if (options.trailingNewline || !text.endsWith('\n')) {
+		return text;
+	}
+	return text.slice(0, -1);
 }

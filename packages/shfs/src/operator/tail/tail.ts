@@ -1,5 +1,6 @@
 import { Result } from 'better-result';
 
+import { fileRecordToLines } from '../../execute/records';
 import type { FS } from '../../fs/fs';
 import type { LineRecord } from '../../record';
 import type { Stream } from '../../stream';
@@ -40,14 +41,12 @@ export async function* tailFiles(
 			continue;
 		}
 		const buf: LineRecord[] = [];
-		let lineNum = 0;
-		for await (const text of fs.readLines(entry.path)) {
-			buf.push({
-				file: entry.path,
-				kind: 'line',
-				lineNum: ++lineNum,
-				text,
-			});
+		for await (const line of fileRecordToLines(fs, {
+			isDirectory: false,
+			kind: 'file',
+			path: entry.path,
+		})) {
+			buf.push(line);
 			if (buf.length > n) {
 				buf.shift();
 			}

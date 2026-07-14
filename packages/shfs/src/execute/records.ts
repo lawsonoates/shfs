@@ -82,15 +82,32 @@ export async function* fileRecordToLines(
 		return;
 	}
 
+	// readLines drops its trailing empty sentinel, so hold the final record
+	// until the source byte stream can distinguish terminated and unterminated.
+	let pendingText: string | undefined;
 	let lineNum = 1;
+	const lineRecord = (text: string): LineRecord => ({
+		file: record.path,
+		kind: 'line',
+		lineNum: lineNum++,
+		text,
+	});
 	for await (const text of fs.readLines(record.path)) {
-		yield {
-			kind: 'line',
-			text,
-			file: record.path,
-			lineNum: lineNum++,
-		};
+		if (pendingText !== undefined) {
+			yield lineRecord(pendingText);
+		}
+		pendingText = text;
 	}
+	if (pendingText === undefined) {
+		return;
+	}
+	const finalRecord = lineRecord(pendingText);
+	const content = await fs.readFile(record.path);
+	if (content.at(-1) === 0x0a) {
+		yield finalRecord;
+		return;
+	}
+	yield { ...finalRecord, terminated: false };
 }
 
 export async function isDirectoryRecord(

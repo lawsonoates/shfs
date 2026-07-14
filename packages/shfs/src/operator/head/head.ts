@@ -1,6 +1,6 @@
 import { Result } from 'better-result';
 
-import { isDirectoryRecord } from '../../execute/records';
+import { fileRecordToLines } from '../../execute/records';
 import type { FS } from '../../fs/fs';
 import type { FileRecord, LineRecord } from '../../record';
 import type { Stream } from '../../stream';
@@ -27,20 +27,13 @@ export function headLines(n: number): Transducer<LineRecord, LineRecord> {
 export function head(fs: FS): Transducer<FileRecord, LineRecord> {
 	return async function* (input) {
 		for await (const file of input) {
-			if (await isDirectoryRecord(fs, file)) {
-				continue;
-			}
-			let lineNum = 0;
-			for await (const text of fs.readLines(file.path)) {
-				if (lineNum >= 10) {
+			let emitted = 0;
+			for await (const line of fileRecordToLines(fs, file)) {
+				if (emitted >= 10) {
 					break; // Default to 10 lines
 				}
-				yield {
-					file: file.path,
-					kind: 'line',
-					lineNum: ++lineNum,
-					text,
-				};
+				emitted++;
+				yield line;
 			}
 		}
 	};
@@ -73,17 +66,17 @@ export async function* headFiles(
 			yield { kind: 'line', text: `==> ${entry.displayPath} <==` };
 		}
 		printedAny = true;
-		let lineNum = 0;
-		for await (const text of fs.readLines(entry.path)) {
-			if (lineNum >= n) {
+		let emitted = 0;
+		for await (const line of fileRecordToLines(fs, {
+			isDirectory: false,
+			kind: 'file',
+			path: entry.path,
+		})) {
+			if (emitted >= n) {
 				break;
 			}
-			yield {
-				file: entry.path,
-				kind: 'line',
-				lineNum: ++lineNum,
-				text,
-			};
+			emitted++;
+			yield line;
 		}
 	}
 }

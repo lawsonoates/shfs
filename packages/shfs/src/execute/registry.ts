@@ -48,7 +48,11 @@ import {
 } from './path';
 import { files } from './producers';
 import { empty, fromRecordGenerator, type RecordStream } from './record-stream';
-import { toFormattedLineStream, toFormattedRecordStream } from './records';
+import {
+	fileRecordToLines,
+	toFormattedLineStream,
+	toFormattedRecordStream,
+} from './records';
 import {
 	resolveInputRedirectEffect,
 	resolveRedirectPathEffect,
@@ -117,14 +121,7 @@ function resolveCpSourcePath(cwd: string, path: string): string {
 const ROOT_DIRECTORY = '/';
 
 function lineRecordsFromPath(fs: FS, path: string): Stream<ShellRecord> {
-	return (async function* (): Stream<ShellRecord> {
-		for await (const line of fs.readLines(path)) {
-			yield {
-				kind: 'line',
-				text: line,
-			};
-		}
-	})();
+	return fileRecordToLines(fs, { kind: 'file', path });
 }
 
 let commandRegistriesVerified = false;

@@ -12,17 +12,20 @@ export interface ShellOutputInit {
 	exitCode: number;
 	stderr: Buffer;
 	stdout: Buffer;
+	stdoutText?: Buffer;
 }
 
 export class ShellOutput {
 	readonly exitCode: number;
 	readonly stderr: Buffer;
 	readonly stdout: Buffer;
+	private readonly stdoutText: Buffer;
 
 	constructor(init: ShellOutputInit) {
 		this.exitCode = init.exitCode;
 		this.stderr = init.stderr;
 		this.stdout = init.stdout;
+		this.stdoutText = init.stdoutText ?? init.stdout;
 	}
 
 	arrayBuffer(): ArrayBuffer {
@@ -42,7 +45,7 @@ export class ShellOutput {
 	}
 
 	text(encoding: BufferEncoding = 'utf8'): string {
-		return this.stdout.toString(encoding);
+		return this.stdoutText.toString(encoding);
 	}
 }
 

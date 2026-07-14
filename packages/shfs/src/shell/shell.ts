@@ -11,7 +11,7 @@ import {
 	ShellError,
 	ShellOutput,
 } from '../output-channels';
-import { type Record, recordsToBytes } from '../record';
+import { formatRecords, type Record, recordsToBytes } from '../record';
 import { BufferedOutputStream, formatStderr } from '../stderr';
 
 const ROOT_DIRECTORY = '/';
@@ -89,6 +89,7 @@ function createShellOutput(result: OutputChannels<Record>): ShellOutput {
 		exitCode: result.exitCode,
 		stderr: Buffer.from(formatStderr(result.stderr), 'utf8'),
 		stdout: Buffer.from(buildStdoutBytes(result.stdout)),
+		stdoutText: Buffer.from(formatRecords(result.stdout), 'utf8'),
 	});
 }
 
