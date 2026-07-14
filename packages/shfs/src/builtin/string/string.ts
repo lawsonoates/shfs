@@ -44,6 +44,11 @@ interface OptionSpec {
 	takesValue: boolean;
 }
 
+const SPLIT_OPTIONS: readonly OptionSpec[] = [
+	{ name: 'max', short: 'm', long: 'max', takesValue: true },
+	{ name: 'right', short: 'r', long: 'right', takesValue: false },
+];
+
 interface ParsedOptions {
 	options: Map<string, string | true>;
 	positional: string[];
@@ -608,24 +613,32 @@ function splitValue(
 	return [...pieces.slice(0, max), pieces.slice(max).join(separator)];
 }
 
+function splitMax(
+	subcommand: 'split' | 'split0',
+	options: ReadonlyMap<string, string | true>
+): number | null {
+	return options.has('max')
+		? parseIntegerOption(
+				subcommand,
+				'max',
+				String(options.get('max')),
+				(value) => value >= 0
+			)
+		: null;
+}
+
 function split(runtime: BuiltinRuntime, operands: string[]) {
 	return (async function* () {
-		const { options, positional } = parseOptions('split', operands, [
-			{ name: 'max', short: 'm', long: 'max', takesValue: true },
-			{ name: 'right', short: 'r', long: 'right', takesValue: false },
-		]);
+		const { options, positional } = parseOptions(
+			'split',
+			operands,
+			SPLIT_OPTIONS
+		);
 		const [separator, ...rest] = positional;
 		if (separator === undefined) {
 			throw new StringUsageError('string split: missing argument');
 		}
-		const max = options.has('max')
-			? parseIntegerOption(
-					'split',
-					'max',
-					String(options.get('max')),
-					(value) => value >= 0
-				)
-			: null;
+		const max = splitMax('split', options);
 
 		const values =
 			rest.length > 0 ? rest : await collectStdinLines(runtime);
@@ -650,25 +663,36 @@ function split(runtime: BuiltinRuntime, operands: string[]) {
 
 function split0(runtime: BuiltinRuntime, operands: string[]) {
 	return (async function* () {
-		const { positional } = parseOptions('split0', operands, []);
-		if (positional.length > 0) {
-			throw new StringUsageError('string split0: too many arguments');
+		const { options, positional } = parseOptions(
+			'split0',
+			operands,
+			SPLIT_OPTIONS
+		);
+		const max = splitMax('split0', options);
+		let values = positional;
+		if (values.length === 0) {
+			const bytes = await runtime.stdin.bytes({ trailingNewline: true });
+			if (bytes.length === 0) {
+				runtime.context.status = 1;
+				return;
+			}
+			values = [UTF8_DECODER.decode(bytes)];
 		}
-		const bytes = await runtime.stdin.bytes({ trailingNewline: true });
-		if (bytes.length === 0) {
-			runtime.context.status = 1;
-			return;
+
+		let anySplit = false;
+		for (const value of values) {
+			const pieces = splitValue(value, '\0', max, options.has('right'));
+			if (pieces.length > 1) {
+				anySplit = true;
+			}
+			if (pieces.at(-1) === '') {
+				pieces.pop();
+			}
+			for (const piece of pieces) {
+				yield field(piece);
+			}
 		}
-		const value = UTF8_DECODER.decode(bytes);
-		const pieces = value.split('\0');
-		const split = pieces.length > 1;
-		if (pieces.at(-1) === '') {
-			pieces.pop();
-		}
-		for (const piece of pieces) {
-			yield field(piece);
-		}
-		runtime.context.status = split ? 0 : 1;
+		runtime.context.status = anySplit ? 0 : 1;
 	})();
 }
 

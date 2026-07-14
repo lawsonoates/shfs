@@ -186,13 +186,6 @@ test('fish string: string.fish - regex replace expands captures and escapes', as
 	expect(await run("string replace -r -a '(\\w)' '$1$1' ab")).toBe('aabb');
 });
 
-// string-replace.rst:24: numeric captures accept braced references.
-test('fish string: string-replace.rst - regex replace expands braced numeric captures', async () => {
-	expect(
-		await run(`string replace -r '(a)(b)' '${'$'}{2}${'$'}{1}' ab`)
-	).toBe('ba');
-});
-
 // string.fish:522-526: no regex replacement returns status 1 while passing
 // the input through.
 test('fish string: string.fish - regex replace reports no replacement', async () => {

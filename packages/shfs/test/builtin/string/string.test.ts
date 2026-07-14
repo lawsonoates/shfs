@@ -9,6 +9,14 @@ async function* emptyInput(): AsyncIterable<ShellRecord> {
 	// no records
 }
 
+async function* nulInput(): AsyncIterable<ShellRecord> {
+	yield {
+		kind: 'line',
+		terminated: false,
+		text: 'left\0middle\0right',
+	};
+}
+
 test('string replace emits replaced value', async () => {
 	const runtime = createBuiltinRuntime();
 	const stream = string(runtime, {
@@ -18,6 +26,62 @@ test('string replace emits replaced value', async () => {
 	const records = await collect<ShellRecord>()(stream);
 
 	expect(records).toEqual([{ kind: 'line', text: 'cat shell' }]);
+	expect(runtime.context.status).toBe(0);
+});
+
+// fish string-replace.rst: numeric captures accept ${n} references.
+test('string replace expands braced numeric capture references', async () => {
+	const runtime = createBuiltinRuntime();
+	const records = await collect<ShellRecord>()(
+		string(runtime, {
+			operands: [
+				literal('-r'),
+				literal('(a)(b)'),
+				literal(`${'$'}{2}${'$'}{1}`),
+				literal('ab'),
+			],
+			subcommand: literal('replace'),
+		})
+	);
+
+	expect(records).toEqual([{ kind: 'line', text: 'ba' }]);
+	expect(runtime.context.status).toBe(0);
+});
+
+// fish string-split.rst: split0 accepts direct strings.
+test('string split0 accepts direct string operands', async () => {
+	const runtime = createBuiltinRuntime();
+	const records = await collect<ShellRecord>()(
+		string(runtime, {
+			operands: [literal('plain')],
+			subcommand: literal('split0'),
+		})
+	);
+
+	expect(records).toEqual([
+		{ kind: 'line', separation: 'explicit', text: 'plain' },
+	]);
+	expect(runtime.context.status).toBe(1);
+});
+
+// fish string-split.rst: split0 shares split's max/right options.
+test('string split0 applies max splits from the right', async () => {
+	const runtime = createBuiltinRuntime({ input: nulInput() });
+	const records = await collect<ShellRecord>()(
+		string(runtime, {
+			operands: [literal('-r'), literal('-m1')],
+			subcommand: literal('split0'),
+		})
+	);
+
+	expect(records).toEqual([
+		{
+			kind: 'line',
+			separation: 'explicit',
+			text: 'left\0middle',
+		},
+		{ kind: 'line', separation: 'explicit', text: 'right' },
+	]);
 	expect(runtime.context.status).toBe(0);
 });
 
