@@ -10,6 +10,8 @@ export interface LineRecord {
 	text: string;
 	file?: string;
 	lineNum?: number;
+	/** Preserve this record as one command-substitution value. */
+	separation?: 'explicit';
 }
 
 export interface JsonRecord {

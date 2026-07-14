@@ -210,6 +210,13 @@ test('fish string: string.fish - split with empty separator splits characters', 
 	expect(await run('string split "" abc')).toBe('a\nb\nc');
 });
 
+// string.fish:893-895: split output is explicitly separated, so trailing
+// empty fields survive command substitution instead of being trimmed as
+// inferred trailing newlines.
+test('fish string: string.fish - split preserves empty fields in command substitution', async () => {
+	expect(await run('count (string split / /)')).toBe('2');
+});
+
 // string.fish: string split -r -m1 / /usr/local/bin/fish
 test('fish string: string.fish - split -r -m1 splits once from the right', async () => {
 	expect(await run('string split -r -m1 / /usr/local/bin/fish')).toBe(

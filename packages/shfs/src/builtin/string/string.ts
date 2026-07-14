@@ -202,6 +202,10 @@ function line(text: string): ShellRecord {
 	return { kind: 'line', text };
 }
 
+function field(text: string): ShellRecord {
+	return { kind: 'line', separation: 'explicit', text };
+}
+
 // ─────────────────────────────────────────────────────────
 // Subcommands
 // ─────────────────────────────────────────────────────────
@@ -446,7 +450,7 @@ function split(runtime: BuiltinRuntime, operands: string[]) {
 				anySplit = true;
 			}
 			for (const piece of pieces) {
-				yield line(piece);
+				yield field(piece);
 			}
 		}
 		runtime.context.status = anySplit ? 0 : 1;

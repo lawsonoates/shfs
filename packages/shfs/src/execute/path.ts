@@ -68,11 +68,25 @@ function evaluateCommandSubstitutionEffect(
 			),
 			toShellErrorCause
 		);
-		const lines = records.flatMap((record) =>
-			formatRecord(record).split('\n')
-		);
-		while (lines.length > 0 && lines.at(-1) === '') {
-			lines.pop();
+		const lines: string[] = [];
+		let inferred = '';
+		for (const record of records) {
+			if (record.kind === 'line' && record.separation === 'explicit') {
+				if (inferred !== '') {
+					const split = inferred.split('\n');
+					split.pop();
+					lines.push(...split);
+					inferred = '';
+				}
+				lines.push(record.text);
+				continue;
+			}
+			inferred += `${formatRecord(record)}\n`;
+		}
+		if (inferred !== '') {
+			const split = inferred.split('\n');
+			split.pop();
+			lines.push(...split);
 		}
 		return Result.ok(lines);
 	});
