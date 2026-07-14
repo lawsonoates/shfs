@@ -11,7 +11,12 @@ import { type ExecuteContext, execute } from '@/execute/execute';
 import { collectRecordStream } from '@/execute/record-stream';
 import type { FS } from '@/fs/fs';
 import { MemoryFS } from '@/fs/memory';
-import type { FileRecord, LineRecord } from '@/record';
+import {
+	type FileRecord,
+	type LineRecord,
+	recordsToBytes,
+	toPhysicalLineRecords,
+} from '@/record';
 import { BufferedOutputStream } from '@/stderr';
 
 const textDecoder = new TextDecoder();
@@ -108,10 +113,9 @@ test('uses input redirection when no file args are provided', async () => {
 
 	const result = execute(ir, fs);
 	const records = (await collectRecordStream(result)).unwrap();
-	const lineRecords = records.filter(
-		(record): record is LineRecord => record.kind === 'line'
-	);
-	expect(lineRecords.map((record) => record.text)).toEqual(['alpha', 'beta']);
+	expect(
+		textDecoder.decode(recordsToBytes(records, { trailingNewline: true }))
+	).toBe('alpha\nbeta\n');
 });
 
 test('supports combined input and output redirection', async () => {
@@ -404,6 +408,51 @@ test('numeric echo escapes redirect and append as exact bytes', async () => {
 	expect(await fs.readFile('/raw.bin')).toEqual(new Uint8Array([0xfe, 0xff]));
 });
 
+// Coreutils cat/head/tail copy selected input bytes without a text decode.
+test('file replay commands preserve raw bytes and line selection', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/raw.bin', new Uint8Array([0xfe, 0x0a, 0xff, 0x0a, 0xfd]));
+	fs.setFile('/terminated.bin', new Uint8Array([0xfe, 0x0a, 0xff, 0x0a]));
+	const cases = [
+		{
+			command: 'cat /raw.bin',
+			expected: new Uint8Array([0xfe, 0x0a, 0xff, 0x0a, 0xfd]),
+		},
+		{
+			command: 'head -n 1 /raw.bin',
+			expected: new Uint8Array([0xfe, 0x0a]),
+		},
+		{
+			command: 'head -n 2 /raw.bin',
+			expected: new Uint8Array([0xfe, 0x0a, 0xff, 0x0a]),
+		},
+		{
+			command: 'tail -n 1 /raw.bin',
+			expected: new Uint8Array([0xfd]),
+		},
+		{
+			command: 'tail -n 2 /raw.bin',
+			expected: new Uint8Array([0xff, 0x0a, 0xfd]),
+		},
+		{
+			command: 'head -n 1 /terminated.bin',
+			expected: new Uint8Array([0xfe, 0x0a]),
+		},
+		{
+			command: 'tail -n 1 /terminated.bin',
+			expected: new Uint8Array([0xff, 0x0a]),
+		},
+	] as const;
+
+	for (const { command, expected } of cases) {
+		const output = execute(compile(parse(command)), fs);
+		const records = (await collectRecordStream(output)).unwrap();
+		expect(recordsToBytes(records, { trailingNewline: true })).toEqual(
+			expected
+		);
+	}
+});
+
 test('variable-expanded input redirection resolves relative to cwd', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/workspace/input.txt', 'alpha\nbeta\ngamma');
@@ -413,10 +462,9 @@ test('variable-expanded input redirection resolves relative to cwd', async () =>
 		globalVars: new Map<string, string[]>([['INPUTFILE', ['input.txt']]]),
 	});
 	const records = (await collectRecordStream(result)).unwrap();
-	const lineRecords = records.filter(
-		(record): record is LineRecord => record.kind === 'line'
-	);
-	expect(lineRecords.map((record) => record.text)).toEqual(['alpha']);
+	expect(
+		textDecoder.decode(recordsToBytes(records, { trailingNewline: true }))
+	).toBe('alpha\n');
 });
 
 test('command substitution can produce an output redirection target', async () => {
@@ -809,9 +857,14 @@ test('cat/head/tail expand glob file arguments relative to cwd', async () => {
 			cwd: '/workspace',
 		});
 		const records = (await collectRecordStream(result)).unwrap();
-		return records
-			.filter((record): record is LineRecord => record.kind === 'line')
-			.map((record) => record.text);
+		const input = (async function* () {
+			yield* records;
+		})();
+		const lines: string[] = [];
+		for await (const line of toPhysicalLineRecords(input)) {
+			lines.push(line.text);
+		}
+		return lines;
 	};
 
 	expect(await runLines('cat logs/*.txt')).toEqual(['a1', 'a2', 'b1', 'b2']);

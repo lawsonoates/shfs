@@ -138,7 +138,7 @@ test('cat keeps output from readable operands around a missing one', async () =>
 
 	const result = await run('cat /w/a.txt /w/missing.txt /w/b.txt');
 
-	expect(result.stdout.toString()).toBe('hello\nworld');
+	expect(result.stdout.toString()).toBe('hello\nworld\n');
 	expect(result.stderr.toString()).toContain(
 		'cat: /w/missing.txt: No such file or directory'
 	);

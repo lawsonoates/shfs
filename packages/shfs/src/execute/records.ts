@@ -2,6 +2,7 @@ import { Result } from 'better-result';
 
 import type { FS } from '../fs/fs';
 import {
+	type ByteRecord,
 	type FileRecord,
 	formatRecord as formatShellRecord,
 	type LineRecord,
@@ -87,6 +88,28 @@ export async function* fileRecordToLines(
 		return;
 	}
 	yield { ...finalRecord, terminated: false };
+}
+
+/** Replay a regular file as exact physical bytes without a text round trip. */
+export async function* fileRecordToByteStream(
+	fs: FS,
+	record: FileRecord
+): Stream<ByteRecord> {
+	const bytes = await readFileRecordBytes(fs, record);
+	if (!bytes || bytes.length === 0) {
+		return;
+	}
+	yield { bytes, kind: 'bytes' };
+}
+
+export async function readFileRecordBytes(
+	fs: FS,
+	record: FileRecord
+): Promise<Uint8Array | null> {
+	if (await isDirectoryRecord(fs, record)) {
+		return null;
+	}
+	return await fs.readFile(record.path);
 }
 
 export async function isDirectoryRecord(

@@ -17,7 +17,7 @@ import {
 	ShellRuntimeError,
 } from '../diagnostics';
 import type { FS } from '../fs/fs';
-import { formatRecord, type Record as ShellRecord } from '../record';
+import { type Record as ShellRecord, toPhysicalLineRecords } from '../record';
 import { collectRecordStream, toShellFailure } from './record-stream';
 import { lookupVariable, selectByIndex } from './variables';
 
@@ -40,36 +40,14 @@ const ROOT_DIRECTORY = '/';
 const TRAILING_SLASH_REGEX = /\/+$/;
 const NO_GLOB_MATCH_MESSAGE = 'no matches found';
 
-function separate(records: readonly ShellRecord[]): string[] {
+async function separate(records: readonly ShellRecord[]): Promise<string[]> {
 	const lines: string[] = [];
-	let inferred = '';
-	const flush = () => {
-		if (inferred === '') {
-			return;
-		}
-		const split = inferred.split('\n');
-		if (split.at(-1) === '') {
-			split.pop();
-		}
-		lines.push(...split);
-		inferred = '';
-	};
-	for (const record of records) {
-		if (record.kind === 'line' && record.separation === 'explicit') {
-			flush();
-			lines.push(record.text);
-			continue;
-		}
-		if (record.kind === 'bytes') {
-			inferred += formatRecord(record);
-			continue;
-		}
-		inferred += formatRecord(record);
-		if (record.kind !== 'line' || record.terminated !== false) {
-			inferred += '\n';
-		}
+	const input = (async function* () {
+		yield* records;
+	})();
+	for await (const line of toPhysicalLineRecords(input)) {
+		lines.push(line.text);
 	}
-	flush();
 	return lines;
 }
 
@@ -101,7 +79,7 @@ function evaluateCommandSubstitutionEffect(
 			),
 			toShellErrorCause
 		);
-		return Result.ok(separate(records));
+		return Result.ok(await separate(records));
 	});
 }
 

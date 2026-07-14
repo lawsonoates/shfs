@@ -77,14 +77,16 @@ class PhysicalLineDecoder {
 			record.kind === 'line'
 				? record
 				: { kind: 'line' as const, text: formatStdoutRecord(record) };
-		if (line.separation === 'explicit' && this.pendingLine) {
-			lines.push(this.takePendingLine(false));
+		if (line.separation === 'explicit') {
+			if (this.pendingLine) {
+				lines.push(this.takePendingLine(false));
+			}
+			lines.push(line);
+			return lines;
 		}
 		lines.push(...this.appendPhysicalText(line.text, line));
 		if (line.terminated !== false) {
 			lines.push(this.takePendingLine(true, line));
-		} else if (line.separation === 'explicit' && !this.pendingLine) {
-			this.pendingLine = { ...line };
 		}
 		return lines;
 	}

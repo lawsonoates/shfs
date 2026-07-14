@@ -85,3 +85,7 @@ test('line consumers join physical fragments across byte and line records', asyn
 	].join('\n');
 	expect(await run(lineThenByte)).toBe('2');
 });
+
+test('command substitution stream-decodes adjacent byte records', async () => {
+	expect(await run("echo (echo -ne '\\303'; echo -ne '\\277')")).toBe('ÿ');
+});

@@ -2,7 +2,27 @@ import { expect, test } from 'bun:test';
 
 import { MemoryFS } from '@/fs/memory';
 import { head } from '@/operator/head/head';
-import type { FileRecord } from '@/record';
+import { type ByteRecord, type FileRecord, recordsToBytes } from '@/record';
+
+const textDecoder = new TextDecoder();
+
+async function collectHeadLines(
+	fs: MemoryFS,
+	input: AsyncIterable<FileRecord>
+): Promise<string[]> {
+	const records: ByteRecord[] = [];
+	for await (const record of head(fs)(input)) {
+		records.push(record);
+	}
+	const text = textDecoder.decode(
+		recordsToBytes(records, { trailingNewline: true })
+	);
+	const lines = text.split('\n');
+	if (lines.at(-1) === '') {
+		lines.pop();
+	}
+	return lines;
+}
 
 test('head reads first 10 lines by default', async () => {
 	const fs = new MemoryFS();
@@ -15,13 +35,7 @@ test('head reads first 10 lines by default', async () => {
 		yield { kind: 'file', path: '/test.txt' };
 	}
 
-	const result: string[] = [];
-	const transducer = head(fs);
-	for await (const record of transducer(createFileStream())) {
-		if (record.kind === 'line') {
-			result.push(record.text);
-		}
-	}
+	const result = await collectHeadLines(fs, createFileStream());
 
 	expect(result).toHaveLength(10);
 	expect(result[0]).toBe('line1');
@@ -39,13 +53,7 @@ test('head reads fewer lines than requested', async () => {
 		yield { kind: 'file', path: '/short.txt' };
 	}
 
-	const result: string[] = [];
-	const transducer = head(fs);
-	for await (const record of transducer(createFileStream())) {
-		if (record.kind === 'line') {
-			result.push(record.text);
-		}
-	}
+	const result = await collectHeadLines(fs, createFileStream());
 
 	expect(result).toHaveLength(5);
 	expect(result).toEqual(['line1', 'line2', 'line3', 'line4', 'line5']);
@@ -67,13 +75,7 @@ test('head handles multiple files', async () => {
 		yield { kind: 'file', path: '/file2.txt' };
 	}
 
-	const result: string[] = [];
-	const transducer = head(fs);
-	for await (const record of transducer(createFileStream())) {
-		if (record.kind === 'line') {
-			result.push(record.text);
-		}
-	}
+	const result = await collectHeadLines(fs, createFileStream());
 
 	expect(result).toHaveLength(20); // 10 from each file
 	expect(result[0]).toBe('file1-line1');
@@ -90,13 +92,7 @@ test('head with single line file', async () => {
 		yield { kind: 'file', path: '/single.txt' };
 	}
 
-	const result: string[] = [];
-	const transducer = head(fs);
-	for await (const record of transducer(createFileStream())) {
-		if (record.kind === 'line') {
-			result.push(record.text);
-		}
-	}
+	const result = await collectHeadLines(fs, createFileStream());
 
 	expect(result).toEqual(['only line']);
 });

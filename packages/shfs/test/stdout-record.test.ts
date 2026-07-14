@@ -110,12 +110,12 @@ test('physical line decoding preserves explicit logical boundaries', async () =>
 	expect(
 		await decodePhysicalLines([
 			{ bytes: new Uint8Array([0x61]), kind: 'bytes' },
-			{ kind: 'line', separation: 'explicit', text: 'b' },
+			{ kind: 'line', separation: 'explicit', text: 'b\ninside' },
 			{ kind: 'line', separation: 'explicit', text: 'c' },
 		])
 	).toEqual([
 		{ kind: 'line', terminated: false, text: 'a' },
-		{ kind: 'line', separation: 'explicit', text: 'b' },
+		{ kind: 'line', separation: 'explicit', text: 'b\ninside' },
 		{ kind: 'line', separation: 'explicit', text: 'c' },
 	]);
 });

@@ -1,6 +1,9 @@
 import { Result } from 'better-result';
 
-import { fileRecordToLines } from '../../execute/records';
+import {
+	fileRecordToByteStream,
+	fileRecordToLines,
+} from '../../execute/records';
 import type { FS } from '../../fs/fs';
 import {
 	type FileRecord,
@@ -151,23 +154,23 @@ async function* emitJsonRecord(
 	};
 }
 
-async function* emitFileLines(
+async function canReadFile(
 	fs: FS,
 	record: FileRecord,
-	state: CatState,
-	options: Required<CatOptions>,
 	onMissingFile?: (path: string) => void
-): AsyncIterable<LineRecord> {
-	for await (const line of readFileLines(fs, record, onMissingFile)) {
-		const rendered = nextRenderedLine(line.text, state, options);
-		if (rendered.isSkipped) {
-			continue;
-		}
-		yield {
-			...line,
-			text: renderLineText(rendered.text, rendered.lineNumber, options),
-		};
+): Promise<boolean> {
+	if (!onMissingFile) {
+		return true;
 	}
+	const stat = await Result.tryPromise({
+		try: () => fs.stat(record.path),
+		catch: (error) => error,
+	});
+	if (Result.isError(stat)) {
+		onMissingFile(record.path);
+		return false;
+	}
+	return true;
 }
 
 async function* readFileLines(
@@ -175,17 +178,21 @@ async function* readFileLines(
 	record: FileRecord,
 	onMissingFile?: (path: string) => void
 ): AsyncIterable<LineRecord> {
-	if (onMissingFile) {
-		const stat = await Result.tryPromise({
-			try: () => fs.stat(record.path),
-			catch: (error) => error,
-		});
-		if (Result.isError(stat)) {
-			onMissingFile(record.path);
-			return;
-		}
+	if (!(await canReadFile(fs, record, onMissingFile))) {
+		return;
 	}
 	yield* fileRecordToLines(fs, record);
+}
+
+async function* readFileBytes(
+	fs: FS,
+	record: FileRecord,
+	onMissingFile?: (path: string) => void
+): Stream<Record> {
+	if (!(await canReadFile(fs, record, onMissingFile))) {
+		return;
+	}
+	yield* fileRecordToByteStream(fs, record);
 }
 
 async function* expandTransformInput(
@@ -243,7 +250,7 @@ export function cat(
 				yield* emitJsonRecord(record.value, state, normalized);
 				continue;
 			}
-			yield* emitFileLines(fs, record, state, normalized, onMissingFile);
+			yield* readFileBytes(fs, record, onMissingFile);
 		}
 	};
 }

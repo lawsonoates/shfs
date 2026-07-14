@@ -2,9 +2,15 @@ import { expect, test } from 'bun:test';
 
 import { MemoryFS } from '@/fs/memory';
 import { cat } from '@/operator/cat/cat';
-import type { FileRecord, Record as ShellRecord } from '@/record';
+import {
+	type FileRecord,
+	recordsToBytes,
+	type Record as ShellRecord,
+} from '@/record';
 
-test('cat reads file and yields lines', async () => {
+const textDecoder = new TextDecoder();
+
+test('cat replays file bytes', async () => {
 	const fs = new MemoryFS();
 	const filePath = '/test.txt';
 	const fileContent = 'line1\nline2\nline3';
@@ -15,16 +21,15 @@ test('cat reads file and yields lines', async () => {
 		yield { kind: 'file', path: filePath };
 	}
 
-	const lines: string[] = [];
+	const records: ShellRecord[] = [];
 	const transducer = cat(fs);
 	for await (const record of transducer(createFileStream())) {
-		if (record.kind === 'line') {
-			lines.push(record.text);
-		}
+		records.push(record);
 	}
 
-	expect(lines).toEqual(['line1', 'line2', 'line3']);
-	expect(lines[0]).toBe('line1');
+	expect(
+		textDecoder.decode(recordsToBytes(records, { trailingNewline: true }))
+	).toBe(fileContent);
 });
 
 test('cat transforms physical lines across byte record boundaries', async () => {
@@ -40,4 +45,27 @@ test('cat transforms physical lines across byte record boundaries', async () => 
 	}
 
 	expect(records).toEqual([{ kind: 'line', text: 'ab$' }]);
+});
+
+test('cat decodes invalid file bytes only when line transforms require text', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/raw.bin', new Uint8Array([0xfe]));
+	const input = (async function* (): AsyncIterable<ShellRecord> {
+		yield { kind: 'file', path: '/raw.bin' };
+	})();
+
+	const records: ShellRecord[] = [];
+	for await (const record of cat(fs, { showEnds: true })(input)) {
+		records.push(record);
+	}
+
+	expect(records).toEqual([
+		{
+			file: '/raw.bin',
+			kind: 'line',
+			lineNum: 1,
+			terminated: false,
+			text: '\ufffd$',
+		},
+	]);
 });

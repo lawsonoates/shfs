@@ -1,8 +1,13 @@
 import { Result } from 'better-result';
 
-import { fileRecordToLines } from '../../execute/records';
+import { readFileRecordBytes } from '../../execute/records';
 import type { FS } from '../../fs/fs';
-import type { FileRecord, LineRecord } from '../../record';
+import type {
+	ByteRecord,
+	FileRecord,
+	LineRecord,
+	Record as ShellRecord,
+} from '../../record';
 import type { Stream } from '../../stream';
 import type { Transducer } from '../types';
 
@@ -10,6 +15,8 @@ export interface FileEntry {
 	displayPath: string;
 	path: string;
 }
+
+const NEWLINE_BYTE = 0x0a;
 
 export function headLines(n: number): Transducer<LineRecord, LineRecord> {
 	return async function* (input) {
@@ -24,16 +31,34 @@ export function headLines(n: number): Transducer<LineRecord, LineRecord> {
 	};
 }
 
-export function head(fs: FS): Transducer<FileRecord, LineRecord> {
+function takeHeadLines(bytes: Uint8Array, count: number): Uint8Array {
+	if (count <= 0) {
+		return new Uint8Array();
+	}
+	let newlines = 0;
+	for (const [index, byte] of bytes.entries()) {
+		if (byte !== NEWLINE_BYTE) {
+			continue;
+		}
+		newlines += 1;
+		if (newlines === count) {
+			return bytes.slice(0, index + 1);
+		}
+	}
+	return bytes;
+}
+
+function byteRecord(bytes: Uint8Array): ByteRecord | null {
+	return bytes.length > 0 ? { bytes, kind: 'bytes' } : null;
+}
+
+export function head(fs: FS): Transducer<FileRecord, ByteRecord> {
 	return async function* (input) {
 		for await (const file of input) {
-			let emitted = 0;
-			for await (const line of fileRecordToLines(fs, file)) {
-				if (emitted >= 10) {
-					break; // Default to 10 lines
-				}
-				emitted++;
-				yield line;
+			const bytes = await readFileRecordBytes(fs, file);
+			const selected = bytes && byteRecord(takeHeadLines(bytes, 10));
+			if (selected) {
+				yield selected;
 			}
 		}
 	};
@@ -44,7 +69,7 @@ export async function* headFiles(
 	n: number,
 	entries: readonly FileEntry[],
 	onMissingFile: (displayPath: string) => void
-): Stream<LineRecord> {
+): Stream<ShellRecord> {
 	const printHeaders = entries.length > 1;
 	let printedAny = false;
 	for (const entry of entries) {
@@ -66,17 +91,14 @@ export async function* headFiles(
 			yield { kind: 'line', text: `==> ${entry.displayPath} <==` };
 		}
 		printedAny = true;
-		let emitted = 0;
-		for await (const line of fileRecordToLines(fs, {
+		const bytes = await readFileRecordBytes(fs, {
 			isDirectory: false,
 			kind: 'file',
 			path: entry.path,
-		})) {
-			if (emitted >= n) {
-				break;
-			}
-			emitted++;
-			yield line;
+		});
+		const selected = bytes && byteRecord(takeHeadLines(bytes, n));
+		if (selected) {
+			yield selected;
 		}
 	}
 }
