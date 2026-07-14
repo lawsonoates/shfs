@@ -534,6 +534,68 @@ export const expandWordToValuesEffect: (
 		return await expandGlobProductsEffect(products, fs, context, options);
 	});
 
+function invalidIndexError(): ShellRuntimeError {
+	return new ShellRuntimeError({
+		exitCode: 1,
+		message: 'Invalid index value',
+	});
+}
+
+function indexWordsEffect(
+	index: string
+): ShellResult<ExpandedWord[], ShellErrorCause> {
+	return Result.gen(function* () {
+		const parsed = yield* Result.mapError(
+			Result.try({
+				try: () => parse(`count ${index}`),
+				catch: toShellErrorCause,
+			}),
+			toShellErrorCause
+		);
+		const script = yield* Result.mapError(
+			Result.try({
+				try: () => compile(parsed),
+				catch: toShellErrorCause,
+			}),
+			toShellErrorCause
+		);
+		const statement = script.statements[0];
+		if (
+			script.statements.length !== 1 ||
+			statement?.kind !== 'job' ||
+			statement.pipeline.steps.length !== 1
+		) {
+			return yield* invalidIndexError();
+		}
+		const step = statement.pipeline.steps[0];
+		if (step?.cmd !== 'count') {
+			return yield* invalidIndexError();
+		}
+		return Result.ok(step.args.values);
+	});
+}
+
+function selectExpandedIndexEffect(
+	values: string[],
+	index: string,
+	fs: FS,
+	context: BuiltinContext
+): ShellResult<string[], ShellErrorCause> {
+	return Result.gen(async function* () {
+		const words = yield* await indexWordsEffect(index);
+		const expanded: string[] = [];
+		for (const word of words) {
+			expanded.push(
+				...(yield* await expandWordToValuesEffect(word, fs, context, {
+					command: '<index>',
+					emptyGlobOk: true,
+				}))
+			);
+		}
+		return selectByIndex(context, values, expanded.join(' '));
+	});
+}
+
 /**
  * Combine per-part candidate lists left to right. An empty factor elides
  * the entire word.
@@ -610,7 +672,12 @@ function expandPartToCandidatesEffect(
 			case 'variable': {
 				let values = lookupVariable(context, part.name) ?? [];
 				if (part.index !== null) {
-					values = yield* selectByIndex(context, values, part.index);
+					values = yield* await selectExpandedIndexEffect(
+						values,
+						part.index,
+						fs,
+						context
+					);
 				}
 				return Result.ok(
 					part.quoted ? [joinVariable(part.name, values)] : values
@@ -623,7 +690,12 @@ function expandPartToCandidatesEffect(
 					context
 				);
 				if (part.index !== null && part.index !== undefined) {
-					lines = yield* selectByIndex(context, lines, part.index);
+					lines = yield* await selectExpandedIndexEffect(
+						lines,
+						part.index,
+						fs,
+						context
+					);
 				}
 				return Result.ok(part.quoted ? [lines.join('\n')] : lines);
 			}

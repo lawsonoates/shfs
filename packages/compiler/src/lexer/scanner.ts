@@ -143,6 +143,18 @@ interface CharProcessResult {
 	part: TokenWordPart | null;
 }
 
+interface IndexSuffix {
+	raw: string;
+	text: string;
+}
+
+interface IndexState {
+	depth: number;
+	index: string;
+	quote: "'" | '"' | null;
+	raw: string;
+}
+
 /**
  * Merge two flags objects, combining their values.
  */
@@ -725,9 +737,9 @@ export class Scanner {
 		}
 		raw += name;
 
-		const index = this.readIndexSuffix();
-		if (index !== null) {
-			raw += `[${index}]`;
+		const suffix = this.readIndexSuffix();
+		if (suffix !== null) {
+			raw += suffix.raw;
 		}
 
 		const flags = createEmptyFlags();
@@ -739,7 +751,7 @@ export class Scanner {
 			done: false,
 			part: {
 				escaped: false,
-				index,
+				index: suffix?.text ?? null,
 				kind: 'variable',
 				name,
 				quote,
@@ -754,30 +766,69 @@ export class Scanner {
 	 * substitution. Spaces are allowed inside the brackets; newlines are not.
 	 * Returns the inner text, or null when no index expression follows.
 	 */
-	private readIndexSuffix(): string | null {
+	private readIndexSuffix(): IndexSuffix | null {
 		if (this.source.peek() !== '[') {
 			return null;
 		}
 
-		let lookahead = 1;
-		while (true) {
-			const c = this.source.peek(lookahead);
-			if (c === ']') {
-				break;
+		const outerQuote = this.currentWordPartQuote();
+		const state: IndexState = {
+			depth: 1,
+			index: '',
+			quote: null,
+			raw: this.source.advance(), // [
+		};
+
+		while (!this.source.eof) {
+			const char = this.source.peek();
+			if (state.quote !== null) {
+				this.readQuotedIndexChar(state);
+				continue;
 			}
-			if (c === '\n' || c === '\0') {
-				return null;
+
+			const closesOuterQuote =
+				(outerQuote === 'double' && char === '"') ||
+				(outerQuote === 'single' && char === "'");
+			if (char === '\n' || char === '\0' || closesOuterQuote) {
+				return { raw: state.raw, text: `[${state.index}` };
 			}
-			lookahead++;
+
+			if (char === "'" || char === '"') {
+				state.quote = char;
+				state.raw += this.source.advance();
+				state.index += char;
+				continue;
+			}
+
+			if (char === '[') {
+				state.depth += 1;
+			}
+			if (char === ']') {
+				state.depth -= 1;
+			}
+			state.raw += this.source.advance();
+			if (state.depth === 0) {
+				return { raw: state.raw, text: state.index };
+			}
+			state.index += char;
 		}
 
-		this.source.advance(); // [
-		let index = '';
-		while (this.source.peek() !== ']') {
-			index += this.source.advance();
+		return { raw: state.raw, text: `[${state.index}` };
+	}
+
+	private readQuotedIndexChar(state: IndexState): void {
+		const char = this.source.advance();
+		state.raw += char;
+		state.index += char;
+		if (char === '\\' && state.quote === '"' && !this.source.eof) {
+			const escaped = this.source.advance();
+			state.raw += escaped;
+			state.index += escaped;
+			return;
 		}
-		this.source.advance(); // ]
-		return index;
+		if (char === state.quote) {
+			state.quote = null;
+		}
 	}
 
 	/**
@@ -829,10 +880,10 @@ export class Scanner {
 			? result.slice(1, -1)
 			: result.slice(1);
 
-		const index = this.readIndexSuffix();
+		const suffix = this.readIndexSuffix();
 		let raw = `${prefix}${result}`;
-		if (index !== null) {
-			raw += `[${index}]`;
+		if (suffix !== null) {
+			raw += suffix.raw;
 		}
 
 		const flags = createEmptyFlags();
@@ -844,7 +895,7 @@ export class Scanner {
 			done: false,
 			part: {
 				escaped: false,
-				index,
+				index: suffix?.text ?? null,
 				kind: 'commandSub',
 				quote,
 				source,

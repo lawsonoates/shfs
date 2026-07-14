@@ -198,17 +198,17 @@ async function runErase(
 		}
 
 		const current = lookupVariable(runtime.context, target.name);
-		if (current === undefined) {
-			missing = true;
-			continue;
-		}
 		const positions = resolveIndexPositions(
 			runtime.context,
 			target.index,
-			current.length
+			current?.length ?? 0
 		);
 		if (Result.isError(positions)) {
 			throw positions.error;
+		}
+		if (current === undefined) {
+			missing = true;
+			continue;
 		}
 		const removed = new Set(positions.value);
 		const next = current.filter((_value, index) => !removed.has(index + 1));

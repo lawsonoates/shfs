@@ -237,9 +237,7 @@ test('fish expansion: expansion.fish - non-numeric index is an error', async () 
 test('fish expansion: expansion.fish - nested variable indexes select outer values', async () => {
 	const setup = 'set -l outer out1 out2\nset -l inner 1 2';
 	expect(await run(`${setup}\necho $outer[$inner[2]]`)).toBe('out2');
-	expect(await run(`${setup}\necho $outer[$inner[2..1]]`)).toBe(
-		'out2 out1'
-	);
+	expect(await run(`${setup}\necho $outer[$inner[2..1]]`)).toBe('out2 out1');
 });
 
 // expansion.fish: $fish -c 'echo "$abc["' reports Invalid index value.
