@@ -1,6 +1,9 @@
 export interface OutputStream {
+	/** Append a complete diagnostic line. */
 	append(line: string): void;
 	appendLines(lines: readonly string[]): void;
+	/** Append exact physical text without implying a line terminator. */
+	appendText(text: string): void;
 	snapshot(): readonly string[];
 }
 
@@ -9,10 +12,17 @@ export interface StderrSink {
 }
 
 export class BufferedOutputStream implements OutputStream {
-	private readonly lines: string[] = [];
+	private readonly chunks: string[] = [];
+	private hasOutput = false;
+	private needsLineSeparator = false;
 
 	append(line: string): void {
-		this.lines.push(line);
+		if (this.needsLineSeparator) {
+			this.chunks.push('\n');
+		}
+		this.chunks.push(line);
+		this.hasOutput = true;
+		this.needsLineSeparator = true;
 	}
 
 	appendLines(lines: readonly string[]): void {
@@ -21,8 +31,20 @@ export class BufferedOutputStream implements OutputStream {
 		}
 	}
 
+	appendText(text: string): void {
+		if (text === '') {
+			return;
+		}
+		if (this.needsLineSeparator) {
+			this.chunks.push('\n');
+		}
+		this.chunks.push(text);
+		this.hasOutput = true;
+		this.needsLineSeparator = false;
+	}
+
 	snapshot(): readonly string[] {
-		return [...this.lines];
+		return this.hasOutput ? this.chunks.join('').split('\n') : [];
 	}
 }
 
@@ -32,6 +54,10 @@ export class NullOutputStream implements OutputStream {
 	}
 
 	appendLines(_lines: readonly string[]): void {
+		// drop output
+	}
+
+	appendText(_text: string): void {
 		// drop output
 	}
 

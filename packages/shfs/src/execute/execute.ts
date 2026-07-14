@@ -1057,8 +1057,8 @@ function stderrLinesToRecords(lines: readonly string[]): ShellRecord[] {
 	}));
 }
 
-function recordsToText(records: readonly ShellRecord[]): string {
-	return formatRecords(records);
+function recordsToPhysicalText(records: readonly ShellRecord[]): string {
+	return formatRecords(records, { trailingNewline: true });
 }
 
 function recordsToFileBytes(records: readonly ShellRecord[]): Uint8Array {
@@ -1226,10 +1226,7 @@ async function routeStdout(
 			shellRecords.push(...stdoutRecords);
 			return;
 		case 'shellStderr': {
-			const stdoutText = recordsToText(stdoutRecords);
-			if (stdoutText !== '') {
-				context.stderr.append(stdoutText);
-			}
+			context.stderr.appendText(recordsToPhysicalText(stdoutRecords));
 			return;
 		}
 		case 'file':

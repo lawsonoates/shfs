@@ -144,3 +144,29 @@ test('cat keeps output from readable operands around a missing one', async () =>
 	);
 	expect(result.exitCode).toBe(1);
 });
+
+test('stdout redirected to stderr preserves physical fragment adjacency', async () => {
+	const unterminatedThenTerminated = await run(
+		'echo -n first >&2; echo second >&2'
+	);
+	expect(unterminatedThenTerminated.stderr.toString()).toBe('firstsecond\n');
+
+	const terminatedThenTerminated = await run(
+		'echo first >&2; echo second >&2'
+	);
+	expect(terminatedThenTerminated.stderr.toString()).toBe('first\nsecond\n');
+
+	const emptyFragment = await run(
+		'echo -n first >&2; echo -n >&2; echo second >&2'
+	);
+	expect(emptyFragment.stderr.toString()).toBe('firstsecond\n');
+});
+
+test('redirected stdout fragments remain adjacent to diagnostic stderr', async () => {
+	await run('mkdir -p /w');
+	const result = await run('echo -n prefix >&2; cat /w/missing.txt');
+
+	expect(result.stderr.toString()).toBe(
+		'prefixcat: /w/missing.txt: No such file or directory'
+	);
+});
