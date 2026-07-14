@@ -79,7 +79,7 @@ test('writes stream output to redirected file', async () => {
 	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('output.txt'))).toBe(
-		'alpha\nbeta\ngamma'
+		'alpha\nbeta\ngamma\n'
 	);
 });
 
@@ -143,7 +143,7 @@ test('supports combined input and output redirection', async () => {
 	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('copy.txt'))).toBe(
-		'alpha\nbeta\ngamma'
+		'alpha\nbeta\ngamma\n'
 	);
 });
 
@@ -237,7 +237,29 @@ test('variable-expanded output redirection resolves relative to cwd', async () =
 	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('/workspace/logs.txt'))).toBe(
-		'hello'
+		'hello\n'
+	);
+});
+
+test('output redirection preserves line termination metadata', async () => {
+	const fs = new MemoryFS();
+
+	const multiline = execute(
+		compile(parse("echo -e 'a\\nb' > /multiline.txt")),
+		fs
+	);
+	(await collectRecordStream(multiline)).unwrap();
+	const unterminated = execute(
+		compile(parse('echo -n tail > /unterminated.txt')),
+		fs
+	);
+	(await collectRecordStream(unterminated)).unwrap();
+
+	expect(textDecoder.decode(await fs.readFile('/multiline.txt'))).toBe(
+		'a\nb\n'
+	);
+	expect(textDecoder.decode(await fs.readFile('/unterminated.txt'))).toBe(
+		'tail'
 	);
 });
 
@@ -265,7 +287,7 @@ test('command substitution can produce an output redirection target', async () =
 	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('/workspace/out.txt'))).toBe(
-		'hello'
+		'hello\n'
 	);
 });
 
@@ -383,7 +405,7 @@ test('grep reuses a resolved output redirect target for conflict checks and writ
 	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('/workspace/first.txt'))).toBe(
-		'match'
+		'match\n'
 	);
 	expect(textDecoder.decode(await fs.readFile('/workspace/which.txt'))).toBe(
 		'second.txt'

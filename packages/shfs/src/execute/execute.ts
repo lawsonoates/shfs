@@ -1055,12 +1055,19 @@ function recordsToText(records: readonly ShellRecord[]): string {
 	return formatRecords(records);
 }
 
+function recordsToFileText(records: readonly ShellRecord[]): string {
+	return formatRecords(records, { trailingNewline: true });
+}
+
 function mergeChannelText(stdoutText: string, stderrText: string): string {
 	if (stdoutText === '') {
 		return stderrText;
 	}
 	if (stderrText === '') {
 		return stdoutText;
+	}
+	if (stdoutText.endsWith('\n')) {
+		return `${stdoutText}${stderrText}`;
 	}
 	return `${stdoutText}\n${stderrText}`;
 }
@@ -1120,7 +1127,7 @@ async function routeStepOutput(params: {
 		stdoutDestination.path === stderrDestination.path;
 	if (writesToSameFile) {
 		const mergedText = mergeChannelText(
-			recordsToText(stdoutRecords),
+			recordsToFileText(stdoutRecords),
 			stderrLines.join('\n')
 		);
 		await writeToFileOrReport({
@@ -1192,7 +1199,7 @@ async function routeStdout(
 		case 'file':
 			await writeToFileOrReport({
 				append: destination.append,
-				content: recordsToText(stdoutRecords),
+				content: recordsToFileText(stdoutRecords),
 				context,
 				fs,
 				path: destination.path,
