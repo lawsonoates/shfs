@@ -566,7 +566,8 @@ export async function* runFunctionCall(
 	fs: FS,
 	context: NormalizedExecuteContext,
 	input: Stream<ShellRecord> | null = null,
-	vars?: ReadonlyMap<string, string[]>
+	vars?: ReadonlyMap<string, string[]>,
+	sharedInput?: ShellInput
 ): AsyncGenerator<ShellRecord, void> {
 	const local = new Map<string, string[]>();
 	for (const [name, values] of vars ?? []) {
@@ -578,7 +579,9 @@ export async function* runFunctionCall(
 		local.set(name, value === undefined ? [] : [value]);
 	});
 	const stdin = context.stdin;
-	context.stdin = input ? createShellInput(input) : undefined;
+	context.stdin = input
+		? (sharedInput ?? createShellInput(input))
+		: undefined;
 	context.scopes.push({ barrier: true, vars: local });
 	try {
 		// Fish semantics: the body sees the caller's $status, but a function

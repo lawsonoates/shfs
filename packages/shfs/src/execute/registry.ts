@@ -1016,7 +1016,7 @@ CommandRegistry.register('count', {
 
 CommandRegistry.register('call', {
 	kind: 'stream',
-	handler: ({ step, fs, input, context, vars }) => {
+	handler: ({ step, fs, input, sharedInput, context, vars }) => {
 		return fromRecordGenerator(
 			(async function* (): Stream<ShellRecord> {
 				const args = await runOrReport(
@@ -1054,6 +1054,10 @@ CommandRegistry.register('call', {
 				if (!resolved.value.closed && resolved.value.path) {
 					source = lineRecordsFromPath(fs, resolved.value.path);
 				}
+				const inheritedInput =
+					resolved.value.closed || resolved.value.path
+						? undefined
+						: sharedInput;
 				const executeModule = await import('./execute');
 				yield* executeModule.runFunctionCall(
 					definition,
@@ -1061,7 +1065,8 @@ CommandRegistry.register('call', {
 					fs,
 					context,
 					source,
-					vars
+					vars,
+					inheritedInput
 				);
 			})()
 		);

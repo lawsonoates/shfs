@@ -83,6 +83,52 @@ test('partial line consumers stream-decode split UTF-8 inherited stdin', async (
 	expect(await runBytes(script)).toEqual(UTF8_ENCODER.encode('ÿ\nrest\n'));
 });
 
+test('nested functions share unread inherited stdin with their caller', async () => {
+	const unreadSuffix = new Uint8Array([0xfe, 0xff, 0x0a]);
+	fs.setFile(
+		'/tmp/nested-shared-input.bin',
+		new Uint8Array([...UTF8_ENCODER.encode('first\n'), ...unreadSuffix])
+	);
+	const script = [
+		'function read_one',
+		'    read value',
+		'end',
+		'function outer',
+		'    read_one > /tmp/nested-read-output.txt',
+		'    cat',
+		'end',
+		'cat /tmp/nested-shared-input.bin | outer',
+	].join('\n');
+
+	expect(await runBytes(script)).toEqual(unreadSuffix);
+});
+
+test('explicit nested-function pipelines stay isolated from inherited stdin', async () => {
+	fs.setFile('/tmp/nested-function-input.txt', 'redirected\n');
+	const script = [
+		'function read_one',
+		'    read value',
+		'    echo $value',
+		'end',
+		'function outer',
+		'    echo local | read_one',
+		'    cat',
+		'end',
+		'echo outer | outer',
+	].join('\n');
+
+	expect(await run(script)).toBe('local\nouter');
+
+	const redirectedScript = [
+		'function outer_redirect',
+		'    read_one < /tmp/nested-function-input.txt',
+		'    cat',
+		'end',
+		'echo outer | outer_redirect',
+	].join('\n');
+	expect(await run(redirectedScript)).toBe('redirected\nouter');
+});
+
 test('function definitions persist across shell API invocations', async () => {
 	await run('function keeper\n    echo kept\nend');
 	expect(await run('keeper')).toBe('kept');
