@@ -19,7 +19,7 @@ import {
 import type { FS } from '../fs/fs';
 import { formatRecord } from '../record';
 import { collectRecordStream, toShellFailure } from './record-stream';
-import { lookupVariable, selectByIndex } from './variables';
+import { lookupVariable, resolveIndexPositions } from './variables';
 
 function toShellErrorCause(cause: unknown): ShellErrorCause {
 	return toShellFailure(cause) as ShellErrorCause;
@@ -39,6 +39,8 @@ const MULTIPLE_SLASH_REGEX = /\/+/g;
 const ROOT_DIRECTORY = '/';
 const TRAILING_SLASH_REGEX = /\/+$/;
 const NO_GLOB_MATCH_MESSAGE = 'no matches found';
+const INDEX_ATOM_WHITESPACE_REGEX = /\s/;
+const INDEX_PARSE_BOUNDARY = '__shfs_index_boundary__';
 
 /**
  * Execute a command substitution and return its output lines.
@@ -496,6 +498,8 @@ export interface ExpandWordOptions {
 	command?: string;
 	/** Expand unmatched globs to an empty list instead of failing. */
 	emptyGlobOk?: boolean;
+	/** Expand glob parts against the filesystem. */
+	expandGlobs?: boolean;
 }
 
 /**
@@ -528,11 +532,110 @@ export const expandWordToValuesEffect: (
 		}
 
 		const products = cartesianProduct(partCandidates);
-		if (!hasGlob) {
+		if (!hasGlob || options?.expandGlobs === false) {
 			return Result.ok(products);
 		}
 		return await expandGlobProductsEffect(products, fs, context, options);
 	});
+
+function invalidIndexError(): ShellRuntimeError {
+	return new ShellRuntimeError({
+		exitCode: 1,
+		message: 'Invalid index value',
+	});
+}
+
+function indexWordsEffect(
+	index: string
+): ShellResult<ExpandedWord[], ShellErrorCause> {
+	return Result.gen(function* () {
+		const parsed = yield* Result.mapError(
+			Result.try({
+				try: () => parse(`count ${index} ${INDEX_PARSE_BOUNDARY}`),
+				catch: toShellErrorCause,
+			}),
+			toShellErrorCause
+		);
+		const script = yield* Result.mapError(
+			Result.try({
+				try: () => compile(parsed),
+				catch: toShellErrorCause,
+			}),
+			toShellErrorCause
+		);
+		const statement = script.statements[0];
+		if (
+			script.statements.length !== 1 ||
+			statement?.kind !== 'job' ||
+			statement.pipeline.steps.length !== 1
+		) {
+			return yield* invalidIndexError();
+		}
+		const step = statement.pipeline.steps[0];
+		if (step?.cmd !== 'count' || (step.redirections?.length ?? 0) > 0) {
+			return yield* invalidIndexError();
+		}
+		const boundary = step.args.values.at(-1);
+		if (
+			boundary?.kind !== 'literal' ||
+			boundary.value !== INDEX_PARSE_BOUNDARY
+		) {
+			return yield* invalidIndexError();
+		}
+		return Result.ok(step.args.values.slice(0, -1));
+	});
+}
+
+/** Expand deferred Fish slice atoms, then resolve their 1-based positions. */
+export const resolveExpandedIndexPositionsEffect: (
+	index: string,
+	length: number,
+	fs: FS,
+	context: BuiltinContext
+) => ShellResult<number[], ShellErrorCause> = (index, length, fs, context) =>
+	Result.gen(async function* () {
+		const words = yield* await indexWordsEffect(index);
+		const expanded: string[] = [];
+		for (const word of words) {
+			expanded.push(
+				...(yield* await expandWordToValuesEffect(word, fs, context, {
+					expandGlobs: false,
+				}))
+			);
+		}
+		for (const atom of expanded) {
+			if (INDEX_ATOM_WHITESPACE_REGEX.test(atom)) {
+				return yield* invalidIndexError();
+			}
+		}
+		return resolveIndexPositions(context, expanded.join(' '), length, {
+			allowVariableReferences: false,
+		});
+	});
+
+function selectExpandedIndexEffect(
+	values: string[],
+	index: string,
+	fs: FS,
+	context: BuiltinContext
+): ShellResult<string[], ShellErrorCause> {
+	return Result.gen(async function* () {
+		const positions = yield* await resolveExpandedIndexPositionsEffect(
+			index,
+			values.length,
+			fs,
+			context
+		);
+		const selected: string[] = [];
+		for (const position of positions) {
+			const value = values[position - 1];
+			if (value !== undefined) {
+				selected.push(value);
+			}
+		}
+		return Result.ok(selected);
+	});
+}
 
 /**
  * Combine per-part candidate lists left to right. An empty factor elides
@@ -610,9 +713,16 @@ function expandPartToCandidatesEffect(
 			case 'variable': {
 				let values = lookupVariable(context, part.name) ?? [];
 				if (part.index !== null) {
-					values = yield* selectByIndex(context, values, part.index);
+					values = yield* await selectExpandedIndexEffect(
+						values,
+						part.index,
+						fs,
+						context
+					);
 				}
-				return Result.ok(part.quoted ? [values.join(' ')] : values);
+				return Result.ok(
+					part.quoted ? [joinVariable(part.name, values)] : values
+				);
 			}
 			case 'commandSub': {
 				let lines = yield* await evaluateCommandSubstitutionEffect(
@@ -621,7 +731,12 @@ function expandPartToCandidatesEffect(
 					context
 				);
 				if (part.index !== null && part.index !== undefined) {
-					lines = yield* selectByIndex(context, lines, part.index);
+					lines = yield* await selectExpandedIndexEffect(
+						lines,
+						part.index,
+						fs,
+						context
+					);
 				}
 				return Result.ok(part.quoted ? [lines.join('\n')] : lines);
 			}
@@ -634,4 +749,14 @@ function expandPartToCandidatesEffect(
 			}
 		}
 	});
+}
+
+function joinVariable(name: string, values: readonly string[]): string {
+	if (!name.endsWith('PATH')) {
+		return values.join(' ');
+	}
+	if (name === 'MANPATH') {
+		return values.join(':');
+	}
+	return values.map((value) => (value === '' ? '.' : value)).join(':');
 }

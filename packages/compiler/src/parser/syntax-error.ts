@@ -138,3 +138,14 @@ export class UnterminatedQuoteError extends ParseSyntaxError {
 		this.quoteChar = quoteChar;
 	}
 }
+
+/**
+ * Exception thrown when a token contains an invalid escape sequence.
+ */
+export class InvalidEscapeError extends ParseSyntaxError {
+	constructor(sequence: string, span: SourceSpan) {
+		super(`Invalid escape sequence '${sequence}'`, span, {
+			code: 'invalid-escape',
+		});
+	}
+}

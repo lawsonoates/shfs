@@ -11,15 +11,12 @@ export interface OperatorEntry {
 /**
  * Multi-character operators sorted by length (longest first) for greedy matching.
  *
- * For the fish subset, we only support:
- * - | (pipe)
- * - > (output redirection - Phase 2)
- * - < (input redirection - Phase 2)
- *
- * NOT supported: &&, ||, >>, &>, >?, ;, &
+ * The scanner consumes this table greedily before checking single-character
+ * operators.
  */
 export const OPERATORS: readonly OperatorEntry[] = [
-	// No multi-char operators in the subset
+	{ kind: TokenKind.AND_AND, pattern: '&&' },
+	{ kind: TokenKind.OR_OR, pattern: '||' },
 ];
 
 /**
