@@ -127,6 +127,160 @@ test('scanner emits mixed command substitution words as one token with ordered p
 	]);
 });
 
+test('scanner preserves escaped hashes inside command substitutions', () => {
+	const tokens = new Scanner('echo (echo foo\\ #bar) after').tokenize();
+
+	expect(tokens.map((token) => token.spelling)).toEqual([
+		'echo',
+		'(echo foo\\ #bar)',
+		'after',
+		'',
+	]);
+});
+
+test('scanner preserves hashes after non-separator characters', () => {
+	// features-ampersand-nobg-in-token1.fish keeps a lone `&` inside a word.
+	const innerWords = [
+		'a&#b',
+		'a&&&#b',
+		'a\\&&#b',
+		'a\\|#b',
+		'a\\;#b',
+		'a\\<#b',
+		'a\\>#b',
+		'a\\\n#b',
+	];
+
+	for (const innerWord of innerWords) {
+		const input = `echo (echo ${innerWord}) after`;
+		const tokens = new Scanner(input).tokenize();
+
+		expect(tokens.map((token) => token.spelling)).toEqual([
+			'echo',
+			`(echo ${innerWord})`,
+			'after',
+			'',
+		]);
+	}
+});
+
+test('scanner recognizes substitution comments after lexer separators', () => {
+	const separators = ['&&', '|', '||', ';', '<', '>', '\n'];
+
+	for (const separator of separators) {
+		const substitution = `(echo ok${separator}#comment\n echo after)`;
+		const tokens = new Scanner(`echo ${substitution} tail`).tokenize();
+
+		expect(tokens.map((token) => token.spelling)).toEqual([
+			'echo',
+			substitution,
+			'tail',
+			'',
+		]);
+	}
+});
+
+test('scanner requires a real command substitution closing delimiter', () => {
+	for (const input of ['(echo #)', '(echo (echo nested) #))']) {
+		expect(() => scanFirstWord(input)).toThrow();
+	}
+
+	for (const input of ['(echo #)\n)', '(echo (echo nested) #))\n)']) {
+		expect(scanFirstWord(input).spelling).toBe(input);
+	}
+});
+
+test('scanner keeps brackets inside indexed command substitutions', () => {
+	const cases = [
+		{
+			expectedIndex: "(string replace ] '' 1])",
+			input: "$vals[(string replace ] '' 1])]",
+		},
+		{
+			expectedIndex: '(string replace [ "" 1[)',
+			input: '$vals[(string replace [ "" 1[)]',
+		},
+		{
+			expectedIndex: '(string replace "[]" "" "1[]")',
+			input: '$vals[(string replace "[]" "" "1[]")]',
+		},
+	];
+
+	for (const { expectedIndex, input } of cases) {
+		const token = scanFirstWord(input);
+		const [part] = token.wordParts;
+		if (part?.kind !== 'variable') {
+			throw new Error('Expected indexed variable word part');
+		}
+		expect(token.spelling).toBe(input);
+		expect(part.index).toBe(expectedIndex);
+	}
+});
+
+test('scanner tracks nested and escaped substitution delimiters in indexes', () => {
+	const cases = [
+		{
+			expectedIndex: '(echo (string replace ] "" 1]))',
+			input: '$vals[(echo (string replace ] "" 1]))]',
+		},
+		{
+			expectedIndex: '(echo \\) ] 1)',
+			input: '$vals[(echo \\) ] 1)]',
+		},
+	];
+
+	for (const { expectedIndex, input } of cases) {
+		const token = scanFirstWord(input);
+		const [part] = token.wordParts;
+		if (part?.kind !== 'variable') {
+			throw new Error('Expected indexed variable word part');
+		}
+		expect(token.spelling).toBe(input);
+		expect(part.index).toBe(expectedIndex);
+	}
+});
+
+test('scanner keeps nested substitution terminators inside variable indexes', () => {
+	const cases = [
+		{
+			expectedIndex: '(echo 1\n)',
+			expectedSpelling: '$vals[(echo 1\n)]',
+			input: '$vals[(echo 1\n)]',
+		},
+		{
+			expectedIndex: '(echo "1")',
+			expectedSpelling: '$vals[(echo "1")]',
+			input: '"$vals[(echo "1")]"',
+		},
+	];
+
+	for (const { expectedIndex, expectedSpelling, input } of cases) {
+		const token = scanFirstWord(input);
+		const part = token.wordParts.find(
+			(wordPart) => wordPart.kind === 'variable'
+		);
+		if (part?.kind !== 'variable') {
+			throw new Error('Expected indexed variable word part');
+		}
+		expect(token.spelling).toBe(expectedSpelling);
+		expect(part.index).toBe(expectedIndex);
+	}
+});
+
+test('scanner ignores delimiters in indexed substitution comments', () => {
+	const cases = ['$vals[(echo 1 #)\n)]', '$vals[(echo 1 # ) ] "\n)]'];
+
+	for (const input of cases) {
+		const token = scanFirstWord(input);
+		const [part] = token.wordParts;
+		if (part?.kind !== 'variable') {
+			throw new Error('Expected indexed variable word part');
+		}
+		expect(token.spelling).toBe(input);
+		expect(part.index).toBe(input.slice('$vals['.length, -1));
+	}
+});
+
 test('scanner keeps quoted wildcard characters as literal metadata', () => {
 	const token = scanFirstWord('prefix"*"suffix');
 
@@ -159,4 +313,51 @@ test('scanner keeps escaped wildcard characters as literal metadata', () => {
 		{ escaped: true, kind: 'literal', text: '*' },
 		{ escaped: false, kind: 'literal', text: 'bar' },
 	]);
+});
+
+test('scanner decodes Fish backspace escapes', () => {
+	expect(scanFirstWord('A\\bB').spelling).toBe('A\bB');
+});
+
+test('scanner applies Fish byte escape boundaries', () => {
+	expect(scanFirstWord('\\x1').spelling).toBe('\u0001');
+	expect(scanFirstWord('\\X41').spelling).toBe('A');
+	expect(scanFirstWord('\\x1G').spelling).toBe('\u0001G');
+	expect(scanFirstWord('\\X41Z').spelling).toBe('AZ');
+	expect(scanFirstWord('\\xC3\\xB6').spelling).toBe('ö');
+
+	for (const escapeSequence of ['\\x', '\\X', '\\xNotHex', '\\X-not']) {
+		expect(() =>
+			new Scanner(`echo ${escapeSequence}`).tokenize()
+		).toThrow();
+	}
+});
+
+test('scanner rejects octal escapes above the Fish ASCII limit', () => {
+	expect(scanFirstWord('\\177').spelling).toBe('\u007f');
+
+	for (const escapeSequence of ['\\200', '\\400', '\\777']) {
+		expect(() =>
+			new Scanner(`echo ${escapeSequence}`).tokenize()
+		).toThrow();
+	}
+});
+
+test('scanner applies Fish Unicode escape boundaries', () => {
+	expect(scanFirstWord('\\U0010FFFF').spelling).toBe(
+		String.fromCodePoint(0x10_ff_ff)
+	);
+	expect(scanFirstWord('\\U1').spelling).toBe('\u0001');
+	expect(scanFirstWord('\\uD800').spelling).toBe('\ufffd');
+
+	for (const escapeSequence of [
+		'\\U00110000',
+		'\\UFFFFFFFF',
+		'\\U',
+		'\\utest',
+	]) {
+		expect(() =>
+			new Scanner(`echo ${escapeSequence}`).tokenize()
+		).toThrow();
+	}
 });

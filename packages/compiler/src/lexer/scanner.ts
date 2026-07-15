@@ -1,4 +1,9 @@
+import {
+	InvalidEscapeError,
+	UnmatchedParenError,
+} from '../parser/syntax-error';
 import { LexerState, StateContext } from './context';
+import { OPERATORS, type OperatorEntry, SINGLE_CHAR_OPS } from './operators';
 import { type SourcePosition, SourceSpan } from './position';
 import { type SourceReader, StringSourceReader } from './source-reader';
 import {
@@ -9,6 +14,27 @@ import {
 	type TokenWordPart,
 	type TokenWordPartQuote,
 } from './token';
+
+const BYTE_DECODER = new TextDecoder();
+const ASCII_LETTER_REGEX = /^[A-Za-z]$/;
+const HEX_DIGIT_REGEX = /^[\dA-Fa-f]$/;
+const OCTAL_DIGIT_REGEX = /^[0-7]$/;
+const MAX_OCTAL_ESCAPE_VALUE = 0o177;
+const MAX_SHORT_UNICODE_ESCAPE_VALUE = 0xff_ff;
+const MAX_UNICODE_ESCAPE_VALUE = 0x10_ff_ff;
+const MIN_UNICODE_SURROGATE = 0xd8_00;
+const MAX_UNICODE_SURROGATE = 0xdf_ff;
+
+const CHARACTER_ESCAPES: Readonly<Record<string, string>> = {
+	a: '\u0007',
+	b: '\b',
+	e: '\u001b',
+	f: '\f',
+	n: '\n',
+	r: '\r',
+	t: '\t',
+	v: '\v',
+};
 
 function isDigitCode(code: number): boolean {
 	return code >= 48 && code <= 57;
@@ -49,21 +75,6 @@ function classifySpellingKind(spelling: string): TokenKind {
 		}
 	}
 	return TokenKind.NAME;
-}
-
-function singleCharOperatorKind(c: string): TokenKind | null {
-	switch (c) {
-		case '|':
-			return TokenKind.PIPE;
-		case ';':
-			return TokenKind.SEMICOLON;
-		case '<':
-			return TokenKind.LESS;
-		case '>':
-			return TokenKind.GREAT;
-		default:
-			return null;
-	}
 }
 
 function isSpecialChar(c: string): boolean {
@@ -128,6 +139,26 @@ interface CharProcessResult {
 	part: TokenWordPart | null;
 }
 
+interface IndexSuffix {
+	raw: string;
+	text: string;
+}
+
+interface IndexState {
+	commandSubstitutionDepth: number;
+	depth: number;
+	index: string;
+	quote: "'" | '"' | null;
+	raw: string;
+}
+
+interface SubstitutionBoundaryState {
+	atTokenStart: boolean;
+	comment: boolean;
+	index: number;
+	quote: "'" | '"' | null;
+}
+
 /**
  * Merge two flags objects, combining their values.
  */
@@ -149,6 +180,7 @@ function mergeFlags(
  *
  * This lexer implements a fish-inspired subset with:
  * - Pipelines (|)
+ * - Statement and logical separators (;, &&, ||)
  * - Command substitution (...)
  * - Globbing (* ? [...])
  * - Single quotes (literal, no escapes)
@@ -162,7 +194,6 @@ function mergeFlags(
  * - Control flow (if, for, while, etc.)
  * - Functions
  * - Background (&)
- * - Semicolons (;)
  * - and/or/not keywords
  * - Tilde expansion (~)
  * - Recursive globbing (**)
@@ -237,20 +268,22 @@ export class Scanner {
 			return this.makeToken(TokenKind.NEWLINE, '\n', start);
 		}
 
-		// Multi-char operators: && and ||
-		if (c0 === '&' && this.source.peek(1) === '&') {
-			this.source.advance();
-			this.source.advance();
-			return this.makeToken(TokenKind.AND_AND, '&&', start);
-		}
-		if (c0 === '|' && this.source.peek(1) === '|') {
-			this.source.advance();
-			this.source.advance();
-			return this.makeToken(TokenKind.OR_OR, '||', start);
+		const multiCharOperator = this.peekMultiCharOperator();
+		if (multiCharOperator !== null) {
+			let remainingCharacters = multiCharOperator.pattern.length;
+			while (remainingCharacters > 0) {
+				this.source.advance();
+				remainingCharacters--;
+			}
+			return this.makeToken(
+				multiCharOperator.kind,
+				multiCharOperator.pattern,
+				start
+			);
 		}
 
 		// Single-char operators
-		const singleOp = singleCharOperatorKind(c0);
+		const singleOp = SINGLE_CHAR_OPS.get(c0) ?? null;
 		if (singleOp !== null) {
 			this.source.advance();
 			return this.makeToken(singleOp, c0, start);
@@ -362,11 +395,10 @@ export class Scanner {
 				break;
 			}
 
-			// && ends a word (|| is covered by "|" being a boundary).
+			// Multi-character operators end a word.
 			if (
 				!this.stateCtx.inQuotes &&
-				c === '&' &&
-				this.source.peek(1) === '&'
+				this.peekMultiCharOperator() !== null
 			) {
 				break;
 			}
@@ -574,20 +606,121 @@ export class Scanner {
 			};
 		}
 
-		// Outside quotes, backslash escapes any character (removes special meaning)
-		this.source.advance();
+		// Outside quotes, fish decodes character, byte, numeric, and Unicode
+		// escapes. Unknown escapes still quote the following character.
+		const escaped = this.readUnquotedEscape(start);
 		return {
-			chars: next,
+			chars: escaped,
 			flags: createEmptyFlags(),
 			done: false,
 			part: this.createWordPart(
 				'literal',
-				next,
+				escaped,
 				start.span(this.source.position),
 				quote,
 				true
 			),
 		};
+	}
+
+	private readUnquotedEscape(start: SourcePosition): string {
+		const marker = this.source.peek();
+		const character = CHARACTER_ESCAPES[marker];
+		if (character !== undefined) {
+			this.source.advance();
+			return character;
+		}
+
+		if (marker === 'x' || marker === 'X') {
+			if (!HEX_DIGIT_REGEX.test(this.source.peek(1))) {
+				this.source.advance();
+				throw new InvalidEscapeError(
+					`\\${marker}`,
+					start.span(this.source.position)
+				);
+			}
+			return this.readByteEscapes();
+		}
+
+		if (marker === 'u') {
+			return this.readCodePointEscape(
+				start,
+				4,
+				MAX_SHORT_UNICODE_ESCAPE_VALUE
+			);
+		}
+
+		if (marker === 'U') {
+			return this.readCodePointEscape(start, 8, MAX_UNICODE_ESCAPE_VALUE);
+		}
+
+		if (OCTAL_DIGIT_REGEX.test(marker)) {
+			const digits = this.readDigits(OCTAL_DIGIT_REGEX, 3);
+			const value = Number.parseInt(digits, 8);
+			if (value > MAX_OCTAL_ESCAPE_VALUE) {
+				throw new InvalidEscapeError(
+					`\\${digits}`,
+					start.span(this.source.position)
+				);
+			}
+			return String.fromCodePoint(value);
+		}
+
+		if (marker === 'c' && ASCII_LETTER_REGEX.test(this.source.peek(1))) {
+			this.source.advance();
+			return String.fromCodePoint(
+				this.source.advance().toUpperCase().charCodeAt(0) % 32
+			);
+		}
+
+		return this.source.advance();
+	}
+
+	private readByteEscapes(): string {
+		const bytes: number[] = [];
+		while (true) {
+			this.source.advance(); // x / X
+			bytes.push(
+				Number.parseInt(this.readDigits(HEX_DIGIT_REGEX, 2), 16)
+			);
+			if (
+				this.source.peek() !== '\\' ||
+				!['x', 'X'].includes(this.source.peek(1)) ||
+				!HEX_DIGIT_REGEX.test(this.source.peek(2))
+			) {
+				break;
+			}
+			this.source.advance(); // backslash before the next byte
+		}
+		return BYTE_DECODER.decode(Uint8Array.from(bytes));
+	}
+
+	private readCodePointEscape(
+		start: SourcePosition,
+		maxDigits: number,
+		maxValue: number
+	): string {
+		const prefix = this.source.advance(); // u / U
+		const digits = this.readDigits(HEX_DIGIT_REGEX, maxDigits);
+		const value = Number.parseInt(digits, 16);
+		if (digits === '' || value > maxValue) {
+			throw new InvalidEscapeError(
+				`\\${prefix}${digits}`,
+				start.span(this.source.position)
+			);
+		}
+		if (value >= MIN_UNICODE_SURROGATE && value <= MAX_UNICODE_SURROGATE) {
+			return '\ufffd';
+		}
+		return String.fromCodePoint(value);
+	}
+
+	private readDigits(pattern: RegExp, limit: number): string {
+		let digits = '';
+		while (digits.length < limit && pattern.test(this.source.peek())) {
+			digits += this.source.advance();
+		}
+		return digits;
 	}
 
 	// ─────────────────────────────────────────────────────────
@@ -634,9 +767,9 @@ export class Scanner {
 		}
 		raw += name;
 
-		const index = this.readIndexSuffix();
-		if (index !== null) {
-			raw += `[${index}]`;
+		const suffix = this.readIndexSuffix();
+		if (suffix !== null) {
+			raw += suffix.raw;
 		}
 
 		const flags = createEmptyFlags();
@@ -648,7 +781,7 @@ export class Scanner {
 			done: false,
 			part: {
 				escaped: false,
-				index,
+				index: suffix?.text ?? null,
 				kind: 'variable',
 				name,
 				quote,
@@ -663,30 +796,136 @@ export class Scanner {
 	 * substitution. Spaces are allowed inside the brackets; newlines are not.
 	 * Returns the inner text, or null when no index expression follows.
 	 */
-	private readIndexSuffix(): string | null {
+	private readIndexSuffix(): IndexSuffix | null {
 		if (this.source.peek() !== '[') {
 			return null;
 		}
 
-		let lookahead = 1;
-		while (true) {
-			const c = this.source.peek(lookahead);
-			if (c === ']') {
-				break;
+		const outerQuote = this.currentWordPartQuote();
+		const state: IndexState = {
+			commandSubstitutionDepth: 0,
+			depth: 1,
+			index: '',
+			quote: null,
+			raw: this.source.advance(), // [
+		};
+
+		while (!this.source.eof) {
+			const char = this.source.peek();
+			if (state.quote !== null) {
+				this.readQuotedIndexChar(state);
+				continue;
 			}
-			if (c === '\n' || c === '\0') {
-				return null;
+
+			if (this.readIndexSubstitutionComment(state, char)) {
+				continue;
 			}
-			lookahead++;
+
+			if (
+				state.commandSubstitutionDepth === 0 &&
+				this.endsIndexBeforeCharacter(char, outerQuote)
+			) {
+				return { raw: state.raw, text: `[${state.index}` };
+			}
+
+			if (char === '\\') {
+				this.readEscapedIndexChar(state);
+				continue;
+			}
+
+			if (char === "'" || char === '"') {
+				state.quote = char;
+				state.raw += this.source.advance();
+				state.index += char;
+				continue;
+			}
+
+			this.updateIndexDelimiterDepths(state, char);
+			state.raw += this.source.advance();
+			if (state.depth === 0) {
+				return { raw: state.raw, text: state.index };
+			}
+			state.index += char;
 		}
 
-		this.source.advance(); // [
-		let index = '';
-		while (this.source.peek() !== ']') {
-			index += this.source.advance();
+		return { raw: state.raw, text: `[${state.index}` };
+	}
+
+	private readIndexSubstitutionComment(
+		state: IndexState,
+		char: string
+	): boolean {
+		if (
+			char !== '#' ||
+			state.commandSubstitutionDepth === 0 ||
+			!this.canStartSubstitutionComment(state.index)
+		) {
+			return false;
 		}
-		this.source.advance(); // ]
-		return index;
+
+		const comment = this.readSubstitutionComment();
+		state.raw += comment;
+		state.index += comment;
+		return true;
+	}
+
+	private endsIndexBeforeCharacter(
+		char: string,
+		outerQuote: TokenWordPartQuote
+	): boolean {
+		return (
+			char === '\n' ||
+			char === '\0' ||
+			(outerQuote === 'double' && char === '"') ||
+			(outerQuote === 'single' && char === "'")
+		);
+	}
+
+	private readEscapedIndexChar(state: IndexState): void {
+		const escapeMarker = this.source.advance();
+		state.raw += escapeMarker;
+		state.index += escapeMarker;
+		if (this.source.eof || this.source.peek() === '\n') {
+			return;
+		}
+
+		const escaped = this.source.advance();
+		state.raw += escaped;
+		state.index += escaped;
+	}
+
+	private updateIndexDelimiterDepths(state: IndexState, char: string): void {
+		if (char === '(') {
+			state.commandSubstitutionDepth += 1;
+			return;
+		}
+		if (char === ')' && state.commandSubstitutionDepth > 0) {
+			state.commandSubstitutionDepth -= 1;
+			return;
+		}
+		if (state.commandSubstitutionDepth > 0) {
+			return;
+		}
+		if (char === '[') {
+			state.depth += 1;
+		} else if (char === ']') {
+			state.depth -= 1;
+		}
+	}
+
+	private readQuotedIndexChar(state: IndexState): void {
+		const char = this.source.advance();
+		state.raw += char;
+		state.index += char;
+		if (char === '\\' && state.quote === '"' && !this.source.eof) {
+			const escaped = this.source.advance();
+			state.raw += escaped;
+			state.index += escaped;
+			return;
+		}
+		if (char === state.quote) {
+			state.quote = null;
+		}
 	}
 
 	/**
@@ -729,35 +968,21 @@ export class Scanner {
 
 		let depth = 1;
 		while (depth > 0 && !this.source.eof) {
-			const c = this.source.peek();
-
-			if (c === '(') {
-				depth++;
-				result += this.source.advance();
-			} else if (c === ')') {
-				depth--;
-				result += this.source.advance();
-			} else if (c === "'" || c === '"') {
-				// Skip quoted content
-				result += this.skipQuotedContent(c);
-			} else if (c === '\\' && !this.source.eof) {
-				result += this.source.advance();
-				if (!this.source.eof) {
-					result += this.source.advance();
-				}
-			} else {
-				result += this.source.advance();
-			}
+			const chunk = this.readSubstitutionChunk(result);
+			depth += chunk.depth;
+			result += chunk.chars;
 		}
 
-		const source = result.endsWith(')')
-			? result.slice(1, -1)
-			: result.slice(1);
+		const closed = depth === 0;
+		if (!closed) {
+			throw new UnmatchedParenError(start.span(this.source.position));
+		}
+		const source = result.slice(1, -1);
 
-		const index = this.readIndexSuffix();
+		const suffix = this.readIndexSuffix();
 		let raw = `${prefix}${result}`;
-		if (index !== null) {
-			raw += `[${index}]`;
+		if (suffix !== null) {
+			raw += suffix.raw;
 		}
 
 		const flags = createEmptyFlags();
@@ -769,7 +994,7 @@ export class Scanner {
 			done: false,
 			part: {
 				escaped: false,
-				index,
+				index: suffix?.text ?? null,
 				kind: 'commandSub',
 				quote,
 				source,
@@ -777,6 +1002,133 @@ export class Scanner {
 				text: raw,
 			},
 		};
+	}
+
+	private readSubstitutionChunk(source: string): {
+		chars: string;
+		depth: number;
+	} {
+		const char = this.source.peek();
+		if (char === '#' && this.canStartSubstitutionComment(source)) {
+			return { chars: this.readSubstitutionComment(), depth: 0 };
+		}
+		if (char === '(') {
+			return { chars: this.source.advance(), depth: 1 };
+		}
+		if (char === ')') {
+			return { chars: this.source.advance(), depth: -1 };
+		}
+		if (char === "'" || char === '"') {
+			return { chars: this.skipQuotedContent(char), depth: 0 };
+		}
+		if (char === '\\') {
+			let chars = this.source.advance();
+			if (!this.source.eof) {
+				chars += this.source.advance();
+			}
+			return { chars, depth: 0 };
+		}
+		return { chars: this.source.advance(), depth: 0 };
+	}
+
+	private canStartSubstitutionComment(source: string): boolean {
+		const state: SubstitutionBoundaryState = {
+			atTokenStart: false,
+			comment: false,
+			index: 0,
+			quote: null,
+		};
+
+		while (state.index < source.length) {
+			this.advanceSubstitutionBoundaryState(source, state);
+		}
+
+		return state.atTokenStart;
+	}
+
+	private advanceSubstitutionBoundaryState(
+		source: string,
+		state: SubstitutionBoundaryState
+	): void {
+		if (state.comment) {
+			this.advanceSubstitutionCommentBoundary(source, state);
+			return;
+		}
+		if (state.quote !== null) {
+			this.advanceQuotedSubstitutionBoundary(source, state);
+			return;
+		}
+		this.advanceUnquotedSubstitutionBoundary(source, state);
+	}
+
+	private advanceSubstitutionCommentBoundary(
+		source: string,
+		state: SubstitutionBoundaryState
+	): void {
+		if (source[state.index] === '\n') {
+			state.comment = false;
+			state.atTokenStart = true;
+		}
+		state.index++;
+	}
+
+	private advanceQuotedSubstitutionBoundary(
+		source: string,
+		state: SubstitutionBoundaryState
+	): void {
+		const char = source[state.index] ?? '';
+		if (char === state.quote) {
+			state.quote = null;
+		} else if (state.quote === '"' && char === '\\') {
+			state.index++;
+		}
+		state.atTokenStart = false;
+		state.index++;
+	}
+
+	private advanceUnquotedSubstitutionBoundary(
+		source: string,
+		state: SubstitutionBoundaryState
+	): void {
+		const char = source[state.index] ?? '';
+		if (char === "'" || char === '"') {
+			state.quote = char;
+			state.atTokenStart = false;
+			state.index++;
+			return;
+		}
+		if (char === '\\') {
+			state.atTokenStart = false;
+			state.index += state.index + 1 < source.length ? 2 : 1;
+			return;
+		}
+		if (char === '#' && state.atTokenStart) {
+			state.comment = true;
+			state.index++;
+			return;
+		}
+		if (char === ' ' || char === '\t' || char === '\n') {
+			state.atTokenStart = true;
+			state.index++;
+			return;
+		}
+		if (char === '(') {
+			state.atTokenStart = true;
+			state.index++;
+			return;
+		}
+
+		const operatorLength = this.operatorLengthAt(source, state.index);
+		state.atTokenStart = operatorLength > 0;
+		state.index += operatorLength || 1;
+	}
+
+	private readSubstitutionComment(): string {
+		let comment = '';
+		while (!this.source.eof && this.source.peek() !== '\n') {
+			comment += this.source.advance();
+		}
+		return comment;
 	}
 
 	private readCharacterClass(start: SourcePosition): CharProcessResult {
@@ -886,6 +1238,31 @@ export class Scanner {
 			spelling += this.source.advance();
 		}
 		return this.makeToken(TokenKind.COMMENT, spelling, start);
+	}
+
+	private operatorLengthAt(source: string, index: number): number {
+		for (const operator of OPERATORS) {
+			if (source.startsWith(operator.pattern, index)) {
+				return operator.pattern.length;
+			}
+		}
+		return SINGLE_CHAR_OPS.has(source[index] ?? '') ? 1 : 0;
+	}
+
+	private peekMultiCharOperator(): OperatorEntry | null {
+		for (const operator of OPERATORS) {
+			let matches = true;
+			for (let index = 0; index < operator.pattern.length; index++) {
+				if (this.source.peek(index) !== operator.pattern[index]) {
+					matches = false;
+					break;
+				}
+			}
+			if (matches) {
+				return operator;
+			}
+		}
+		return null;
 	}
 
 	private isSpecialChar(c: string): boolean {

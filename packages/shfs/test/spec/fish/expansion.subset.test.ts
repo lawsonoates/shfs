@@ -233,6 +233,21 @@ test('fish expansion: expansion.fish - non-numeric index is an error', async () 
 	expect(result.stderr).toContain('Invalid index value');
 });
 
+// expansion.fish: echo $outer[$inner[2]] / $outer[$inner[2..1]]
+test('fish expansion: expansion.fish - nested variable indexes select outer values', async () => {
+	const setup = 'set -l outer out1 out2\nset -l inner 1 2';
+	expect(await run(`${setup}\necho $outer[$inner[2]]`)).toBe('out2');
+	expect(await run(`${setup}\necho $outer[$inner[2..1]]`)).toBe('out2 out1');
+});
+
+// expansion.fish: $fish -c 'echo "$abc["' reports Invalid index value.
+// Adapted: invoke the malformed expansion directly instead of nested fish.
+test('fish expansion: expansion.fish - unterminated quoted variable index is an error', async () => {
+	const result = await runWithStatus('echo "$abc["');
+	expect(result.status).not.toBe(0);
+	expect(result.stderr).toContain('Invalid index value');
+});
+
 // expansion.fish lines 4-13 use nested fish execution with `... 2>&1`
 // to assert diagnostic capture in command substitutions.
 // Adapted: shfs has no `$fish -c`, so we use a failing command directly.

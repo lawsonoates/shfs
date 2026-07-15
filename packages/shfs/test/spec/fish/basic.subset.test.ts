@@ -252,3 +252,11 @@ test('fish basic: basic.fish - # inside a word is not a comment', async () => {
 test('fish basic: basic.fish - command substitution keeps a trailing escaped backslash', async () => {
 	expect(await run('echo (echo hello\\\\)')).toBe('hello\\');
 });
+
+// basic.fish:558-567: comment text inside a substitution can contain a
+// closing parenthesis or unmatched quote without closing the substitution.
+test('fish basic: basic.fish - comments hide structural characters inside substitutions', async () => {
+	expect(await run('echo (echo foo;#)\n)')).toBe('foo');
+	expect(await run("echo (echo bar #'\n)")).toBe('bar');
+	expect(await run('echo (#"\necho baz)')).toBe('baz');
+});

@@ -4,8 +4,7 @@
 // License: GNU General Public License, version 2.
 
 // Note: upstream builds lists with `seq`; this port writes them out literally.
-// Command substitutions inside index brackets (e.g. `$test[(count $test)..1]`)
-// are out of scope; variable references inside index brackets are covered.
+// Variable and command-substitution bounds use their upstream spelling.
 
 import { beforeEach, expect, test } from 'bun:test';
 
@@ -147,6 +146,20 @@ test('fish slices: slices.fish - command substitution single index', async () =>
 	expect(await run(script)).toBe('2');
 });
 
+// slices.fish: echo $test[(count $test)..1]
+test('fish slices: slices.fish - command substitution supplies an inverted range bound', async () => {
+	expect(await run(`${SET_TEST_LIST}\necho $test[(count $test)..1]`)).toBe(
+		'10 9 8 7 6 5 4 3 2 1'
+	);
+});
+
+// slices.fish: echo $test[1..(count $test)]
+test('fish slices: slices.fish - command substitution supplies a range end', async () => {
+	expect(await run(`${SET_TEST_LIST}\necho $test[1..(count $test)]`)).toBe(
+		'1 2 3 4 5 6 7 8 9 10'
+	);
+});
+
 // slices.fish: echo $test[ .. ]
 test('fish slices: slices.fish - fully open range selects everything', async () => {
 	expect(await run(`${SET_TEST_LIST}\necho $test[ .. ]`)).toBe(
@@ -186,6 +199,30 @@ test('fish slices: slices.fish - double range with open start is an invalid inde
 	const result = await runResult(`${SET_TEST_LIST}\necho $test[..1..2]`);
 	expect(result.exitCode).not.toBe(0);
 	expect(result.stderr).toContain('Invalid index value');
+});
+
+// slices.fish: empty variable bounds differ by quoting and position.
+test('fish slices: slices.fish - empty variable bounds preserve open-range semantics', async () => {
+	const setup = `${SET_TEST_LIST}\nset -l empty`;
+	expect(await run(`${setup}\necho $test[$empty..]`)).toBe('');
+	expect(await run(`${setup}\necho $test[.."$empty"]`)).toBe(
+		'1 2 3 4 5 6 7 8 9 10'
+	);
+	expect(await run(`${setup}\necho $test["$empty"..]`)).toBe(
+		'1 2 3 4 5 6 7 8 9 10'
+	);
+});
+
+// slices.fish: an empty command substitution contributes no bound values.
+test('fish slices: slices.fish - empty command substitution bound selects nothing', async () => {
+	expect(await run(`${SET_TEST_LIST}\necho $test[(true)..3]`)).toBe('');
+});
+
+// slices.fish: a substitution can expand to several range starts.
+test('fish slices: slices.fish - multi-value command substitution supplies several bounds', async () => {
+	expect(
+		await run(`${SET_TEST_LIST}\necho $test[(string join \\n 1 2 3)..3]`)
+	).toBe('1 2 3 2 3 3');
 });
 
 // slices.fish: set list[..2] $list[2..1]

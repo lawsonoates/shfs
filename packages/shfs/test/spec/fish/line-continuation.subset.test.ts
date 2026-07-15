@@ -4,10 +4,9 @@
 // License: GNU General Public License, version 2.
 
 // In-scope contract: a backslash-newline continues the line, including in the
-// middle of a command name. Out of scope: the `builtin` command (the split
-// command-name case is reduced to `count`), unicode/numeric escape sequences
-// spelling out keywords (line-continuation.fish:14-21), and quoted words
-// acting as keywords (line-continuation.fish:23-27).
+// middle of a command name. The `builtin` command is out of scope (the split
+// command-name case is reduced to `count`), as are quoted words acting as
+// keywords (line-continuation.fish:23-27).
 
 import { beforeEach, expect, test } from 'bun:test';
 
@@ -38,4 +37,19 @@ test('fish line-continuation: line-continuation.fish - continuation inside anoth
 // line-continuation.fish:10-12: continuation splits the `and` combiner.
 test('fish line-continuation: line-continuation.fish - continuation inside a combiner keyword', async () => {
 	expect(await run('true; an\\\nd echo true')).toBe('true');
+});
+
+// line-continuation.fish: \i\ + \U00000066\ and \145n\ + d\ spell the
+// opening and closing keywords across continued physical lines.
+test('fish line-continuation: line-continuation.fish - escapes and continuations spell control-flow keywords', async () => {
+	const script = [
+		'\\i\\',
+		'\\U00000066\\',
+		' true',
+		'    echo if true',
+		'\\145n\\',
+		'd\\',
+		'',
+	].join('\n');
+	expect(await run(script)).toBe('if true');
 });
