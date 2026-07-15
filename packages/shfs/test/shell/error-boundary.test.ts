@@ -56,6 +56,76 @@ test("$status reflects a command's expansion failure", async () => {
 	expect(result.stdout.toString()).toBe('1');
 });
 
+test('variable indexes reject embedded redirections', async () => {
+	const result = await run('set values first second; echo $values[1 >out]');
+
+	expect(result.stdout.toString()).toBe('');
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr.toString()).toContain('Invalid index value');
+});
+
+test('expanded index items preserve embedded whitespace boundaries', async () => {
+	for (const command of [
+		"set values first second; set index '1 2'; echo $values[$index]",
+		"set values first second; echo $values[(echo '1 2')]",
+	]) {
+		const result = await run(command);
+		expect(result.stdout.toString()).toBe('');
+		expect(result.exitCode).not.toBe(0);
+		expect(result.stderr.toString()).toContain('Invalid index value');
+	}
+});
+
+test('variable indexes do not glob wildcard atoms', async () => {
+	const withoutMatch = await run('set values first second; echo $values[*]');
+	expect(withoutMatch.stdout.toString()).toBe('');
+	expect(withoutMatch.exitCode).not.toBe(0);
+	expect(withoutMatch.stderr.toString()).toContain('Invalid index value');
+
+	await run('touch /1');
+	const withMatch = await run('set values first second; echo $values[*]');
+	expect(withMatch.stdout.toString()).toBe('');
+	expect(withMatch.exitCode).not.toBe(0);
+	expect(withMatch.stderr.toString()).toContain('Invalid index value');
+});
+
+test('expanded index atoms are not recursively resolved', async () => {
+	for (const indexExpression of ['$index', '\\$inner', "'$inner'"]) {
+		const result = await run(
+			`set values first second; set inner 2; set index '$inner'; echo $values[${indexExpression}]`
+		);
+		expect(result.stdout.toString()).toBe('');
+		expect(result.exitCode).not.toBe(0);
+		expect(result.stderr.toString()).toContain('Invalid index value');
+	}
+
+	const directVariable = await run(
+		'set values first second; set inner 2; echo $values[$inner]'
+	);
+	expect(directVariable.stdout.toString()).toBe('second');
+
+	const commandSubstitution = await run(
+		'set values first second; echo $values[(echo 2)]'
+	);
+	expect(commandSubstitution.stdout.toString()).toBe('second');
+});
+
+test('top-level index comments are not silently truncated', async () => {
+	const topLevel = await run(
+		'set values first second; echo $values[1 #ignored]'
+	);
+	expect(topLevel.stdout.toString()).toBe('');
+	expect(topLevel.exitCode).not.toBe(0);
+	expect(topLevel.stderr.toString()).toContain('Invalid index value');
+
+	const nested = await run(`set values first second
+echo $values[(echo 1 # ) ] "
+)]`);
+	expect(nested.stdout.toString()).toBe('first');
+	expect(nested.exitCode).toBe(0);
+	expect(nested.stderr.toString()).toBe('');
+});
+
 test('2> redirects an expansion-failure diagnostic to a file, not shell stderr', async () => {
 	await run('mkdir -p /w');
 	await run('cd /w');

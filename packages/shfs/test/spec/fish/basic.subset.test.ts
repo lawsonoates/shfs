@@ -5,9 +5,9 @@
 
 // Note: basic.fish is a broad smoke test of fish syntax. This subset ports the
 // if/else-if/else chains, begin blocks as conditions, lazy condition
-// evaluation, and break/continue behavior. Upstream cases built on `switch`,
-// `eval`, `contains`, dynamically-invoked loop controls, and process/job
-// features are out of scope.
+// evaluation, break/continue behavior, and switch status preservation.
+// Upstream cases built on `eval`, `contains`, dynamically-invoked loop
+// controls, and process/job features are out of scope.
 
 import { beforeEach, expect, test } from 'bun:test';
 
@@ -166,6 +166,26 @@ test('fish basic: basic.fish - continue outside of a loop reports an error', asy
 	expect(result.stderr).toContain('continue: Not inside of loop');
 });
 
+// basic.fish:217-223: switch itself does not reset the incoming status before
+// the selected case body starts.
+test('fish basic: basic.fish - switch preserves status before its case body', async () => {
+	const script = [
+		'false',
+		'switch one',
+		'case one',
+		'    echo $status',
+		'end',
+	].join('\n');
+	expect(await run(script)).toBe('1');
+});
+
+// basic.fish:489-490: an unterminated switch is a parse error.
+test('fish basic: basic.fish - switch requires a closing end', async () => {
+	const result = await runResult('switch one\ncase one\n echo nope');
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain('end');
+});
+
 // basic.fish:11-17: comments on the command line and inside loop bodies.
 test('fish basic: basic.fish - comments in odd places do not break loops', async () => {
 	const script = [
@@ -295,4 +315,12 @@ test('fish basic: basic.fish - # inside a word is not a comment', async () => {
 // basic.fish:554-556: a trailing escaped backslash inside a substitution.
 test('fish basic: basic.fish - command substitution keeps a trailing escaped backslash', async () => {
 	expect(await run('echo (echo hello\\\\)')).toBe('hello\\');
+});
+
+// basic.fish:558-567: comment text inside a substitution can contain a
+// closing parenthesis or unmatched quote without closing the substitution.
+test('fish basic: basic.fish - comments hide structural characters inside substitutions', async () => {
+	expect(await run('echo (echo foo;#)\n)')).toBe('foo');
+	expect(await run("echo (echo bar #'\n)")).toBe('bar');
+	expect(await run('echo (#"\necho baz)')).toBe('baz');
 });

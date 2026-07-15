@@ -20,6 +20,9 @@ This specification describes the lexical analysis for a **fish-inspired subset**
 
 ### Operators
 - **PIPE**: `|` - Pipe operator
+- **SEMICOLON**: `;` - Statement separator
+- **AND_AND**: `&&` - Logical conjunction
+- **OR_OR**: `||` - Logical disjunction
 - **GREAT**: `>` - Output redirection (Phase 2)
 - **LESS**: `<` - Input redirection (Phase 2)
 - **LPAREN**: `(` - Command substitution start
@@ -146,9 +149,7 @@ NOT supported:
 This is **not a scripting language**.
 
 ### Other Unsupported Features
-- `;` (semicolons)
 - `&` (background jobs)
-- `&&`, `||` (logical operators)
 - `and`, `or`, `not` (keywords)
 - `~` (tilde expansion)
 - `$()` syntax (use `()` instead)
@@ -177,7 +178,7 @@ substitution ::= "(" program ")"
 ### Token Boundaries
 Tokens are delimited by:
 - Whitespace (space, tab, newline)
-- Operators: `|`, `>`, `<`, `(`, `)`
+- Operators: `|`, `||`, `&&`, `;`, `>`, `<`, `(`, `)`
 - Quotes change to/from quoted mode but don't necessarily end tokens
 
 ### Concatenation

@@ -6,7 +6,7 @@
  * - Statement chaining: `; and`/`; or` keywords and `&&`/`||` combiners
  * - Job negation with `not` and `!`
  * - Command-scoped variable assignments (`name=value command`)
- * - Blocks and control flow: begin, if, while, for, function
+ * - Blocks and control flow: begin, if, switch, while, for, function
  * - break, continue, and return
  * - Pipelines (command | command | ...)
  */
@@ -31,6 +31,8 @@ import {
 	Statement,
 	type StatementChainMode,
 	type StatementNode,
+	type SwitchCase,
+	SwitchStatement,
 	WhileStatement,
 	Word,
 } from './ast';
@@ -44,12 +46,13 @@ const VARIABLE_NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const BLOCK_KEYWORDS = new Set([
 	'begin',
 	'if',
+	'switch',
 	'while',
 	'for',
 	'function',
 ] as const);
 
-type BlockKeyword = 'begin' | 'if' | 'while' | 'for' | 'function';
+type BlockKeyword = 'begin' | 'if' | 'switch' | 'while' | 'for' | 'function';
 
 /**
  * Parser for statements, blocks, and pipelines.
@@ -179,6 +182,14 @@ export class StatementParser {
 			return this.parseReturn(chainMode);
 		}
 
+		if (this.isKeyword('case')) {
+			throw new ParseSyntaxError(
+				"'case' is only valid directly inside a switch",
+				this.parser.currentToken.span,
+				{ code: 'case-outside-switch' }
+			);
+		}
+
 		if (this.isKeyword('end') || this.isKeyword('else')) {
 			return this.parser.syntacticError(
 				`'${this.parser.currentToken.spelling}' outside of a block`,
@@ -214,6 +225,8 @@ export class StatementParser {
 				return this.parseBegin(context);
 			case 'if':
 				return this.parseIf(context);
+			case 'switch':
+				return this.parseSwitch(context);
 			case 'while':
 				return this.parseWhile(context);
 			case 'for':
@@ -230,6 +243,74 @@ export class StatementParser {
 				);
 			}
 		}
+	}
+
+	private parseSwitch(context: {
+		assignments: Assignment[];
+		chainMode: StatementChainMode;
+		negated: boolean;
+	}): SwitchStatement {
+		const startPos = this.parser.currentToken.span.start;
+		const token = this.parser.currentToken;
+		this.parser.advance(); // switch
+
+		const value = this.commandParser.parseWordArgument();
+		if (!value) {
+			throw new ParseSyntaxError(
+				'switch: expected exactly one value',
+				token.span,
+				{ code: 'invalid-switch-value-count' }
+			);
+		}
+		const extra = this.commandParser.parseWordArgument();
+		if (extra) {
+			throw new ParseSyntaxError(
+				'switch: expected exactly one value',
+				extra.span,
+				{ code: 'invalid-switch-value-count' }
+			);
+		}
+		this.requireBlockSeparator('switch value');
+		this.consumeSeparatorsAndComments();
+
+		const cases: SwitchCase[] = [];
+		while (
+			this.parser.currentToken.kind !== TokenKind.EOF &&
+			!this.isKeyword('end')
+		) {
+			if (!this.isKeyword('case')) {
+				throw new ParseSyntaxError(
+					'switch: expected case or end',
+					this.parser.currentToken.span,
+					{ code: 'expected-switch-case' }
+				);
+			}
+			this.parser.advance(); // case
+
+			const patterns: Word[] = [];
+			while (true) {
+				const pattern = this.commandParser.parseWordArgument();
+				if (!pattern) {
+					break;
+				}
+				patterns.push(pattern);
+			}
+			this.requireBlockSeparator('case patterns');
+			cases.push({
+				body: this.parseStatementSequence(new Set(['case', 'end'])),
+				patterns,
+			});
+		}
+
+		this.expectKeyword('end');
+		return new SwitchStatement(
+			new SourceSpan(startPos, this.parser.previousTokenPosition),
+			value,
+			cases,
+			context.chainMode,
+			context.negated,
+			context.assignments
+		);
 	}
 
 	private parseBegin(context: {
@@ -735,6 +816,23 @@ export class StatementParser {
 				'command'
 			);
 		}
+	}
+
+	private requireBlockSeparator(part: string): void {
+		const token = this.parser.currentToken;
+		if (
+			token.kind === TokenKind.COMMENT ||
+			token.kind === TokenKind.EOF ||
+			token.kind === TokenKind.NEWLINE ||
+			token.kind === TokenKind.SEMICOLON
+		) {
+			return;
+		}
+		throw new ParseSyntaxError(
+			`Expected a statement separator after ${part}`,
+			token.span,
+			{ code: 'missing-statement-separator' }
+		);
 	}
 
 	// ─────────────────────────────────────────────────────────
