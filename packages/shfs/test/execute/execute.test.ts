@@ -453,6 +453,43 @@ test('file replay commands preserve raw bytes and line selection', async () => {
 	}
 });
 
+test('stdin head preserves raw bytes and line selection', async () => {
+	const fs = new MemoryFS();
+	const rawBytes = new Uint8Array([0xfe, 0x0a, 0xff, 0x0a, 0xfd]);
+	fs.setFile('/raw-stdin.bin', rawBytes);
+	const cases = [
+		{
+			command: 'cat /raw-stdin.bin | head -n 1',
+			expected: new Uint8Array([0xfe, 0x0a]),
+		},
+		{
+			command: 'cat /raw-stdin.bin | head -n 2',
+			expected: new Uint8Array([0xfe, 0x0a, 0xff, 0x0a]),
+		},
+		{
+			command: 'cat /raw-stdin.bin | head -n 3',
+			expected: rawBytes,
+		},
+	] as const;
+
+	for (const { command, expected } of cases) {
+		const output = execute(compile(parse(command)), fs);
+		const records = (await collectRecordStream(output)).unwrap();
+		expect(recordsToBytes(records, { trailingNewline: true })).toEqual(
+			expected
+		);
+	}
+
+	const redirected = execute(
+		compile(parse('cat /raw-stdin.bin | head -n 1 > /selected.bin')),
+		fs
+	);
+	(await collectRecordStream(redirected)).unwrap();
+	expect(await fs.readFile('/selected.bin')).toEqual(
+		new Uint8Array([0xfe, 0x0a])
+	);
+});
+
 test('variable-expanded input redirection resolves relative to cwd', async () => {
 	const fs = new MemoryFS();
 	fs.setFile('/workspace/input.txt', 'alpha\nbeta\ngamma');

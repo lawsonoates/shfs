@@ -83,6 +83,25 @@ test('partial line consumers stream-decode split UTF-8 inherited stdin', async (
 	expect(await runBytes(script)).toEqual(UTF8_ENCODER.encode('ÿ\nrest\n'));
 });
 
+test('shared head preserves split raw records and its unread suffix', async () => {
+	const script = [
+		'function produce_raw',
+		"    echo -ne '\\376'",
+		"    echo -ne '\\377\\n\\375'",
+		"    echo -ne '\\n\\374'",
+		'end',
+		'function consume_raw',
+		'    head -n 1',
+		'    cat',
+		'end',
+		'produce_raw | consume_raw',
+	].join('\n');
+
+	expect(await runBytes(script)).toEqual(
+		new Uint8Array([0xfe, 0xff, 0x0a, 0xfd, 0x0a, 0xfc])
+	);
+});
+
 test('nested functions share unread inherited stdin with their caller', async () => {
 	const unreadSuffix = new Uint8Array([0xfe, 0xff, 0x0a]);
 	fs.setFile(

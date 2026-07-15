@@ -19,7 +19,7 @@ import { cat } from '../operator/cat/cat';
 import { cp } from '../operator/cp/cp';
 import { find } from '../operator/find/find';
 import { runGrepCommand } from '../operator/grep/grep';
-import { headFiles, headLines } from '../operator/head/head';
+import { headFiles } from '../operator/head/head';
 import { ls } from '../operator/ls/ls';
 import { mkdir } from '../operator/mkdir/mkdir';
 import { mv } from '../operator/mv/mv';
@@ -743,10 +743,8 @@ CommandRegistry.register('head', {
 					return;
 				}
 				if (input) {
-					const lines = sharedInput
-						? sharedInput.lineRecords()
-						: toFormattedLineStream(input);
-					yield* headLines(step.args.n)(lines);
+					const headInput = sharedInput ?? createShellInput(input);
+					yield* headInput.takePhysicalLines(step.args.n);
 				}
 				context.status = 0;
 			})()

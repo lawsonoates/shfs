@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
-import { recordsToShellInput } from '@/execute/io';
-import type { Record as ShellRecord } from '@/record';
+import { createShellInput, recordsToShellInput } from '@/execute/io';
+import { recordsToBytes, type Record as ShellRecord } from '@/record';
 
 const UTF8_ENCODER = new TextEncoder();
 
@@ -85,4 +85,80 @@ test('lineRecords preserve physical termination metadata', async () => {
 		value: { kind: 'line', terminated: false, text: 'last' },
 	});
 	expect(await lines.next()).toEqual({ done: true, value: undefined });
+});
+
+test('takePhysicalLines preserves selected bytes and the exact unread suffix', async () => {
+	const input = recordsToShellInput([
+		{ bytes: new Uint8Array([0xfe]), kind: 'bytes' },
+		{
+			bytes: new Uint8Array([0xff, 0x0a, 0xfd, 0x0a, 0xfc]),
+			kind: 'bytes',
+		},
+	]);
+	const selected: ShellRecord[] = [];
+	for await (const record of input.takePhysicalLines(2)) {
+		selected.push(record);
+	}
+
+	expect(recordsToBytes(selected, { trailingNewline: true })).toEqual(
+		new Uint8Array([0xfe, 0xff, 0x0a, 0xfd, 0x0a])
+	);
+	expect(await input.bytes({ trailingNewline: true })).toEqual(
+		new Uint8Array([0xfc])
+	);
+});
+
+test('takePhysicalLines pushes unread bytes before yielding its cutoff', async () => {
+	const input = recordsToShellInput([
+		{
+			bytes: new Uint8Array([0xfe, 0x0a, 0xff]),
+			kind: 'bytes',
+		},
+	]);
+	const selected = input.takePhysicalLines(1)[Symbol.asyncIterator]();
+
+	expect(await selected.next()).toEqual({
+		done: false,
+		value: { bytes: new Uint8Array([0xfe, 0x0a]), kind: 'bytes' },
+	});
+	expect(await input.bytes({ trailingNewline: true })).toEqual(
+		new Uint8Array([0xff])
+	);
+	await selected.return?.();
+});
+
+test('takePhysicalLines with zero lines does not pull input', async () => {
+	let pulls = 0;
+	const input = createShellInput(
+		(async function* (): AsyncIterable<ShellRecord> {
+			pulls++;
+			yield { kind: 'line', text: 'first' };
+		})()
+	);
+
+	for await (const _record of input.takePhysicalLines(0)) {
+		throw new Error('head -n 0 must not yield a record');
+	}
+
+	expect(pulls).toBe(0);
+	expect(await input.readLine()).toBe('first');
+	expect(pulls).toBe(1);
+});
+
+test('takePhysicalLines formats structured records without decoding lines', async () => {
+	const input = recordsToShellInput([
+		{ kind: 'json', value: { ok: true } },
+		{ kind: 'line', text: 'second' },
+		{ displayPath: 'third', kind: 'file', path: '/third' },
+	]);
+	const selected: ShellRecord[] = [];
+	for await (const record of input.takePhysicalLines(2)) {
+		selected.push(record);
+	}
+
+	expect(selected).toEqual([
+		{ kind: 'line', text: '{"ok":true}' },
+		{ kind: 'line', text: 'second' },
+	]);
+	expect(await input.readLine()).toBe('third');
 });

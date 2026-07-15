@@ -13,8 +13,56 @@ interface LineReadState {
 	text: string;
 }
 
+interface PhysicalRecordSelection {
+	emitted: ShellRecord;
+	lineCount: number;
+	unread?: ShellRecord;
+}
+
+function toPhysicalRecord(record: ShellRecord): ShellRecord {
+	if (record.kind === 'bytes' || record.kind === 'line') {
+		return record;
+	}
+	return { kind: 'line', text: formatRecord(record) };
+}
+
+function selectPhysicalRecord(
+	record: ShellRecord,
+	lineLimit: number
+): PhysicalRecordSelection {
+	const physicalRecord = toPhysicalRecord(record);
+	const bytes = recordsToBytes([physicalRecord], { trailingNewline: true });
+	let lineCount = 0;
+	for (const [index, byte] of bytes.entries()) {
+		if (byte !== NEWLINE_BYTE) {
+			continue;
+		}
+		lineCount++;
+		if (lineCount !== lineLimit) {
+			continue;
+		}
+		const splitIndex = index + 1;
+		if (splitIndex === bytes.length) {
+			return { emitted: physicalRecord, lineCount };
+		}
+		return {
+			emitted: {
+				bytes: bytes.slice(0, splitIndex),
+				kind: 'bytes',
+			},
+			lineCount,
+			unread: {
+				bytes: bytes.slice(splitIndex),
+				kind: 'bytes',
+			},
+		};
+	}
+	return { emitted: physicalRecord, lineCount };
+}
+
 export interface ShellInput {
 	records(): Stream<ShellRecord>;
+	takePhysicalLines(count: number): Stream<ShellRecord>;
 	lineRecords(): Stream<LineRecord>;
 	lines(): Stream<string>;
 	readLine(): Promise<string | null>;
@@ -35,6 +83,10 @@ export interface ShellIo {
 
 export class EmptyInput implements ShellInput {
 	async *records(): Stream<ShellRecord> {
+		// no records
+	}
+
+	async *takePhysicalLines(_count: number): Stream<ShellRecord> {
 		// no records
 	}
 
@@ -70,6 +122,25 @@ export class RecordInput implements ShellInput {
 				return;
 			}
 			yield record;
+		}
+	}
+
+	async *takePhysicalLines(count: number): Stream<ShellRecord> {
+		let remainingLines = count;
+		while (remainingLines > 0) {
+			const record = await this.takeRecord();
+			if (record === null) {
+				return;
+			}
+			const selected = selectPhysicalRecord(record, remainingLines);
+			remainingLines -= selected.lineCount;
+			if (remainingLines === 0 && selected.unread) {
+				this.pendingRecords.unshift(selected.unread);
+			}
+			yield selected.emitted;
+			if (remainingLines === 0) {
+				return;
+			}
 		}
 	}
 
