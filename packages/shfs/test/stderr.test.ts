@@ -40,3 +40,23 @@ test('diagnostic stderr keeps logical line boundaries around exact fragments', (
 	diagnosticThenFragment.appendText('suffix');
 	expect(render(diagnosticThenFragment)).toBe('diagnostic\nsuffix');
 });
+
+test('stderr snapshots preserve exact bytes and logical boundaries', () => {
+	const rawThenDiagnostic = new BufferedOutputStream();
+	rawThenDiagnostic.appendBytes(new Uint8Array([0xfe]));
+	rawThenDiagnostic.append('diagnostic');
+	expect([...rawThenDiagnostic.snapshotOutput().bytes]).toEqual([
+		0xfe,
+		...new TextEncoder().encode('diagnostic'),
+	]);
+
+	const child = new BufferedOutputStream();
+	child.append('diagnostic');
+	const diagnosticThenRaw = new BufferedOutputStream();
+	diagnosticThenRaw.appendSnapshot(child.snapshotOutput());
+	diagnosticThenRaw.appendBytes(new Uint8Array([0xfe]));
+	expect([...diagnosticThenRaw.snapshotOutput().bytes]).toEqual([
+		...new TextEncoder().encode('diagnostic\n'),
+		0xfe,
+	]);
+});

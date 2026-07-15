@@ -5,6 +5,8 @@ import type { Record as StdoutRecord } from './record';
 export interface OutputChannels<TStdout = StdoutRecord> {
 	stdout: readonly TStdout[];
 	stderr: readonly string[];
+	/** Exact stderr bytes when the producer retains byte-oriented output. */
+	stderrBytes?: Uint8Array;
 	exitCode: number;
 }
 

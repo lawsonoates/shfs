@@ -87,7 +87,9 @@ function buildStdoutBytes(records: readonly Record[]): Uint8Array {
 function createShellOutput(result: OutputChannels<Record>): ShellOutput {
 	return new ShellOutput({
 		exitCode: result.exitCode,
-		stderr: Buffer.from(formatStderr(result.stderr), 'utf8'),
+		stderr: result.stderrBytes
+			? Buffer.from(result.stderrBytes)
+			: Buffer.from(formatStderr(result.stderr), 'utf8'),
 		stdout: Buffer.from(buildStdoutBytes(result.stdout)),
 		stdoutText: Buffer.from(formatRecords(result.stdout), 'utf8'),
 	});
@@ -272,9 +274,11 @@ export class Shell {
 							yield* await collectRecordStream(
 								execute(script, fs, context)
 							);
+						const stderrOutput = context.stderr.snapshotOutput();
 						return Result.ok({
 							stdout,
 							stderr: context.stderr.snapshot(),
+							stderrBytes: stderrOutput.bytes,
 							exitCode: context.status,
 						});
 					});
@@ -289,9 +293,11 @@ export class Shell {
 						throw error;
 					}
 					reportShellFailure(context, error);
+					const stderrOutput = context.stderr.snapshotOutput();
 					return {
 						stdout: [],
 						stderr: context.stderr.snapshot(),
+						stderrBytes: stderrOutput.bytes,
 						exitCode: context.status ?? 1,
 					};
 				} finally {

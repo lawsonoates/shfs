@@ -162,6 +162,51 @@ test('stdout redirected to stderr preserves physical fragment adjacency', async 
 	expect(emptyFragment.stderr.toString()).toBe('firstsecond\n');
 });
 
+// Fish basic.fish:158 emits exact 0xfe, while language.rst:159-179 and
+// redirect.fish:108-115 require fd duplication to preserve the stream.
+test('stdout redirected to stderr preserves exact bytes', async () => {
+	const echoResult = await run("echo -ne '\\376' >&2");
+	expect([...echoResult.stderr]).toEqual([0xfe]);
+
+	await run('mkdir -p /w');
+	await run("echo -ne '\\376\\377' > /w/binary");
+	const catResult = await run('cat /w/binary >&2');
+	expect([...catResult.stderr]).toEqual([0xfe, 0xff]);
+});
+
+test('raw stderr survives child fd routing', async () => {
+	await run('mkdir -p /w');
+	await run("function raw_stderr; echo -ne '\\376\\377' >&2; end");
+
+	const fileResult = await run('raw_stderr 2> /w/raw.err; cat /w/raw.err');
+	expect([...fileResult.stdout]).toEqual([0xfe, 0xff]);
+
+	const stdoutResult = await run('raw_stderr 2>&1');
+	expect([...stdoutResult.stdout]).toEqual([0xfe, 0xff]);
+
+	const pipeResult = await run('raw_stderr 2>| cat');
+	expect([...pipeResult.stdout]).toEqual([0xfe, 0xff]);
+});
+
+test('raw stderr keeps physical adjacency with diagnostics', async () => {
+	await run('mkdir -p /w');
+	const diagnostic = 'cat: /w/missing.txt: No such file or directory';
+
+	const rawThenDiagnostic = await run(
+		"echo -ne '\\376' >&2; cat /w/missing.txt"
+	);
+	expect(rawThenDiagnostic.stderr[0]).toBe(0xfe);
+	expect(rawThenDiagnostic.stderr.subarray(1).toString()).toBe(diagnostic);
+
+	const diagnosticThenRaw = await run(
+		"cat /w/missing.txt; echo -ne '\\376' >&2"
+	);
+	expect(diagnosticThenRaw.stderr.at(-1)).toBe(0xfe);
+	expect(diagnosticThenRaw.stderr.subarray(0, -1).toString()).toBe(
+		`${diagnostic}\n`
+	);
+});
+
 test('redirected stdout fragments remain adjacent to diagnostic stderr', async () => {
 	await run('mkdir -p /w');
 	const result = await run('echo -n prefix >&2; cat /w/missing.txt');
