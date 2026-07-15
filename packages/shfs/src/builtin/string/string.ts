@@ -14,7 +14,7 @@ const INTEGER_REGEX = /^[+-]?\d+$/;
 const CAPTURE_INDEX_REGEX = /^\d+$/;
 const PCRE_BACKREF_REGEX = /\\g(\d+)/g;
 const REPLACEMENT_TOKEN_REGEX =
-	/\\[ELUabefnrtv\\]|\$\$|\$\d+|\$\{[^}]*\}|[\s\S]/g;
+	/\\[ELUabefnrtv\\]|\$\$|\$\d+|\$[A-Za-z_][A-Za-z0-9_]*|\$\{[^}]*\}|[\s\S]/g;
 const WHITESPACE_CHARS = ' \t\n\r\v\f';
 const REPLACEMENT_ESCAPES: Readonly<Record<string, string>> = {
 	'\\a': '\x07',
@@ -284,6 +284,15 @@ function numericReference(value: string, found: RegExpExecArray): string {
 	return found[index] ?? '';
 }
 
+function namedReference(name: string, found: RegExpExecArray): string {
+	if (!Object.hasOwn(found.groups ?? {}, name)) {
+		throw new StringUsageError(
+			'string replace: Regular expression substitute error: unknown substring'
+		);
+	}
+	return found.groups?.[name] ?? '';
+}
+
 function reference(token: string, found: RegExpExecArray): string | undefined {
 	if (token === '$$') {
 		return '$';
@@ -293,17 +302,15 @@ function reference(token: string, found: RegExpExecArray): string | undefined {
 		if (CAPTURE_INDEX_REGEX.test(name)) {
 			return numericReference(name, found);
 		}
-		if (!Object.hasOwn(found.groups ?? {}, name)) {
-			throw new StringUsageError(
-				'string replace: Regular expression substitute error: unknown substring'
-			);
-		}
-		return found.groups?.[name] ?? '';
+		return namedReference(name, found);
 	}
 	if (!token.startsWith('$') || token.length === 1) {
 		return undefined;
 	}
-	return numericReference(token.slice(1), found);
+	const name = token.slice(1);
+	return CAPTURE_INDEX_REGEX.test(name)
+		? numericReference(name, found)
+		: namedReference(name, found);
 }
 
 function expand(template: string, found: RegExpExecArray): string {

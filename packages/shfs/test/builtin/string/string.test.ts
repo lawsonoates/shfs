@@ -187,6 +187,43 @@ test('string replace expands braced numeric capture references', async () => {
 	expect(runtime.context.status).toBe(0);
 });
 
+// fish string-replace.rst: regex captures accept unbraced and braced names.
+test('string replace expands named capture references', async () => {
+	const runtime = createBuiltinRuntime();
+	const records = await collect<ShellRecord>()(
+		string(runtime, {
+			operands: [
+				literal('-r'),
+				literal('(?<word>\\w+)(?<optional>x)?'),
+				literal(`$word:${'$'}{word}:$optional:${'$'}{optional}`),
+				literal('fish'),
+			],
+			subcommand: literal('replace'),
+		})
+	);
+
+	expect(records).toEqual([{ kind: 'line', text: 'fish:fish::' }]);
+	expect(runtime.context.status).toBe(0);
+
+	const invalidRuntime = createBuiltinRuntime();
+	const invalidRecords = await collect<ShellRecord>()(
+		string(invalidRuntime, {
+			operands: [
+				literal('-r'),
+				literal('(?<name>fish)'),
+				literal('$nameSuffix'),
+				literal('fish'),
+			],
+			subcommand: literal('replace'),
+		})
+	);
+	expect(invalidRecords).toEqual([]);
+	expect(invalidRuntime.context.status).toBe(2);
+	expect(invalidRuntime.context.stderr.snapshot().join('\n')).toContain(
+		'unknown substring'
+	);
+});
+
 // fish string-replace.rst: $n and ${n} accept the full numeric capture index.
 test('string replace greedily expands multi-digit capture references', async () => {
 	const pattern = '(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)';
