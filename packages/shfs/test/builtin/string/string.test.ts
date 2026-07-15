@@ -29,6 +29,44 @@ test('string replace emits replaced value', async () => {
 	expect(runtime.context.status).toBe(0);
 });
 
+// fish string-replace.rst: capture references and dollar escapes are regex-only;
+// the literal path copies replacement text verbatim.
+test('string replace keeps literal replacement tokens unchanged', async () => {
+	const cases = [
+		{ expected: '$&', operands: ['a', '$&', 'a'] },
+		{ expected: '$1', operands: ['a', '$1', 'a'] },
+		{ expected: '$$', operands: ['a', '$$', 'a'] },
+		{ expected: '$&$&', operands: ['-a', 'a', '$&', 'aa'] },
+	] as const;
+
+	for (const { expected, operands } of cases) {
+		const runtime = createBuiltinRuntime();
+		const records = await collect<ShellRecord>()(
+			string(runtime, {
+				operands: operands.map((operand) => literal(operand)),
+				subcommand: literal('replace'),
+			})
+		);
+
+		expect(records).toEqual([{ kind: 'line', text: expected }]);
+		expect(runtime.context.status).toBe(0);
+	}
+});
+
+// fish src/builtins/string/replace.rs: an empty literal pattern is a no-op.
+test('string replace ignores an empty literal pattern', async () => {
+	const runtime = createBuiltinRuntime();
+	const records = await collect<ShellRecord>()(
+		string(runtime, {
+			operands: [literal(''), literal('x'), literal('plain')],
+			subcommand: literal('replace'),
+		})
+	);
+
+	expect(records).toEqual([{ kind: 'line', text: 'plain' }]);
+	expect(runtime.context.status).toBe(1);
+});
+
 test('string regex replacement emits one record per physical output line', async () => {
 	const runtime = createBuiltinRuntime();
 	const records = await collect<ShellRecord>()(

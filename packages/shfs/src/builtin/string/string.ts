@@ -383,11 +383,15 @@ function plain(
 	replacement: string,
 	all: boolean
 ): { changed: boolean; text: string } {
+	if (pattern === '') {
+		return { changed: false, text: input };
+	}
+	const literalReplacement = () => replacement;
 	return {
 		changed: input.includes(pattern),
 		text: all
-			? input.replaceAll(pattern, replacement)
-			: input.replace(pattern, replacement),
+			? input.replaceAll(pattern, literalReplacement)
+			: input.replace(pattern, literalReplacement),
 	};
 }
 
