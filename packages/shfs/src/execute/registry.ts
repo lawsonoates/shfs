@@ -33,7 +33,7 @@ import { runWcCommand } from '../operator/wc/wc';
 import { runXargsCommand } from '../operator/xargs/xargs';
 import { formatRecord, type Record as ShellRecord } from '../record';
 import type { Stream } from '../stream';
-import { BufferedShellOutput, createShellInput } from './io';
+import { BufferedShellOutput, createShellInput, type ShellInput } from './io';
 import {
 	evaluateExpandedPathWordsEffect,
 	evaluateExpandedSinglePathEffect,
@@ -71,6 +71,7 @@ interface ExecuteStreamStepParams {
 	step: StreamStep;
 	fs: FS;
 	input: Stream<ShellRecord> | null;
+	sharedInput?: ShellInput;
 	context: ExecuteStepContext;
 	resolvedOutputRedirectPath?: string;
 	vars?: ReadonlyMap<string, string[]>;
@@ -138,6 +139,7 @@ type StreamCommandHandler<TCommand extends StreamCommand = StreamCommand> =
 		step: StreamStepForCommand<TCommand>;
 		fs: FS;
 		input: Stream<ShellRecord> | null;
+		sharedInput?: ShellInput;
 		context: ExecuteStepContext;
 		resolvedOutputRedirectPath?: string;
 		vars?: ReadonlyMap<string, string[]>;
@@ -239,6 +241,7 @@ function executeStreamStep({
 	step,
 	fs,
 	input,
+	sharedInput,
 	context,
 	resolvedOutputRedirectPath,
 	vars,
@@ -261,6 +264,7 @@ function executeStreamStep({
 		step: step as StreamStepForCommand<typeof step.cmd>,
 		fs,
 		input,
+		sharedInput,
 		context,
 		resolvedOutputRedirectPath,
 		vars,
@@ -289,9 +293,9 @@ function executeActionStep({
 function createBuiltinRuntime(
 	fs: FS,
 	context: ExecuteStepContext,
-	input: Stream<ShellRecord> | null
+	input: Stream<ShellRecord> | null,
+	stdin: ShellInput = createShellInput(input)
 ): BuiltinRuntime {
-	const stdin = createShellInput(input);
 	return {
 		fs,
 		context,
@@ -896,7 +900,7 @@ CommandRegistry.register('test', {
 
 CommandRegistry.register('read', {
 	kind: 'stream',
-	handler: ({ step, fs, input, context }) => {
+	handler: ({ step, fs, input, sharedInput, context }) => {
 		return fromRecordGenerator(
 			(async function* (): Stream<ShellRecord> {
 				const resolvedInput = await runOrReport(
@@ -919,8 +923,11 @@ CommandRegistry.register('read', {
 				const redirectedInput = resolvedInput.value.path
 					? lineRecordsFromPath(fs, resolvedInput.value.path)
 					: input;
+				const stdin = resolvedInput.value.path
+					? createShellInput(redirectedInput)
+					: sharedInput;
 				yield* read(
-					createBuiltinRuntime(fs, context, redirectedInput),
+					createBuiltinRuntime(fs, context, redirectedInput, stdin),
 					step.args
 				);
 			})()

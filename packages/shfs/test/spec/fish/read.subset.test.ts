@@ -9,9 +9,11 @@ import { MemoryFS } from '@/fs/memory';
 import { Shell } from '@/shell/shell';
 
 let shell!: Shell;
+let fs!: MemoryFS;
 
 beforeEach(() => {
-	shell = new Shell(new MemoryFS());
+	fs = new MemoryFS();
+	shell = new Shell(fs);
 });
 
 async function run(command: string): Promise<string> {
@@ -81,16 +83,55 @@ test('fish read: read.fish - input redirection preserves spaces for a single rea
 // read.fish:375-382 pipes three records into a block with sequential reads.
 // A function replaces the upstream piped begin block, which is out of scope.
 test('fish read: read.fish - sequential function reads share one stdin cursor', async () => {
-	await run('echo first > /tmp/first.txt');
-	await run('echo second > /tmp/second.txt');
+	fs.setFile('/tmp/two-lines.txt', 'first\nsecond\n');
 	const script = [
 		'function consume',
 		'    read first',
 		'    read second',
 		'    echo $first:$second',
 		'end',
-		'cat /tmp/first.txt /tmp/second.txt | consume',
+		'cat /tmp/two-lines.txt | consume',
 	].join('\n');
 
 	expect(await run(script)).toBe('first:second');
+});
+
+// read.fish:375-382 leaves the third line for cat after two reads. Use an
+// invalid UTF-8 suffix so the assertion also verifies byte-exact passthrough.
+test('fish read: read.fish - unread bytes remain available to cat', async () => {
+	const unreadSuffix = new Uint8Array([0xfe, 0xff, 0x0a]);
+	fs.setFile(
+		'/tmp/read-then-cat.bin',
+		new Uint8Array([
+			...new TextEncoder().encode('first\n'),
+			...unreadSuffix,
+		])
+	);
+	const script = [
+		'function consume',
+		'    read first',
+		'    cat',
+		'end',
+		'cat /tmp/read-then-cat.bin | consume',
+	].join('\n');
+
+	expect(await shell.$`${script}`.bytes()).toEqual(unreadSuffix);
+});
+
+test('fish read: read.fish - sequential reads decode UTF-8 split across records', async () => {
+	fs.setFile('/tmp/utf8-prefix.bin', new Uint8Array([0xc3]));
+	fs.setFile(
+		'/tmp/utf8-suffix.bin',
+		new Uint8Array([0xbf, 0x0a, 0x6e, 0x65, 0x78, 0x74, 0x0a])
+	);
+	const script = [
+		'function consume',
+		'    read first',
+		'    read second',
+		'    echo $first:$second',
+		'end',
+		'cat /tmp/utf8-prefix.bin /tmp/utf8-suffix.bin | consume',
+	].join('\n');
+
+	expect(await run(script)).toBe('ÿ:next');
 });

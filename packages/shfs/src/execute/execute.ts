@@ -750,13 +750,16 @@ async function executeStreamStep(params: {
 	let stdoutRecords: ShellRecord[] = [];
 	try {
 		if (stepAssignments.length === 0 || framePushed) {
+			const sharedInput =
+				inputRecords === null ? childContext.stdin : undefined;
 			const stepOutput = CommandRegistry.executeStep({
 				step,
 				fs,
 				input:
 					inputRecords === null
-						? (childContext.stdin?.records() ?? null)
+						? (sharedInput?.records() ?? null)
 						: recordsToStream(inputRecords),
+				sharedInput,
 				context: childContext,
 				resolvedOutputRedirectPath,
 				vars: framePushed

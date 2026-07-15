@@ -27,6 +27,19 @@ test('function input redirection overrides pipeline stdin', async () => {
 	expect(await run(script)).toBe('redirected');
 });
 
+test('explicit function-body pipelines do not consume inherited stdin', async () => {
+	const script = [
+		'function consume',
+		'    echo local | read inside',
+		'    read outside',
+		'    echo $inside:$outside',
+		'end',
+		'echo outer | consume',
+	].join('\n');
+
+	expect(await run(script)).toBe('local:outer');
+});
+
 test('function definitions persist across shell API invocations', async () => {
 	await run('function keeper\n    echo kept\nend');
 	expect(await run('keeper')).toBe('kept');
