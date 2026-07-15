@@ -8,6 +8,7 @@ import {
 import type { Record as ShellRecord } from '../../record';
 import { textToStdoutRecords } from '../../stdout-record';
 import type { Builtin, BuiltinRuntime } from '../types';
+import { translateNamedPosixClasses } from './posix-character-class';
 
 const INTEGER_REGEX = /^[+-]?\d+$/;
 const CAPTURE_INDEX_REGEX = /^\d+$/;
@@ -235,7 +236,7 @@ function field(text: string): ShellRecord {
 }
 
 function compile(subcommand: string, pattern: string): RegExp {
-	const source = pattern.replace(
+	const source = translateNamedPosixClasses(pattern).replace(
 		PCRE_BACKREF_REGEX,
 		(_whole, group: string) => `\\${group}`
 	);

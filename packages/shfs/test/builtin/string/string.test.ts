@@ -125,6 +125,49 @@ test('string match preserves unmatched capture positions', async () => {
 	expect(runtime.context.status).toBe(0);
 });
 
+// fish doc_src/cmds/string.rst:329-344: regex mode supports the complete
+// documented POSIX named-class table and its [[:^xxx:]] inverse form.
+test('string match supports documented POSIX character classes', async () => {
+	const cases = [
+		{ member: 'A', name: 'alnum', nonmember: '!' },
+		{ member: 'A', name: 'alpha', nonmember: '7' },
+		{ member: 'A', name: 'ascii', nonmember: 'é' },
+		{ member: '\t', name: 'blank', nonmember: 'A' },
+		{ member: '\x07', name: 'cntrl', nonmember: 'A' },
+		{ member: '7', name: 'digit', nonmember: 'A' },
+		{ member: '!', name: 'graph', nonmember: ' ' },
+		{ member: 'a', name: 'lower', nonmember: 'A' },
+		{ member: ' ', name: 'print', nonmember: '\x07' },
+		{ member: '!', name: 'punct', nonmember: 'A' },
+		{ member: '\t', name: 'space', nonmember: 'A' },
+		{ member: 'A', name: 'upper', nonmember: 'a' },
+		{ member: '_', name: 'word', nonmember: '-' },
+		{ member: 'F', name: 'xdigit', nonmember: 'G' },
+	] as const;
+
+	for (const { member, name, nonmember } of cases) {
+		for (const [pattern, value, expectedStatus] of [
+			[`^[[:${name}:]]$`, member, 0],
+			[`^[[:${name}:]]$`, nonmember, 1],
+			[`^[[:^${name}:]]$`, nonmember, 0],
+			[`^[[:^${name}:]]$`, member, 1],
+		] as const) {
+			const runtime = createBuiltinRuntime();
+			const records = await collect<ShellRecord>()(
+				string(runtime, {
+					operands: [literal('-r'), literal(pattern), literal(value)],
+					subcommand: literal('match'),
+				})
+			);
+
+			expect(records).toEqual(
+				expectedStatus === 0 ? [{ kind: 'line', text: value }] : []
+			);
+			expect(runtime.context.status).toBe(expectedStatus);
+		}
+	}
+});
+
 // fish string-replace.rst: numeric captures accept ${n} references.
 test('string replace expands braced numeric capture references', async () => {
 	const runtime = createBuiltinRuntime();
