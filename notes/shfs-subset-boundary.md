@@ -3,7 +3,7 @@
 `shfs` is a fish-inspired subset for deterministic, agent-friendly scripting over a virtual filesystem.
 It is not a full fish shell and does not target host OS parity.
 
-This revision (2026-07-12) replaces the post-scripting-subset draft. It was
+This revision (2026-07-15) replaces the post-scripting-subset draft. It was
 verified against the implementation (`packages/compiler` grammar and
 `packages/shfs` registry/builtins) and against a runtime probe battery, not
 inferred from older notes.
@@ -16,7 +16,10 @@ inferred from older notes.
   - `$var` with fish list semantics: element counts (`count`), indexing and
     slicing (`$var[1]`, `$var[2..-1]`, multiple ranges, open ranges), quoted
     join vs unquoted per-element expansion, empty-list word elision, and
-    cartesian products of adjacent expansions
+    cartesian products of adjacent expansions; nested variables and command
+    substitutions may supply index values and slice bounds
+  - quoted PATH-like lists render with colon delimiters; PATH/CDPATH empty
+    entries render as `.`, while MANPATH empty entries remain empty
   - `set` with `-l`/`-g`/unscoped assignment, erase (`-e`), query (`-q`),
     append/prepend (`-a`/`-p`), and index/slice assignment and erasure
   - command-scoped assignment prefixes (`name=value command`, PATH-like
@@ -25,16 +28,22 @@ inferred from older notes.
 - Command substitution:
   - `(cmd)` and `$(cmd)` execute and capture output; `$(cmd)` also inside
     double quotes; unquoted substitutions split output lines into arguments;
-    substitution output can be sliced (`(cmd)[2]`); substitutions nest
+    substitution output can be sliced (`(cmd)[2]`); substitutions nest;
+    explicit `string split`/`split0` fields survive without inferred
+    trailing-newline trimming
 - Multi-statement scripts:
-  - newline and `;` statement chaining, comments (`#`), backslash escapes
+  - newline and `;` statement chaining, comments (`#`), and fish-style
+    character, byte, Unicode, octal, and line-continuation escapes
 - Boolean chaining, combiners, and status:
   - `and`, `or`, `&&`, `||` (with newline continuation), `not`/`!` negation,
     `$status`
 - Control flow and blocks:
-  - `if`/`else if`/`else`/`end`, `while`, `for ... in`, `begin ... end`,
-    `break`, `continue` (fish block scoping for local variables; the `for`
-    loop variable persists after the loop as in fish)
+  - `if`/`else if`/`else`/`end`, `switch`/`case`, `while`, `for ... in`,
+    `begin ... end`, `break`, `continue` (fish block scoping for local
+    variables; the `for` loop variable persists after the loop as in fish)
+  - `switch` selects the first matching case with fish-style wildcard
+    patterns, preserves incoming status until a selected body changes it, and
+    rejects values that expand to multiple words
 - Functions:
   - `function name [-a names]`/`end`, `$argv`, `return [status]`,
     function-local scope with caller-local isolation, reserved-keyword name
@@ -71,18 +80,19 @@ inferred from older notes.
 
 ### Builtins (fish-derived)
 
-- `echo` (joins arguments with spaces; no option flags — see out of scope),
-  `true`, `false`, `count` (arguments plus stdin records when piped, as in
-  fish)
+- `echo` with fish-style `-n`, `-s`, `-e`, and `-E` option parsing, combined
+  flags, escape decoding, and newline suppression; `true`, `false`, `count`
+  (arguments plus stdin physical lines when piped, as in fish)
 - `test` and its `[` alias: string/numeric/file predicates, `!`, `-a`/`-o`,
   and fish's `test-require-arg` behavior (missing operands are errors; bare
   `-n`/`-z` treat the missing operand as empty)
-- `read NAME`: exactly one variable name, consuming one record from pipeline
-  stdin or `< file` input; deterministic error on closed stdin
-- `string` subcommands: `match` (`-q`, `-v`; glob patterns), `replace`
-  (literal substring, first occurrence; `-a`/`--all` for every occurrence),
-  `length`, `sub` (`-s`, `-l`, `-e`), `split`, `join`, `trim`, `repeat`,
-  `lower`, `upper`
+- `read NAME`: exactly one variable name, consuming one physical line from
+  pipeline stdin or `< file` input while leaving unread input available to
+  later consumers; deterministic error on closed stdin
+- `string` subcommands: `match` (`-q`, `-v`, `-r`; glob or regex patterns),
+  `replace` (literal or `-r` regex replacement, `-a`/`--all`, capture
+  references and case conversion), `length`, `sub` (`-s`, `-l`, `-e`),
+  `split`, `split0`, `join`, `trim`, `repeat`, `lower`, `upper`
 - `set` as described under variables
 - `cd` / `pwd` with `.`, `..`, absolute and relative path handling; `cd`
   without arguments goes to the filesystem root (there is no `$HOME`)
@@ -92,7 +102,9 @@ inferred from older notes.
 - File management actions: `cp` (`-r`, `-f`, `-i`), `mv` (`-f`, `-i`),
   `mkdir` (`-p`), `rm` (`-r`, `-f`, `-i`), `touch` (`-a`, `-m`)
 - Listing and reading: `ls` (`-a`, `-l`), `cat` (numbering/ends/tabs/squeeze
-  display flags), `head` / `tail` (`-n`, files or stdin)
+  display flags), `head` / `tail` (`-n`, files or stdin); plain file replay
+  and stdin line selection preserve exact bytes and final-line termination,
+  and partial stdin consumers leave the unread suffix available
 - Recursive file discovery with `find`:
   - starting paths or default current directory
   - deterministic recursive traversal over the virtual filesystem
@@ -137,8 +149,8 @@ inferred from older notes.
 
 ### Language
 
-- `switch` / `case`, `eval`, `source`, brace expansion (`{a,b}`), tilde
-  expansion, and indirect variable expansion (`$$name`)
+- `eval`, `source`, brace expansion (`{a,b}`), tilde expansion, and indirect
+  variable expansion (`$$name`)
 - Blocks as pipeline components or redirection targets
   (`begin ... end | cmd`, `cmd | begin ... end`, `begin ... end > file`),
   and brace command blocks (`{ ...; }`)
@@ -156,14 +168,13 @@ inferred from older notes.
   `functions`, `alias`, `abbr`, `status`, `time`
 - Additional fish builtins: `argparse`, `contains`, `math`, `path`, `printf`,
   `random`, `realpath`, `set_color`, `ulimit`, `umask`, `version`, `psub`
-- `echo` option flags (`-n`, `-s`, `-e`, `-E`) — arguments starting with `-`
-  are printed literally
 - `read` flags and multi-variable forms (`-l`/`-g`, `-n`, `-z`, `-d`,
   `--list`, prompts, multiple names)
-- `string` subcommands and flags beyond the documented set: regex modes
-  (`-r`), `escape`, `unescape`, `collect`, `pad`, `shorten`, `split0`,
-  `join0`, visible-width/color handling
-- `cd -`, `$CDPATH`, `$HOME`-relative `cd`, `prevd`/`nextd`, `pwd -P`/`-L`
+- `string` subcommands and flags beyond the documented set: `escape`,
+  `unescape`, `collect`, `pad`, `shorten`, `join0`, regex indexes/groups-only,
+  replace filtering/max-matches, and visible-width/color handling
+- `cd -`, `$CDPATH`-based lookup, `$HOME`-relative `cd`, `prevd`/`nextd`,
+  `pwd -P`/`-L`
 
 ### Environment and host behavior
 

@@ -34,15 +34,26 @@ substitutions, and child commands, see `docs/execution-boundary-audit.md`.
 > The `count` entry in item 26 below is resolved. Remaining divergences are
 > tabulated in the audit document.
 
-Local `shfs` fish-derived coverage directly ports 32 of 208 upstream check
+> **Update 2026-07-15**: the audit follow-ups added Fish word escapes,
+> comment-aware substitutions, quoted PATH-like rendering, nested slice/index
+> expansion, `switch`/`case`, `echo` flags and escapes, regex `string
+> match`/`replace`, `split0`, split-aware substitutions, and exact byte/line
+> stream handling across redirection, child commands, file replay, shared
+> stdin, and partial `head`. Items 4 and the identified parts of 7, 9, 10,
+> 13, 21, 26, and 30 are resolved; the subset boundary documents the
+> remaining limits.
+
+Local `shfs` fish-derived coverage directly ports 36 of 208 upstream check
 scripts: `andandoror.fish`, `andor.fish`, `basic.fish`, `cd.fish`,
-`cmdsub.fish`, `command-vars-persist.fish`, `count.fish`,
+`cmdsub.fish`, `colon-delimited-var.fish`, `command-vars-persist.fish`,
+`count.fish`,
 `deep-cmdsub.fish`, `directory-redirect.fish`, `disown-parent.fish`,
 `empty.fish`, `exit-status-with-closing-stderr.fish`, `expansion.fish`,
 `fish_add_path.fish`, `for.fish`, `function-definition.fish`,
 `function.fish`, `glob.fish`, `line-continuation.fish`, `loops.fish`,
-`not.fish`, `read.fish`, `redirect.fish`, `return.fish`, `scoping.fish`,
-`set.fish`, `slices.fish`, `string.fish`, `test.fish`,
+`locale.fish`, `not.fish`, `read.fish`, `redirect.fish`, `return.fish`,
+`scoping.fish`, `set.fish`, `slices.fish`, `string-advanced.fish`,
+`string.fish`, `switch.fish`, `test.fish`,
 `variable-assignment.fish`, `wildcard.fish`, and `zero_based_array.fish`.
 Those ports are subset ports, not full parity ports.
 
@@ -60,10 +71,10 @@ Those ports are subset ports, not full parity ports.
    pipeline, timing, backgrounding, and scoping behavior on blocks. Evidence:
    `andandoror.fish`, `andor.fish`, `braces.fish`, `scoping.fish`.
 
-4. Control flow is missing. Fish has `if`/`else if`/`else`, `while`, `for`,
-   `switch`/`case`, `break`, and loop-specific scoping/status behavior. Evidence:
-   `andandoror.fish`, `andor.fish`, `for.fish`, `loops.fish`, `switch.fish`,
-   `set.fish`.
+4. **Resolved for the shfs subset.** `if`/`else if`/`else`, `while`, `for`,
+   `switch`/`case`, `break`, and loop/switch scoping and status behavior are
+   implemented. Whole-block pipelines/redirection and brace command blocks
+   remain excluded under item 3.
 
 5. Function support is missing. Fish has function definitions, `$argv`, return
    status, function-local scope, autoloading, event handlers, wrapping, erasing,
@@ -183,11 +194,12 @@ Those ports are subset ports, not full parity ports.
     tokenization, prompt options, scope/export flags, large-read limits, and
     invalid UTF-8 preservation. Evidence: `read.fish`, `tmux-read.fish`.
 
-21. The `string` builtin is incomplete. `shfs` only covers a small
-    `match`/`replace` subset; fish supports `collect`, `escape`, `unescape`,
-    `join`, `join0`, `length`, `lower`, `upper`, `pad`, `repeat`, `shorten`,
-    `split`, `split0`, `sub`, `trim`, regex groups/indexes, invert/all/max
-    flags, NUL behavior, visible-width/color handling, and detailed errors.
+21. The `string` builtin is incomplete. `shfs` covers literal and regex
+    `match`/`replace`, `join`, `length`, `lower`, `upper`, `repeat`, `split`,
+    `split0`, `sub`, and `trim`; fish additionally supports `collect`,
+    `escape`, `unescape`, `join0`, `pad`, `shorten`, more regex
+    group/index/filter/max flags, broader NUL behavior, visible-width/color
+    handling, and detailed errors.
     Evidence: `string.fish`, `string-advanced.fish`,
     `features-string-backslashes.fish`.
 
@@ -224,7 +236,7 @@ Those ports are subset ports, not full parity ports.
     `fish_add_path.fish`, `fish_config.fish`.
 
 26. Many fish builtins are absent. Missing command surfaces include `argparse`,
-    `contains`, `count`, `eval`, `exit`, `math`, `path`, `printf`, `random`,
+    `contains`, `eval`, `exit`, `math`, `path`, `printf`, `random`,
     `realpath`, `set_color`, `source`, `time`, `ulimit`, `umask`, and `version`.
     Evidence: `argparse.fish`, `contains_opt.fish`, `count.fish`, `eval.fish`,
     `fish_exit.fish`, `math.fish`, `path.fish`, `printf.fish`,

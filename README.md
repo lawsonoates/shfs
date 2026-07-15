@@ -53,7 +53,7 @@ Included behavior:
 - command substitution (`(cmd)` and `$(cmd)`, including `$(cmd)` inside double quotes)
 - multi-statement scripts with newline and `;`
 - boolean chaining, combiners, and negation (`and`, `or`, `&&`, `||`, `not`, `!`, `$status`)
-- control flow and blocks (`if`/`else if`/`else`, `while`, `for ... in`, `begin ... end`, `break`, `continue`)
+- control flow and blocks (`if`/`else if`/`else`, `switch`/`case`, `while`, `for ... in`, `begin ... end`, `break`, `continue`)
 - functions (`function name [-a names]` ... `end`, `$argv`, `return`)
 - script-core builtins (`test`/`[`, `echo`, `read`, `string`, `true`, `false`, `count`)
 - core path behavior (`cd`, `pwd`, `.`, `..`, absolute/relative paths)
@@ -63,7 +63,7 @@ Included behavior:
 
 Explicitly out of scope:
 
-- `CDPATH`
+- `CDPATH`-based directory lookup
 - host OS/process emulation, job control, and interactive shell UX
 - full fish compatibility or fish-verbatim error text
 
@@ -78,18 +78,21 @@ Canonical boundary doc: [notes/shfs-subset-boundary.md](notes/shfs-subset-bounda
     - `set -e name` erases, `set -q name` queries, `set -a`/`-p` append/prepend
     - `$status` exposes the last command status; `$argv` holds function arguments
     - unquoted list expansion yields one argument per element; quoted expansion joins with spaces; empty lists elide the word
+    - quoted PATH-like variables use colon-delimited rendering with fish empty-entry semantics
 - command substitution:
     - `(echo subdir)` and `$(echo subdir)` can be used as arguments
     - `$(cmd)` also works inside double quotes and preserves inner newlines
     - unquoted substitutions split output lines into arguments; output can be sliced (`(cmd)[2]`)
+    - explicit fields from `string split` and `string split0` remain distinct, including trailing empty fields
 - script statements:
     - newline and semicolon statement separators
     - `and`/`or` keywords and `&&`/`||` combiners chain on the previous status
     - `not`/`!` negate a job's status
-    - `if`/`else if`/`else`, `while`, `for ... in`, and `begin ... end` blocks with `break`/`continue`
+    - `if`/`else if`/`else`, `switch`/`case`, `while`, `for ... in`, and `begin ... end` blocks with `break`/`continue`
     - `function name [-a names] ... end` defines functions with `$argv` and `return`
     - `name=value command` scopes an assignment to a single command
 - quoting and expansion:
+    - unquoted words support fish-style character, byte, Unicode, octal, and line-continuation escapes
     - quoted wildcard text is treated literally
     - unquoted wildcard text is expanded for in-scope path arguments
 
@@ -126,6 +129,12 @@ Script builtins:
 - test (and its `[` alias)
 - true
 
+Notable builtin coverage:
+
+- `echo` supports fish-style `-n`, `-s`, `-e`, and `-E` option parsing and escape decoding
+- `string match` and `string replace` support literal and regex modes; `string split0` preserves explicit NUL-delimited fields
+- `cat`, `head`, and `tail` preserve exact file and stdin bytes when no text transformation is requested
+
 Symlink-related command behavior:
 
 - `find` supports the `-H`, `-L`, and `-P` link-following modes, plus the `-type l` and `-xtype` predicates
@@ -154,15 +163,19 @@ shfs is designed to be a tool used by agents to enable the benefits of a filesys
 ```ebnf
 program        ::= separator* statement (separator+ statement)* separator*
 separator      ::= ";" | NEWLINE | COMMENT
-statement      ::= chain_prefix? pipeline
+statement      ::= chain_prefix? negation? (pipeline | block)
 chain_prefix   ::= "and" | "or"
+negation       ::= "not" | "!"
 pipeline       ::= command ("|" NEWLINE* command)*
+block          ::= if_block | while_block | for_block | begin_block | switch_block | function_block
+switch_block   ::= "switch" word separator+ case_clause* "end"
+case_clause    ::= "case" word* separator+ statement*
 command        ::= word command_part*
 command_part   ::= word | redirection
 redirection    ::= "<" word | ">" word | ">>" word
 word           ::= word_part+
 word_part      ::= literal | glob | substitution
-substitution   ::= "(" program ")"
+substitution   ::= "(" program ")" | "$(" program ")"
 literal        ::= bare_text | single_quoted | double_quoted
 single_quoted  ::= "'" single_quoted_text "'"
 double_quoted  ::= '"' double_quoted_part* '"'

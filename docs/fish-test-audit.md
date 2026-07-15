@@ -1,4 +1,4 @@
-# Fish Upstream Check Audit (2026-07-12, large files re-read 2026-07-13)
+# Fish Upstream Check Audit (2026-07-12, follow-ups completed 2026-07-15)
 
 This document records a full audit of every file in fish-shell
 `tests/checks/` (master snapshot in the opensrc cache, 208 check scripts)
@@ -43,11 +43,27 @@ the extended subset tests):
 | `function -a status` is rejected as read-only (was accepted) | `function.fish:160-176` | parser `validateArgumentName` |
 | A function redefined by a substitution in its own arguments is resolved after expansion (`foo (function foo; ...)` ran the old body) | `function.fish:182-186` | `call` step looks up the definition after expanding arguments |
 
+## Follow-up implementations (2026-07-15)
+
+The worthwhile candidates identified below were implemented from upstream
+tests and documentation in three focused changes:
+
+- Fish word escapes, comment-aware substitution scanning, quoted PATH-like
+  rendering, nested/index-bound expansion, malformed index diagnostics, and
+  invalid undefined-variable erase slices.
+- `switch`/`case` parsing, compilation, runtime matching, scope, status, and
+  deterministic diagnostics.
+- Fish-style `echo` flags and escapes; regex `string match`/`replace`;
+  `split0` and split-aware substitutions; exact byte/line handling through
+  pipelines, redirection, child commands, file replay, shared stdin, and
+  partial `head` consumption.
+
 ## Newly ported subset files
 
 `count`, `empty`, `command-vars-persist`, `line-continuation`, `scoping`,
 `wildcard`, `deep-cmdsub`, `directory-redirect`,
-`exit-status-with-closing-stderr` — see `test/spec/fish/*.subset.test.ts`;
+`exit-status-with-closing-stderr`, `colon-delimited-var`, `locale`,
+`string-advanced`, and `switch` — see `test/spec/fish/*.subset.test.ts`;
 each header records its reductions.
 
 Extended existing ports: `loops` (loop-variable scoping, reduced from
@@ -61,9 +77,6 @@ diverges. No failing tests are committed for them.
 
 | Behavior | Upstream evidence | shfs today | Disposition |
 | --- | --- | --- | --- |
-| `echo` flags `-n`/`-s`/`-e`/`-E` | `count.fish:46`, `basic.fish`, many | printed literally | Out of scope (boundary); revisit — `echo -n` is common |
-| Backslash escape sequences (`\n`, `\xHH`, `\uXXXX`) in words | `locale.fish:31-36`, `line-continuation.fish:14-21` | backslash drops, char kept literally | Divergence; candidate for lexer support |
-| Quoted PATH-like expansion joins with `:` and maps empty elements to `.` | `colon-delimited-var.fish` | joins with spaces | Divergence; PATH special-casing only exists for assignment prefixes |
 | Variables as command names (`$CMD`) and empty-command status 123 | `vars_as_commands.fish`, `status-value.fish:3-8` | deterministic compile error `command-name-not-literal` | Decision: command names are literal in shfs |
 | Fish-exact failure statuses 121 (bad expansion), 124 (glob no-match) | `status-value.fish` | deterministic errors with status 1 | Decision: stable error model, not fish-verbatim |
 | `test` POSIX zero/one-argument modes (`test foo` → 0) | `test-posix.fish` | missing-operand error | Decision: shfs follows fish's `test-require-arg` future semantics |
@@ -76,14 +89,7 @@ Recorded during the 2026-07-13 re-read (probed; left as divergences):
 
 | Behavior | Upstream evidence | shfs today | Disposition |
 | --- | --- | --- | --- |
-| A trailing `string split`/`split0` in a substitution passes its splits through as-is (`count (string split / /)` → 2) | `string.fish:893-895`, fish docs `language.rst` | substitutions always re-split on newlines and trim trailing empties → 0 | Divergence; would need split-aware substitutions |
-| Nested variable indexes in brackets (`$outer[$inner[2]]`) | `expansion.fish:256-261` | `Invalid index value` | Divergence; index text does not re-enter the expander |
-| Command substitutions as index bounds (`$test[(count $test)..1]`) | `slices.fish:36-39` | `Invalid index value` | Divergence, already noted in the slices port header |
-| Empty variables as index bounds (`$test[$empty..]` → nothing, `$test[.."$empty"]` → whole list) | `slices.fish:62-68` | `Invalid index value` | Divergence; empty bounds are not defaulted |
-| Unterminated index in quotes (`"$abc["`) is an error | `expansion.fish:337-340` | expands `$abc` and keeps `[` literally | Divergence |
-| A comment inside a substitution hides a closing `)` on the same line | `basic.fish:558-567` | parse error | Divergence (lexer treats `)` in comments as structure) |
 | `set -q` with no names / names expanding to nothing → status 255 | `set.fish:942-948` | compile error (status 1) / status 1 | Decision: deterministic error model |
-| `set -e undefined[x..]` reports an invalid index | `set.fish:994-1006` | silent status 4 | Divergence, minor |
 | Variable-derived `for` variable names (`for $var1 in ...`) | `basic.fish:463-469` | compile error | Decision: names are literal, matches `vars_as_commands` |
 | Bare `read` with no variable name is accepted | `read.fish:3` | `read` requires exactly one name | Decision: boundary (`read NAME`) |
 
@@ -112,12 +118,13 @@ read-only-variable enforcement across `set`/`read`/`for`/`function -a`).
 `glob`, `test`, `andandoror`, `fish_add_path`, and `disown-parent` needed
 no changes — their ports already covered every in-scope upstream case.
 
-Newly ported (9): `count`, `empty`, `command-vars-persist`,
+Newly ported (13): `count`, `empty`, `command-vars-persist`,
 `line-continuation` (partial: escape-spelled keywords out of scope),
 `scoping` (partial: `-U`/`-x`/`-u` out of scope), `wildcard` (partial:
-permission traversal out of scope), `deep-cmdsub` (reduced), 
+permission traversal out of scope), `deep-cmdsub` (reduced),
 `directory-redirect` (reduced), `exit-status-with-closing-stderr`
-(reduced).
+(reduced), `colon-delimited-var` (quoted rendering subset), `locale`
+(escape subset), `string-advanced` (regex subset), and `switch`.
 
 Out of scope — interactive terminal sessions (tmux-driven):
 `tmux-abbr`, `tmux-autosuggestion`, `tmux-autosuggestion-multiline`,
@@ -179,24 +186,20 @@ Out of scope — builtins excluded by the boundary: `argparse`,
 
 Out of scope — language features and diagnostics excluded by the boundary:
 `bad-option`, `braces` (brace blocks and brace expansion), `cmdsub-limit`
-(`$fish_read_limit`), `colon-delimited-var` (divergence recorded above),
+(`$fish_read_limit`),
 `features-ampersand-nobg-in-token1`, `features-ignore-terminfo`,
 `features-nocaret1`, `features-nocaret2`, `features-nocaret3`,
 `features-nocaret4`, `features-percent-self1`, `features-percent-self2`,
 `features-qmark1`, `features-qmark2`, `features-string-backslashes`,
-`features-string-backslashes-off`, `line-number`, `locale`,
-`locale-numeric`, `message-localization`,
+`features-string-backslashes-off`, `line-number`, `locale-numeric`,
+`message-localization`,
 `message-localization-tier-is-declared`, `stack-overflow`,
-`string-advanced` (regex modes), `switch`, `symlinks-not-overwritten`,
-`syntax-error-location`, `test-posix` (decision recorded above),
+`symlinks-not-overwritten`, `syntax-error-location`, `test-posix` (decision recorded above),
 `status-value` (divergence recorded above), `vars_as_commands`
 (divergence recorded above).
 
-## Follow-ups worth considering
+## Follow-up status
 
-1. `echo -n` (and possibly `-s`) — the most common in-scope-adjacent echo
-   usage in upstream checks; adding it would unlock many reductions.
-2. Lexer escape sequences (`\n`, `\xHH`) — used pervasively upstream.
-3. `string match -r`/`string replace -r` regex modes — the largest string
-   surface still missing.
-4. `switch`/`case` — the only control-flow keyword still excluded.
+All four candidates previously listed here—`echo` flags, lexer escapes,
+regex string modes, and `switch`/`case`—are implemented. Remaining deliberate
+differences are recorded in the tables above and in the subset boundary.

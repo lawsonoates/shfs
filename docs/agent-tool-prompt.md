@@ -18,12 +18,16 @@ Strict fish-inspired subset for filesystem commands. Not POSIX, not full fish. D
 - **sort subset**: C-locale/byte-style line ordering over stdin/files/pipelines; supports `-n`, `-k POS[,POS]`, `-t CHAR`, `-u`, `-c`, and `-C`
 - **xargs subset**: supports `-0`/`--null`, `-d`, `-E`, `-I`, `-L`, `-n`, `-r`/`--no-run-if-empty`; default command is `echo`; `-n`/`-L`/`-I` are mutually exclusive with last-flag-wins behavior
 - **Statements**: multiple statements separated by newline or `;`
-- **Quoting**: Single `'` (literal, no escapes), double `"` (allows `(command)` substitution, escapes `\"` and `\\` only)
-- **Escapes**: `\` escapes next char outside quotes, line continuation at EOL; literal in single quotes
-- **Command substitution**: `(command)` syntax (NOT `$()`), recursive, output trimmed/split on newlines
+- **Quoting**: single `'` is literal; double `"` supports variable and command substitution
+- **Escapes**: fish-style character, hexadecimal byte, Unicode, octal, and line-continuation escapes in unquoted words; literal in single quotes
+- **Command substitution**: `(command)` and `$(command)`, recursive, with unquoted output split on physical lines; explicit `string split`/`split0` fields are preserved
 - **Globbing**: `*`, `**`, `?`, `[abc]`, `[a-z]`, `[!abc]`, trailing `/` for directory-only (no expansion in quotes, no-match = deterministic error)
-- **Variables**: `$name` expansion, `$status` for last exit code; `set name value` to assign (`-l` local, `-g` global)
-- **Chaining**: `and` (run if previous succeeded), `or` (run if previous failed)
+- **Variables**: fish lists with indexing/slices, `$status`, `$argv`, and `set` assignment/query/erase/append/prepend modes; nested expansions may provide index bounds
+- **Chaining**: `and`/`&&` run after success, `or`/`||` after failure, and `not`/`!` negate status
+- **Control flow**: `if`/`else if`/`else`, `switch`/`case`, `while`, `for ... in`, `begin ... end`, `break`, and `continue`
+- **Functions**: `function name [-a names] ... end`, `$argv`, `return`, local scope, and inherited stdin
+- **echo subset**: fish-style `-n`, `-s`, `-e`, and `-E`, including combined flags and escape decoding
+- **string subset**: literal and `-r` regex `match`/`replace`, `split`/`split0`, `join`, `length`, `sub`, `trim`, `repeat`, `lower`, and `upper`
 - **Symlinks**: traversal and command semantics (`find` link modes and predicates, symlink-preserving recursive `cp`); no `ln` command — symlinks are created via the host filesystem API
 - **Redirection**: `< file` (input), `> file` (output, overwrites), `>> file` (output, appends), noclobber forms `>?`/`>>?`, fd forms such as `2>&1` and `2>&-`, stderr pipe `&|`, and combined output forms `&>`/`&>>`
 - **Comments**: `#` to EOL (only at token start)
@@ -31,8 +35,7 @@ Strict fish-inspired subset for filesystem commands. Not POSIX, not full fish. D
 ## Not Supported
 
 - Brace expansion (`{a,b,c}`)
-- Control flow (`if`, `for`, `while`, `switch`, functions)
 - `ln` (create symlinks through the filesystem API instead)
-- `CDPATH`, scoped env injection (`env KEY=... cmd`), host OS/process emulation, external binaries, or `$PATH`
+- `CDPATH`-based lookup, scoped env injection (`env KEY=... cmd`), host OS/process emulation, external binaries, or `$PATH`
 - Full GNU/POSIX/fish compatibility beyond the documented subsets
-- Background `&`, `&&`/`||`, `not`, `~`, `$()`, heredocs, process substitution
+- Background `&`, `~`, heredocs, process substitution, brace expansion, and indirect variable expansion
