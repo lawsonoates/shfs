@@ -52,7 +52,8 @@ function formatNonPrinting(text: string): string {
 function renderLineText(
 	text: string,
 	lineNumber: number | null,
-	options: Required<CatOptions>
+	options: Required<CatOptions>,
+	terminated: boolean
 ): string {
 	let rendered = text;
 	const showNonprinting = options.showAll || options.showNonprinting;
@@ -65,7 +66,10 @@ function renderLineText(
 	if (showTabs) {
 		rendered = rendered.replaceAll('\t', '^I');
 	}
-	if (showEnds) {
+	if (showEnds && terminated) {
+		if (rendered.endsWith('\r')) {
+			rendered = `${rendered.slice(0, -1)}^M`;
+		}
 		rendered = `${rendered}$`;
 	}
 	if (lineNumber !== null) {
@@ -134,7 +138,12 @@ async function* emitLineRecord(
 
 	yield {
 		...record,
-		text: renderLineText(rendered.text, rendered.lineNumber, options),
+		text: renderLineText(
+			rendered.text,
+			rendered.lineNumber,
+			options,
+			record.terminated !== false
+		),
 	};
 }
 
@@ -150,7 +159,7 @@ async function* emitJsonRecord(
 
 	yield {
 		kind: 'line',
-		text: renderLineText(rendered.text, rendered.lineNumber, options),
+		text: renderLineText(rendered.text, rendered.lineNumber, options, true),
 	};
 }
 
