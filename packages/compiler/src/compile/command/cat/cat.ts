@@ -64,27 +64,6 @@ export const compileCatEffect: (
 			}
 		}
 
-		const hasInputRedirection = cmd.redirections.some(
-			(redirection) => redirection.kind === 'input'
-		);
-		const hasOutputRedirection = cmd.redirections.some(
-			(redirection) => redirection.kind === 'output'
-		);
-
-		if (
-			fileArgs.length === 0 &&
-			!hasInputRedirection &&
-			!hasOutputRedirection
-		) {
-			return yield* new CompileError(
-				createCommandDiagnostic(
-					'cat',
-					'missing-file',
-					'cat requires at least one file'
-				)
-			);
-		}
-
 		return Result.ok({
 			cmd: 'cat',
 			args: {

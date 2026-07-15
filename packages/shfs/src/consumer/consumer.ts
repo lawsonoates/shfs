@@ -1,4 +1,4 @@
-import { formatRecord, type Record } from '../record';
+import { type Record, recordsToBytes } from '../record';
 import type { Stream } from '../stream';
 
 /**
@@ -28,7 +28,9 @@ export function collect<T>(): Consumer<T, T[]> {
 export function stdout(): Consumer<Record> {
 	return async (input) => {
 		for await (const record of input) {
-			process.stdout.write(`${formatRecord(record)}\n`);
+			process.stdout.write(
+				recordsToBytes([record], { trailingNewline: true })
+			);
 		}
 	};
 }

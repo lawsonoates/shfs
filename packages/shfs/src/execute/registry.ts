@@ -19,7 +19,7 @@ import { cat } from '../operator/cat/cat';
 import { cp } from '../operator/cp/cp';
 import { find } from '../operator/find/find';
 import { runGrepCommand } from '../operator/grep/grep';
-import { headFiles, headLines } from '../operator/head/head';
+import { headFiles } from '../operator/head/head';
 import { ls } from '../operator/ls/ls';
 import { mkdir } from '../operator/mkdir/mkdir';
 import { mv } from '../operator/mv/mv';
@@ -33,7 +33,7 @@ import { runWcCommand } from '../operator/wc/wc';
 import { runXargsCommand } from '../operator/xargs/xargs';
 import { formatRecord, type Record as ShellRecord } from '../record';
 import type { Stream } from '../stream';
-import { BufferedShellOutput, createShellInput } from './io';
+import { BufferedShellOutput, createShellInput, type ShellInput } from './io';
 import {
 	evaluateExpandedPathWordsEffect,
 	evaluateExpandedSinglePathEffect,
@@ -44,12 +44,18 @@ import {
 } from './path';
 import { files } from './producers';
 import { empty, fromRecordGenerator, type RecordStream } from './record-stream';
-import { toFormattedLineStream } from './records';
+import {
+	fileRecordToLines,
+	toFormattedLineStream,
+	toFormattedRecordStream,
+} from './records';
 import {
 	resolveInputRedirectEffect,
 	resolveRedirectPathEffect,
 	withInputRedirect,
 } from './redirection';
+
+const NEWLINE_BYTE = 0x0a;
 
 export type ActionStep = Extract<
 	StepIR,
@@ -65,6 +71,7 @@ interface ExecuteStreamStepParams {
 	step: StreamStep;
 	fs: FS;
 	input: Stream<ShellRecord> | null;
+	sharedInput?: ShellInput;
 	context: ExecuteStepContext;
 	resolvedOutputRedirectPath?: string;
 	vars?: ReadonlyMap<string, string[]>;
@@ -113,14 +120,7 @@ function resolveCpSourcePath(cwd: string, path: string): string {
 const ROOT_DIRECTORY = '/';
 
 function lineRecordsFromPath(fs: FS, path: string): Stream<ShellRecord> {
-	return (async function* (): Stream<ShellRecord> {
-		for await (const line of fs.readLines(path)) {
-			yield {
-				kind: 'line',
-				text: line,
-			};
-		}
-	})();
+	return fileRecordToLines(fs, { kind: 'file', path });
 }
 
 let commandRegistriesVerified = false;
@@ -139,6 +139,7 @@ type StreamCommandHandler<TCommand extends StreamCommand = StreamCommand> =
 		step: StreamStepForCommand<TCommand>;
 		fs: FS;
 		input: Stream<ShellRecord> | null;
+		sharedInput?: ShellInput;
 		context: ExecuteStepContext;
 		resolvedOutputRedirectPath?: string;
 		vars?: ReadonlyMap<string, string[]>;
@@ -240,6 +241,7 @@ function executeStreamStep({
 	step,
 	fs,
 	input,
+	sharedInput,
 	context,
 	resolvedOutputRedirectPath,
 	vars,
@@ -262,6 +264,7 @@ function executeStreamStep({
 		step: step as StreamStepForCommand<typeof step.cmd>,
 		fs,
 		input,
+		sharedInput,
 		context,
 		resolvedOutputRedirectPath,
 		vars,
@@ -290,9 +293,9 @@ function executeActionStep({
 function createBuiltinRuntime(
 	fs: FS,
 	context: ExecuteStepContext,
-	input: Stream<ShellRecord> | null
+	input: Stream<ShellRecord> | null,
+	stdin: ShellInput = createShellInput(input)
 ): BuiltinRuntime {
-	const stdin = createShellInput(input);
 	return {
 		fs,
 		context,
@@ -460,7 +463,7 @@ CommandRegistry.register('cat', {
 						fs,
 						options,
 						onMissingFile
-					)(toFormattedLineStream(input));
+					)(toFormattedRecordStream(input));
 				}
 				context.status = hadReadError ? 1 : 0;
 			})()
@@ -681,7 +684,7 @@ CommandRegistry.register('tree', {
 
 CommandRegistry.register('head', {
 	kind: 'stream',
-	handler: ({ step, fs, input, context }) => {
+	handler: ({ step, fs, input, sharedInput, context }) => {
 		return fromRecordGenerator(
 			(async function* (): Stream<ShellRecord> {
 				const inputPath = await runOrReport(
@@ -740,7 +743,8 @@ CommandRegistry.register('head', {
 					return;
 				}
 				if (input) {
-					yield* headLines(step.args.n)(toFormattedLineStream(input));
+					const headInput = sharedInput ?? createShellInput(input);
+					yield* headInput.takePhysicalLines(step.args.n);
 				}
 				context.status = 0;
 			})()
@@ -897,7 +901,7 @@ CommandRegistry.register('test', {
 
 CommandRegistry.register('read', {
 	kind: 'stream',
-	handler: ({ step, fs, input, context }) => {
+	handler: ({ step, fs, input, sharedInput, context }) => {
 		return fromRecordGenerator(
 			(async function* (): Stream<ShellRecord> {
 				const resolvedInput = await runOrReport(
@@ -920,8 +924,11 @@ CommandRegistry.register('read', {
 				const redirectedInput = resolvedInput.value.path
 					? lineRecordsFromPath(fs, resolvedInput.value.path)
 					: input;
+				const stdin = resolvedInput.value.path
+					? createShellInput(redirectedInput)
+					: sharedInput;
 				yield* read(
-					createBuiltinRuntime(fs, context, redirectedInput),
+					createBuiltinRuntime(fs, context, redirectedInput, stdin),
 					step.args
 				);
 			})()
@@ -954,12 +961,27 @@ CommandRegistry.register('false', {
 	},
 });
 
+function countInputRecordLines(record: ShellRecord): number {
+	if (record.kind === 'bytes') {
+		let newlineCount = 0;
+		for (const byte of record.bytes) {
+			if (byte === NEWLINE_BYTE) {
+				newlineCount += 1;
+			}
+		}
+		return newlineCount;
+	}
+	const embeddedNewlines = formatRecord(record).split('\n').length - 1;
+	const hasTerminator = record.kind !== 'line' || record.terminated !== false;
+	return embeddedNewlines + (hasTerminator ? 1 : 0);
+}
+
 CommandRegistry.register('count', {
 	kind: 'stream',
 	handler: ({ step, fs, input, context }) => {
 		return fromRecordGenerator(
 			(async function* (): Stream<ShellRecord> {
-				const values: string[] = [];
+				let count = 0;
 				for (const word of step.args.values) {
 					const expanded = await runOrReport(
 						expandWordToValuesEffect(word, fs, context, {
@@ -971,20 +993,20 @@ CommandRegistry.register('count', {
 					if (!expanded.ok) {
 						return;
 					}
-					values.push(...expanded.value);
+					count += expanded.value.length;
 				}
 				// Fish counts arguments plus stdin lines when both are present
 				// (tests/checks/count.fish).
 				if (input) {
 					for await (const record of input) {
-						values.push(formatRecord(record));
+						count += countInputRecordLines(record);
 					}
 				}
 				yield {
 					kind: 'line',
-					text: String(values.length),
+					text: String(count),
 				} as const;
-				context.status = values.length > 0 ? 0 : 1;
+				context.status = count > 0 ? 0 : 1;
 			})()
 		);
 	},
@@ -992,7 +1014,7 @@ CommandRegistry.register('count', {
 
 CommandRegistry.register('call', {
 	kind: 'stream',
-	handler: ({ step, fs, input, context, vars }) => {
+	handler: ({ step, fs, input, sharedInput, context, vars }) => {
 		return fromRecordGenerator(
 			(async function* (): Stream<ShellRecord> {
 				const args = await runOrReport(
@@ -1030,6 +1052,10 @@ CommandRegistry.register('call', {
 				if (!resolved.value.closed && resolved.value.path) {
 					source = lineRecordsFromPath(fs, resolved.value.path);
 				}
+				const inheritedInput =
+					resolved.value.closed || resolved.value.path
+						? undefined
+						: sharedInput;
 				const executeModule = await import('./execute');
 				yield* executeModule.runFunctionCall(
 					definition,
@@ -1037,7 +1063,8 @@ CommandRegistry.register('call', {
 					fs,
 					context,
 					source,
-					vars
+					vars,
+					inheritedInput
 				);
 			})()
 		);

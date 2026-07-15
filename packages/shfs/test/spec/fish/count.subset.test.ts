@@ -67,11 +67,16 @@ test('fish count: count.fish - stdin lines add to the argument count', async () 
 });
 
 // count.fish:45-50: reading from stdin counts newline-terminated records.
-// Reduced: `echo -n` is out of scope, so an empty producer stands in for the
-// zero-record case.
 test('fish count: count.fish - counts stdin records like wc -l', async () => {
-	const empty = await runStatus('true | count');
+	const empty = await runStatus('echo -n 0 | count');
 	expect(empty.stdout).toBe('0');
 	expect(empty.exitCode).toBe(1);
 	expect(await run('echo 1 | count')).toBe('1');
+
+	// Adapt the same newline-counting contract to echo's exact-byte output.
+	const unterminatedBytes = await runStatus("echo -ne '\\141' | count");
+	expect(unterminatedBytes.stdout).toBe('0');
+	expect(unterminatedBytes.exitCode).toBe(1);
+	expect(await run("echo -ne '\\141\\nb' | count")).toBe('1');
+	expect(await run("echo -ne '\\141\\n\\nb' | count")).toBe('2');
 });

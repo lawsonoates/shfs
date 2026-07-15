@@ -1,7 +1,12 @@
 import { Result } from 'better-result';
 
+import { readFileRecordBytes } from '../../execute/records';
 import type { FS } from '../../fs/fs';
-import type { LineRecord } from '../../record';
+import type {
+	ByteRecord,
+	LineRecord,
+	Record as ShellRecord,
+} from '../../record';
 import type { Stream } from '../../stream';
 import type { FileEntry } from '../head/head';
 import type { Transducer } from '../types';
@@ -19,12 +24,37 @@ export function tail(n: number): Transducer<LineRecord, LineRecord> {
 	};
 }
 
+const NEWLINE_BYTE = 0x0a;
+
+function takeTailLines(bytes: Uint8Array, count: number): Uint8Array {
+	if (count <= 0 || bytes.length === 0) {
+		return new Uint8Array();
+	}
+	let newlines = 0;
+	const skipsTrailingTerminator = bytes.at(-1) === NEWLINE_BYTE;
+	const lastIndex = bytes.length - (skipsTrailingTerminator ? 2 : 1);
+	for (let index = lastIndex; index >= 0; index -= 1) {
+		if (bytes[index] !== NEWLINE_BYTE) {
+			continue;
+		}
+		newlines += 1;
+		if (newlines === count) {
+			return bytes.slice(index + 1);
+		}
+	}
+	return bytes;
+}
+
+function byteRecord(bytes: Uint8Array): ByteRecord | null {
+	return bytes.length > 0 ? { bytes, kind: 'bytes' } : null;
+}
+
 export async function* tailFiles(
 	fs: FS,
 	n: number,
 	entries: readonly FileEntry[],
 	onMissingFile: (displayPath: string) => void
-): Stream<LineRecord> {
+): Stream<ShellRecord> {
 	const printHeaders = entries.length > 1;
 	let printedAny = false;
 	for (const entry of entries) {
@@ -39,19 +69,11 @@ export async function* tailFiles(
 		if (stat.value.type === 'Directory') {
 			continue;
 		}
-		const buf: LineRecord[] = [];
-		let lineNum = 0;
-		for await (const text of fs.readLines(entry.path)) {
-			buf.push({
-				file: entry.path,
-				kind: 'line',
-				lineNum: ++lineNum,
-				text,
-			});
-			if (buf.length > n) {
-				buf.shift();
-			}
-		}
+		const bytes = await readFileRecordBytes(fs, {
+			isDirectory: false,
+			kind: 'file',
+			path: entry.path,
+		});
 		if (printHeaders) {
 			if (printedAny) {
 				yield { kind: 'line', text: '' };
@@ -59,6 +81,9 @@ export async function* tailFiles(
 			yield { kind: 'line', text: `==> ${entry.displayPath} <==` };
 		}
 		printedAny = true;
-		yield* buf;
+		const selected = bytes && byteRecord(takeTailLines(bytes, n));
+		if (selected) {
+			yield selected;
+		}
 	}
 }

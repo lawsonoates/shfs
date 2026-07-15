@@ -1,8 +1,17 @@
 import { Result } from 'better-result';
 
-import { isDirectoryRecord } from '../../execute/records';
+import {
+	fileRecordToByteStream,
+	fileRecordToLines,
+} from '../../execute/records';
 import type { FS } from '../../fs/fs';
-import type { FileRecord, LineRecord, Record } from '../../record';
+import {
+	type FileRecord,
+	type LineRecord,
+	type Record,
+	toPhysicalLineRecords,
+} from '../../record';
+import type { Stream } from '../../stream';
 import type { Transducer } from '../types';
 
 export interface CatOptions {
@@ -43,7 +52,8 @@ function formatNonPrinting(text: string): string {
 function renderLineText(
 	text: string,
 	lineNumber: number | null,
-	options: Required<CatOptions>
+	options: Required<CatOptions>,
+	terminated: boolean
 ): string {
 	let rendered = text;
 	const showNonprinting = options.showAll || options.showNonprinting;
@@ -56,7 +66,10 @@ function renderLineText(
 	if (showTabs) {
 		rendered = rendered.replaceAll('\t', '^I');
 	}
-	if (showEnds) {
+	if (showEnds && terminated) {
+		if (rendered.endsWith('\r')) {
+			rendered = `${rendered.slice(0, -1)}^M`;
+		}
 		rendered = `${rendered}$`;
 	}
 	if (lineNumber !== null) {
@@ -76,6 +89,18 @@ function normalizeOptions(options?: CatOptions): Required<CatOptions> {
 		showTabs: options?.showTabs ?? false,
 		squeezeBlank: options?.squeezeBlank ?? false,
 	};
+}
+
+function transformsLines(options: Required<CatOptions>): boolean {
+	return (
+		options.numberLines ||
+		options.numberNonBlank ||
+		options.showAll ||
+		options.showEnds ||
+		options.showNonprinting ||
+		options.showTabs ||
+		options.squeezeBlank
+	);
 }
 
 interface CatState {
@@ -113,7 +138,12 @@ async function* emitLineRecord(
 
 	yield {
 		...record,
-		text: renderLineText(rendered.text, rendered.lineNumber, options),
+		text: renderLineText(
+			rendered.text,
+			rendered.lineNumber,
+			options,
+			record.terminated !== false
+		),
 	};
 }
 
@@ -129,44 +159,66 @@ async function* emitJsonRecord(
 
 	yield {
 		kind: 'line',
-		text: renderLineText(rendered.text, rendered.lineNumber, options),
+		text: renderLineText(rendered.text, rendered.lineNumber, options, true),
 	};
 }
 
-async function* emitFileLines(
+async function canReadFile(
 	fs: FS,
 	record: FileRecord,
-	state: CatState,
-	options: Required<CatOptions>,
+	onMissingFile?: (path: string) => void
+): Promise<boolean> {
+	if (!onMissingFile) {
+		return true;
+	}
+	const stat = await Result.tryPromise({
+		try: () => fs.stat(record.path),
+		catch: (error) => error,
+	});
+	if (Result.isError(stat)) {
+		onMissingFile(record.path);
+		return false;
+	}
+	return true;
+}
+
+async function* readFileLines(
+	fs: FS,
+	record: FileRecord,
 	onMissingFile?: (path: string) => void
 ): AsyncIterable<LineRecord> {
-	if (onMissingFile) {
-		const stat = await Result.tryPromise({
-			try: () => fs.stat(record.path),
-			catch: (error) => error,
-		});
-		if (Result.isError(stat)) {
-			onMissingFile(record.path);
-			return;
-		}
-	}
-	if (await isDirectoryRecord(fs, record)) {
+	if (!(await canReadFile(fs, record, onMissingFile))) {
 		return;
 	}
+	yield* fileRecordToLines(fs, record);
+}
 
-	let sourceLineNum = 1;
-	for await (const rawText of fs.readLines(record.path)) {
-		const rendered = nextRenderedLine(rawText, state, options);
-		if (rendered.isSkipped) {
+async function* readFileBytes(
+	fs: FS,
+	record: FileRecord,
+	onMissingFile?: (path: string) => void
+): Stream<Record> {
+	if (!(await canReadFile(fs, record, onMissingFile))) {
+		return;
+	}
+	yield* fileRecordToByteStream(fs, record);
+}
+
+async function* expandTransformInput(
+	fs: FS,
+	input: Stream<Record>,
+	onMissingFile?: (path: string) => void
+): Stream<Record> {
+	for await (const record of input) {
+		if (record.kind === 'file') {
+			yield* readFileLines(fs, record, onMissingFile);
 			continue;
 		}
-
-		yield {
-			file: record.path,
-			kind: 'line',
-			lineNum: sourceLineNum++,
-			text: renderLineText(rendered.text, rendered.lineNumber, options),
-		};
+		if (record.kind === 'json') {
+			yield { kind: 'line', text: JSON.stringify(record.value) };
+			continue;
+		}
+		yield record;
 	}
 }
 
@@ -174,7 +226,7 @@ export function cat(
 	fs: FS,
 	options?: CatOptions,
 	onMissingFile?: (path: string) => void
-): Transducer<Record, LineRecord> {
+): Transducer<Record, Record> {
 	const normalized = normalizeOptions(options);
 	const state: CatState = {
 		previousWasBlank: false,
@@ -182,16 +234,32 @@ export function cat(
 	};
 
 	return async function* (input) {
+		if (transformsLines(normalized)) {
+			const expandedInput = expandTransformInput(
+				fs,
+				input,
+				onMissingFile
+			);
+			for await (const line of toPhysicalLineRecords(expandedInput)) {
+				yield* emitLineRecord(line, state, normalized);
+			}
+			return;
+		}
+
 		for await (const record of input) {
 			if (isLineRecord(record)) {
 				yield* emitLineRecord(record, state, normalized);
+				continue;
+			}
+			if (record.kind === 'bytes') {
+				yield record;
 				continue;
 			}
 			if (record.kind === 'json') {
 				yield* emitJsonRecord(record.value, state, normalized);
 				continue;
 			}
-			yield* emitFileLines(fs, record, state, normalized, onMissingFile);
+			yield* readFileBytes(fs, record, onMissingFile);
 		}
 	};
 }

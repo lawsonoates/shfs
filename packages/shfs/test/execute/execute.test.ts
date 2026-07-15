@@ -11,7 +11,12 @@ import { type ExecuteContext, execute } from '@/execute/execute';
 import { collectRecordStream } from '@/execute/record-stream';
 import type { FS } from '@/fs/fs';
 import { MemoryFS } from '@/fs/memory';
-import type { FileRecord, LineRecord } from '@/record';
+import {
+	type FileRecord,
+	type LineRecord,
+	recordsToBytes,
+	toPhysicalLineRecords,
+} from '@/record';
 import { BufferedOutputStream } from '@/stderr';
 
 const textDecoder = new TextDecoder();
@@ -108,10 +113,9 @@ test('uses input redirection when no file args are provided', async () => {
 
 	const result = execute(ir, fs);
 	const records = (await collectRecordStream(result)).unwrap();
-	const lineRecords = records.filter(
-		(record): record is LineRecord => record.kind === 'line'
-	);
-	expect(lineRecords.map((record) => record.text)).toEqual(['alpha', 'beta']);
+	expect(
+		textDecoder.decode(recordsToBytes(records, { trailingNewline: true }))
+	).toBe('alpha\nbeta\n');
 });
 
 test('supports combined input and output redirection', async () => {
@@ -237,7 +241,252 @@ test('variable-expanded output redirection resolves relative to cwd', async () =
 	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('/workspace/logs.txt'))).toBe(
-		'hello'
+		'hello\n'
+	);
+});
+
+test('output redirection preserves line termination metadata', async () => {
+	const fs = new MemoryFS();
+
+	const multiline = execute(
+		compile(parse("echo -e 'a\\nb' > /multiline.txt")),
+		fs
+	);
+	(await collectRecordStream(multiline)).unwrap();
+	const unterminated = execute(
+		compile(parse('echo -n tail > /unterminated.txt')),
+		fs
+	);
+	(await collectRecordStream(unterminated)).unwrap();
+
+	expect(textDecoder.decode(await fs.readFile('/multiline.txt'))).toBe(
+		'a\nb\n'
+	);
+	expect(textDecoder.decode(await fs.readFile('/unterminated.txt'))).toBe(
+		'tail'
+	);
+});
+
+// GNU coreutils tests/cat/cat-E.sh compares terminated and unterminated
+// printf fixtures without adding an EOF newline.
+test('cat redirection preserves empty, terminated, and unterminated file endings', async () => {
+	const fs = new MemoryFS();
+	const cases = [
+		{
+			expected: '',
+			input: '',
+			name: 'empty',
+		},
+		{
+			expected: 'abc\n',
+			input: 'abc\n',
+			name: 'terminated',
+		},
+		{
+			expected: 'abc',
+			input: 'abc',
+			name: 'unterminated',
+		},
+	] as const;
+
+	for (const { expected, input, name } of cases) {
+		fs.setFile(`/cat-${name}.txt`, input);
+		const result = execute(
+			compile(parse(`cat /cat-${name}.txt > /cat-${name}-copy.txt`)),
+			fs
+		);
+		(await collectRecordStream(result)).unwrap();
+		expect(
+			textDecoder.decode(await fs.readFile(`/cat-${name}-copy.txt`))
+		).toBe(expected);
+	}
+
+	fs.setFile('/cat-append-terminated.txt', 'abc\n');
+	fs.setFile('/cat-append-unterminated.txt', 'abc');
+	const appendScript = [
+		'cat /cat-append-terminated.txt > /terminated-copy.txt',
+		'echo -n tail >> /terminated-copy.txt',
+		'cat /cat-append-unterminated.txt > /unterminated-copy.txt',
+		'echo -n tail >> /unterminated-copy.txt',
+	].join('; ');
+	const append = execute(compile(parse(appendScript)), fs);
+	(await collectRecordStream(append)).unwrap();
+	expect(textDecoder.decode(await fs.readFile('/terminated-copy.txt'))).toBe(
+		'abc\ntail'
+	);
+	expect(
+		textDecoder.decode(await fs.readFile('/unterminated-copy.txt'))
+	).toBe('abctail');
+});
+
+// GNU coreutils tests/head/head.pl idem-1/idem-3 and tests/tail/tail.pl
+// obs-l1/obs-l2/obs-l3 require pass-through readers to preserve EOF bytes.
+test('head and tail redirection preserve final-line termination', async () => {
+	const fs = new MemoryFS();
+	const cases = [
+		{ expected: new Uint8Array([0x61, 0x62, 0x63]), name: 'unterminated' },
+		{
+			expected: new Uint8Array([0x61, 0x62, 0x63, 0x0a]),
+			name: 'terminated',
+		},
+	] as const;
+	for (const { expected, name } of cases) {
+		fs.setFile(`/line-${name}.txt`, expected);
+		for (const command of ['head', 'tail'] as const) {
+			const outputPath = `/${command}-${name}.txt`;
+			const result = execute(
+				compile(
+					parse(`${command} -n 1 /line-${name}.txt > ${outputPath}`)
+				),
+				fs
+			);
+			(await collectRecordStream(result)).unwrap();
+			expect(await fs.readFile(outputPath)).toEqual(expected);
+		}
+	}
+});
+
+test('append redirection concatenates exact terminated and unterminated output', async () => {
+	const fs = new MemoryFS();
+	const cases = [
+		{
+			expected: 'first\nsecond\n',
+			path: '/terminated.txt',
+			script: 'echo first > /terminated.txt; echo second >> /terminated.txt',
+		},
+		{
+			expected: 'firstsecond',
+			path: '/unterminated.txt',
+			script: 'echo -n first > /unterminated.txt; echo -n second >> /unterminated.txt',
+		},
+		{
+			expected: 'firstsecond\n',
+			path: '/unterminated-then-terminated.txt',
+			script: 'echo -n first > /unterminated-then-terminated.txt; echo second >> /unterminated-then-terminated.txt',
+		},
+		{
+			expected: 'first\nsecond',
+			path: '/terminated-then-unterminated.txt',
+			script: 'echo first > /terminated-then-unterminated.txt; echo -n second >> /terminated-then-unterminated.txt',
+		},
+	] as const;
+
+	for (const { expected, path, script } of cases) {
+		const result = execute(compile(parse(script)), fs);
+		(await collectRecordStream(result)).unwrap();
+		expect(textDecoder.decode(await fs.readFile(path))).toBe(expected);
+	}
+
+	const existingBytes = new Uint8Array([0xff]);
+	fs.setFile('/binary-prefix.txt', existingBytes);
+	const binaryAppend = execute(
+		compile(parse('echo -n tail >> /binary-prefix.txt')),
+		fs
+	);
+	(await collectRecordStream(binaryAppend)).unwrap();
+	const appendedBytes = await fs.readFile('/binary-prefix.txt');
+	expect(appendedBytes.slice(0, existingBytes.length)).toEqual(existingBytes);
+	expect(textDecoder.decode(appendedBytes.slice(existingBytes.length))).toBe(
+		'tail'
+	);
+});
+
+// fish-shell tests/checks/basic.fish:148-159 verifies numeric echo escapes
+// with display_bytes. Redirect assertions exercise the same byte contract.
+test('numeric echo escapes redirect and append as exact bytes', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/raw.bin', new Uint8Array([0x00]));
+
+	const result = execute(
+		compile(
+			parse("echo -ne '\\376' > /raw.bin; echo -ne '\\377' >> /raw.bin")
+		),
+		fs
+	);
+	(await collectRecordStream(result)).unwrap();
+
+	expect(await fs.readFile('/raw.bin')).toEqual(new Uint8Array([0xfe, 0xff]));
+});
+
+// Coreutils cat/head/tail copy selected input bytes without a text decode.
+test('file replay commands preserve raw bytes and line selection', async () => {
+	const fs = new MemoryFS();
+	fs.setFile('/raw.bin', new Uint8Array([0xfe, 0x0a, 0xff, 0x0a, 0xfd]));
+	fs.setFile('/terminated.bin', new Uint8Array([0xfe, 0x0a, 0xff, 0x0a]));
+	const cases = [
+		{
+			command: 'cat /raw.bin',
+			expected: new Uint8Array([0xfe, 0x0a, 0xff, 0x0a, 0xfd]),
+		},
+		{
+			command: 'head -n 1 /raw.bin',
+			expected: new Uint8Array([0xfe, 0x0a]),
+		},
+		{
+			command: 'head -n 2 /raw.bin',
+			expected: new Uint8Array([0xfe, 0x0a, 0xff, 0x0a]),
+		},
+		{
+			command: 'tail -n 1 /raw.bin',
+			expected: new Uint8Array([0xfd]),
+		},
+		{
+			command: 'tail -n 2 /raw.bin',
+			expected: new Uint8Array([0xff, 0x0a, 0xfd]),
+		},
+		{
+			command: 'head -n 1 /terminated.bin',
+			expected: new Uint8Array([0xfe, 0x0a]),
+		},
+		{
+			command: 'tail -n 1 /terminated.bin',
+			expected: new Uint8Array([0xff, 0x0a]),
+		},
+	] as const;
+
+	for (const { command, expected } of cases) {
+		const output = execute(compile(parse(command)), fs);
+		const records = (await collectRecordStream(output)).unwrap();
+		expect(recordsToBytes(records, { trailingNewline: true })).toEqual(
+			expected
+		);
+	}
+});
+
+test('stdin head preserves raw bytes and line selection', async () => {
+	const fs = new MemoryFS();
+	const rawBytes = new Uint8Array([0xfe, 0x0a, 0xff, 0x0a, 0xfd]);
+	fs.setFile('/raw-stdin.bin', rawBytes);
+	const cases = [
+		{
+			command: 'cat /raw-stdin.bin | head -n 1',
+			expected: new Uint8Array([0xfe, 0x0a]),
+		},
+		{
+			command: 'cat /raw-stdin.bin | head -n 2',
+			expected: new Uint8Array([0xfe, 0x0a, 0xff, 0x0a]),
+		},
+		{
+			command: 'cat /raw-stdin.bin | head -n 3',
+			expected: rawBytes,
+		},
+	] as const;
+
+	for (const { command, expected } of cases) {
+		const output = execute(compile(parse(command)), fs);
+		const records = (await collectRecordStream(output)).unwrap();
+		expect(recordsToBytes(records, { trailingNewline: true })).toEqual(
+			expected
+		);
+	}
+
+	const redirected = execute(
+		compile(parse('cat /raw-stdin.bin | head -n 1 > /selected.bin')),
+		fs
+	);
+	(await collectRecordStream(redirected)).unwrap();
+	expect(await fs.readFile('/selected.bin')).toEqual(
+		new Uint8Array([0xfe, 0x0a])
 	);
 });
 
@@ -250,10 +499,9 @@ test('variable-expanded input redirection resolves relative to cwd', async () =>
 		globalVars: new Map<string, string[]>([['INPUTFILE', ['input.txt']]]),
 	});
 	const records = (await collectRecordStream(result)).unwrap();
-	const lineRecords = records.filter(
-		(record): record is LineRecord => record.kind === 'line'
-	);
-	expect(lineRecords.map((record) => record.text)).toEqual(['alpha']);
+	expect(
+		textDecoder.decode(recordsToBytes(records, { trailingNewline: true }))
+	).toBe('alpha\n');
 });
 
 test('command substitution can produce an output redirection target', async () => {
@@ -265,7 +513,7 @@ test('command substitution can produce an output redirection target', async () =
 	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('/workspace/out.txt'))).toBe(
-		'hello'
+		'hello\n'
 	);
 });
 
@@ -383,7 +631,7 @@ test('grep reuses a resolved output redirect target for conflict checks and writ
 	(await collectRecordStream(result)).unwrap();
 
 	expect(textDecoder.decode(await fs.readFile('/workspace/first.txt'))).toBe(
-		'match'
+		'match\n'
 	);
 	expect(textDecoder.decode(await fs.readFile('/workspace/which.txt'))).toBe(
 		'second.txt'
@@ -646,9 +894,14 @@ test('cat/head/tail expand glob file arguments relative to cwd', async () => {
 			cwd: '/workspace',
 		});
 		const records = (await collectRecordStream(result)).unwrap();
-		return records
-			.filter((record): record is LineRecord => record.kind === 'line')
-			.map((record) => record.text);
+		const input = (async function* () {
+			yield* records;
+		})();
+		const lines: string[] = [];
+		for await (const line of toPhysicalLineRecords(input)) {
+			lines.push(line.text);
+		}
+		return lines;
 	};
 
 	expect(await runLines('cat logs/*.txt')).toEqual(['a1', 'a2', 'b1', 'b2']);
@@ -1288,6 +1541,54 @@ test('mixed command substitution words concatenate literal prefixes and suffixes
 		.map((record) => record.text);
 
 	expect(lines).toEqual(['foobarbaz']);
+});
+
+test('command substitution keeps inferred output separate from explicit fields', async () => {
+	const fs = new MemoryFS();
+	const runLines = async (command: string): Promise<string[]> => {
+		const result = execute(compile(parse(command)), fs);
+		const records = (await collectRecordStream(result)).unwrap();
+		return records
+			.filter((record): record is LineRecord => record.kind === 'line')
+			.map((record) => record.text);
+	};
+
+	// Fish src/io.rs SeparatedBuffer::append and src/exec.rs
+	// populate_subshell_output keep an inferred element distinct when an
+	// explicitly separated field follows it.
+	expect(await runLines('count (echo -n foo; string split / a/b)')).toEqual([
+		'3',
+	]);
+	// Fish's inferred splitter removes only the synthetic field after a final
+	// newline, preserving any preceding blank at end-of-stream or before an
+	// explicit field.
+	expect(await runLines(String.raw`count (echo -ne 'one\n')`)).toEqual(['1']);
+	expect(await runLines(String.raw`count (echo -ne 'one\n\n')`)).toEqual([
+		'2',
+	]);
+	expect(
+		await runLines(
+			String.raw`count (echo -ne 'one\n\n'; string split / a/b)`
+		)
+	).toEqual(['4']);
+});
+
+test('command substitution distinguishes no output from an empty line', async () => {
+	const fs = new MemoryFS();
+	const runLines = async (command: string): Promise<string[]> => {
+		const result = execute(compile(parse(command)), fs);
+		const records = (await collectRecordStream(result)).unwrap();
+		return records
+			.filter((record): record is LineRecord => record.kind === 'line')
+			.map((record) => record.text);
+	};
+
+	expect(await runLines('echo before (echo -n) after')).toEqual([
+		'before after',
+	]);
+	expect(await runLines('echo before (echo) after')).toEqual([
+		'before  after',
+	]);
 });
 
 test('mixed glob words preserve literal prefixes and suffixes at execution', async () => {

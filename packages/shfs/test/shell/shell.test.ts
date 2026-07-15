@@ -129,6 +129,16 @@ test('shell command await resolves to Bun-like shell output', async () => {
 	expect(failure.exitCode).toBe(1);
 });
 
+test('shell text decodes non-UTF-8 encodings from exact stdout bytes', async () => {
+	const shell = new Shell(new MemoryFS());
+	const output = await shell.$`echo -e '\xff'`;
+
+	expect(output.bytes()).toEqual(new Uint8Array([0xff, 0x0a]));
+	expect(output.text()).toBe('\ufffd');
+	expect(output.text('utf-8')).toBe('\ufffd');
+	expect(output.text('latin1')).toBe('\u00ff\n');
+});
+
 test('shell throws Bun-like ShellError by default for non-zero exits', async () => {
 	const fs = new MemoryFS();
 	await fs.makeDirectory('/workspace/a', { recursive: true });

@@ -24,6 +24,10 @@ async function run(command: string): Promise<string> {
 	return await shell.$`${command}`.text();
 }
 
+async function runBytes(command: string): Promise<Uint8Array> {
+	return await shell.$`${command}`.bytes();
+}
+
 async function runResult(command: string) {
 	const result = await shell.$`${command}`.nothrow();
 	return {
@@ -233,6 +237,66 @@ test('fish basic: basic.fish - return above 255 clamps to 255', async () => {
 		'echo $status',
 	].join('\n');
 	expect(await run(script)).toBe('255');
+});
+
+// basic.fish:130-163: echo leaves escapes literal unless -e enables them.
+test('fish basic: basic.fish - echo -e interprets supported escapes', async () => {
+	expect(await run("echo 'abc\\ndef'")).toBe('abc\\ndef');
+	expect(await run("echo -e 'abc\\ndef'")).toBe('abc\ndef');
+	expect(await run("echo -e 'abc\\zdef'")).toBe('abc\\zdef');
+	expect(await run("echo -e 'abc\\41def'")).toBe('abc!def');
+	expect(await run("echo -e 'abc\\041def'")).toBe('abc!def');
+	expect(await run("echo -e 'abc\\x21def'")).toBe('abc!def');
+});
+
+// basic.fish:130-159 verifies interpreted newlines and numeric bytes. Adapted
+// to the Shell byte API because display_bytes is outside the shfs subset.
+test('fish basic: basic.fish - echo escapes emit exact bytes', async () => {
+	expect(await runBytes("echo -ne 'a\\n'")).toEqual(
+		new Uint8Array([0x61, 0x0a])
+	);
+	expect(await runBytes("echo -ne '\\376'")).toEqual(new Uint8Array([0xfe]));
+	expect(await runBytes("echo -ne '\\x41\\x0a'")).toEqual(
+		new Uint8Array([0x41, 0x0a])
+	);
+	expect(await runBytes("echo -ne '\\5555'")).toEqual(
+		new Uint8Array([0o155, 0o65])
+	);
+	// An ordinary Unicode operand remains UTF-8; it must not inherit the raw
+	// byte interpretation used by numeric escapes.
+	expect(await runBytes("echo -ne 'ÿ'")).toEqual(
+		new Uint8Array([0xc3, 0xbf])
+	);
+	expect(await run("echo -ne '\\376' | wc -c")).toBe('1');
+	expect(await run("echo -ne '\\141\\nb' | string match b")).toBe('b');
+});
+
+// basic.fish:132-134: escaped newlines are physical output lines.
+test('fish basic: basic.fish - echo -e exposes escaped newlines to pipelines', async () => {
+	expect(await run("echo -e 'a\\nb' | string match b")).toBe('b');
+});
+
+// basic.fish:151-152: \c stops output and suppresses the newline.
+test('fish basic: basic.fish - echo -e stops output at backslash c', async () => {
+	expect(await run("echo -e 'abc\\cdef'; echo after")).toBe('abcafter');
+});
+
+// basic.fish:177: -n suppresses the newline before the next command output.
+test('fish basic: basic.fish - echo -n suppresses its trailing newline', async () => {
+	expect(await run('echo -n first; echo second')).toBe('firstsecond');
+});
+
+// basic.fish:545-550: an invalid option-shaped operand is printed literally
+// and stops option parsing.
+test('fish basic: basic.fish - echo prints invalid option-shaped operands', async () => {
+	expect(await run("echo '-ne \\tart'; echo '-n art'; echo banana")).toBe(
+		'-ne \\tart\n-n art\nbanana'
+	);
+});
+
+// Fish echo docs/source: -- ends option parsing so -n is data.
+test('fish basic: basic.fish - echo double dash ends option parsing', async () => {
+	expect(await run('echo -- -n')).toBe('-n');
 });
 
 // basic.fish:175-178: a backslash at the end of a comment does not join lines.

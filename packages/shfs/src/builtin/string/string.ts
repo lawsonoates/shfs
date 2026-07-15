@@ -1,14 +1,33 @@
 import type { StringStep } from '@shfs/compiler';
+import { Result } from 'better-result';
 import picomatch from 'picomatch';
 import {
 	evaluateExpandedWord,
 	evaluateExpandedWords,
 } from '../../execute/path';
 import type { Record as ShellRecord } from '../../record';
+import { textToStdoutRecords } from '../../stdout-record';
 import type { Builtin, BuiltinRuntime } from '../types';
+import { translateNamedPosixClasses } from './posix-character-class';
 
 const INTEGER_REGEX = /^[+-]?\d+$/;
+const CAPTURE_INDEX_REGEX = /^\d+$/;
+const PCRE_BACKREF_REGEX = /\\g(\d+)/g;
+const REPLACEMENT_TOKEN_REGEX =
+	/\\[ELUabefnrtv\\]|\$\$|\$\d+|\$[A-Za-z_][A-Za-z0-9_]*|\$\{[^}]*\}|[\s\S]/g;
 const WHITESPACE_CHARS = ' \t\n\r\v\f';
+const REPLACEMENT_ESCAPES: Readonly<Record<string, string>> = {
+	'\\a': '\x07',
+	'\\b': '\b',
+	'\\e': '\x1b',
+	'\\f': '\f',
+	'\\n': '\n',
+	'\\r': '\r',
+	'\\t': '\t',
+	'\\v': '\v',
+	'\\\\': '\\',
+};
+const UTF8_DECODER = new TextDecoder();
 
 const USAGE_ERROR_STATUS = 2;
 
@@ -26,6 +45,11 @@ interface OptionSpec {
 	long?: string;
 	takesValue: boolean;
 }
+
+const SPLIT_OPTIONS: readonly OptionSpec[] = [
+	{ name: 'max', short: 'm', long: 'max', takesValue: true },
+	{ name: 'right', short: 'r', long: 'right', takesValue: false },
+];
 
 interface ParsedOptions {
 	options: Map<string, string | true>;
@@ -55,6 +79,11 @@ function parseLongOption(
 		);
 	}
 	if (!spec.takesValue) {
+		if (equalsIndex !== -1) {
+			throw new StringUsageError(
+				`string ${subcommand}: --${flagName}: option does not take an argument`
+			);
+		}
 		options.set(spec.name, true);
 		return 1;
 	}
@@ -202,39 +231,222 @@ function line(text: string): ShellRecord {
 	return { kind: 'line', text };
 }
 
+function field(text: string): ShellRecord {
+	return { kind: 'line', separation: 'explicit', text };
+}
+
+function compile(subcommand: string, pattern: string): RegExp {
+	const source = translateNamedPosixClasses(pattern).replace(
+		PCRE_BACKREF_REGEX,
+		(_whole, group: string) => `\\${group}`
+	);
+	const result = Result.try({
+		try: () => new RegExp(source, 'gu'),
+		catch: (error) => error,
+	});
+	if (Result.isError(result)) {
+		throw new StringUsageError(
+			`string ${subcommand}: Regular expression compile error: ${String(result.error)}`
+		);
+	}
+	return result.value;
+}
+
+function captures(regex: RegExp, value: string, invert: boolean) {
+	regex.lastIndex = 0;
+	const found = regex.exec(value);
+	if (!found) {
+		return invert ? [value] : null;
+	}
+	if (invert) {
+		return null;
+	}
+	return [...found].map((capture) => capture ?? '');
+}
+
+function casing(value: string, mode: 'lower' | 'upper' | null): string {
+	if (mode === 'lower') {
+		return value.toLowerCase();
+	}
+	if (mode === 'upper') {
+		return value.toUpperCase();
+	}
+	return value;
+}
+
+function numericReference(value: string, found: RegExpExecArray): string {
+	const index = Number.parseInt(value, 10);
+	if (index >= found.length) {
+		throw new StringUsageError(
+			'string replace: Regular expression substitute error: unknown substring'
+		);
+	}
+	return found[index] ?? '';
+}
+
+function namedReference(name: string, found: RegExpExecArray): string {
+	if (!Object.hasOwn(found.groups ?? {}, name)) {
+		throw new StringUsageError(
+			'string replace: Regular expression substitute error: unknown substring'
+		);
+	}
+	return found.groups?.[name] ?? '';
+}
+
+function reference(token: string, found: RegExpExecArray): string | undefined {
+	if (token === '$$') {
+		return '$';
+	}
+	if (token.startsWith('${')) {
+		const name = token.slice(2, -1);
+		if (CAPTURE_INDEX_REGEX.test(name)) {
+			return numericReference(name, found);
+		}
+		return namedReference(name, found);
+	}
+	if (!token.startsWith('$') || token.length === 1) {
+		return undefined;
+	}
+	const name = token.slice(1);
+	return CAPTURE_INDEX_REGEX.test(name)
+		? numericReference(name, found)
+		: namedReference(name, found);
+}
+
+function expand(template: string, found: RegExpExecArray): string {
+	let mode: 'lower' | 'upper' | null = null;
+	let text = '';
+	for (const token of template.match(REPLACEMENT_TOKEN_REGEX) ?? []) {
+		if (token === '\\L') {
+			mode = 'lower';
+			continue;
+		}
+		if (token === '\\U') {
+			mode = 'upper';
+			continue;
+		}
+		if (token === '\\E') {
+			mode = null;
+			continue;
+		}
+		text += casing(
+			reference(token, found) ?? REPLACEMENT_ESCAPES[token] ?? token,
+			mode
+		);
+	}
+	return text;
+}
+
+function substitute(
+	input: string,
+	regex: RegExp,
+	replacement: string,
+	all: boolean
+): { changed: boolean; text: string } {
+	regex.lastIndex = 0;
+	let cursor = 0;
+	let text = '';
+	let changed = false;
+	while (true) {
+		const found = regex.exec(input);
+		if (!found) {
+			break;
+		}
+		changed = true;
+		text += input.slice(cursor, found.index);
+		text += expand(replacement, found);
+		cursor = found.index + found[0].length;
+		if (!all) {
+			break;
+		}
+		if (found[0] === '') {
+			const point = input.codePointAt(regex.lastIndex);
+			regex.lastIndex += point !== undefined && point > 0xff_ff ? 2 : 1;
+		}
+	}
+	return {
+		changed,
+		text: changed ? `${text}${input.slice(cursor)}` : input,
+	};
+}
+
+function selected(
+	value: string,
+	regex: RegExp | null,
+	matcher: ((value: string) => boolean) | null,
+	invert: boolean
+): string[] | null {
+	if (regex) {
+		return captures(regex, value, invert);
+	}
+	if (!matcher || matcher(value) === invert) {
+		return null;
+	}
+	return [value];
+}
+
+function plain(
+	input: string,
+	pattern: string,
+	replacement: string,
+	all: boolean
+): { changed: boolean; text: string } {
+	if (pattern === '') {
+		return { changed: false, text: input };
+	}
+	const literalReplacement = () => replacement;
+	return {
+		changed: input.includes(pattern),
+		text: all
+			? input.replaceAll(pattern, literalReplacement)
+			: input.replace(pattern, literalReplacement),
+	};
+}
+
+async function configure(runtime: BuiltinRuntime, operands: string[]) {
+	const parsed = parseOptions('match', operands, [
+		{ name: 'quiet', short: 'q', takesValue: false },
+		{ name: 'invert', short: 'v', long: 'invert', takesValue: false },
+		{ name: 'regex', short: 'r', long: 'regex', takesValue: false },
+	]);
+	const [pattern, ...rest] = parsed.positional;
+	if (pattern === undefined) {
+		throw new StringUsageError('string match: missing argument');
+	}
+	const values = rest.length > 0 ? rest : await collectStdinLines(runtime);
+	if (rest.length === 0 && !runtime.input) {
+		throw new StringUsageError('string match requires pattern and value');
+	}
+	const regex = parsed.options.has('regex')
+		? compile('match', pattern)
+		: null;
+	return {
+		invert: parsed.options.has('invert'),
+		matcher: regex ? null : picomatch(pattern, { dot: true }),
+		quiet: parsed.options.has('quiet'),
+		regex,
+		values,
+	};
+}
+
 // ─────────────────────────────────────────────────────────
 // Subcommands
 // ─────────────────────────────────────────────────────────
 
 function match(runtime: BuiltinRuntime, operands: string[]) {
 	return (async function* () {
-		const { options, positional } = parseOptions('match', operands, [
-			{ name: 'quiet', short: 'q', takesValue: false },
-			{ name: 'invert', short: 'v', long: 'invert', takesValue: false },
-		]);
-		const [pattern, ...rest] = positional;
-		if (pattern === undefined) {
-			throw new StringUsageError('string match: missing argument');
-		}
-		const values =
-			rest.length > 0 ? rest : await collectStdinLines(runtime);
-		if (rest.length === 0 && !runtime.input) {
-			throw new StringUsageError(
-				'string match requires pattern and value'
-			);
-		}
-
-		const matcher = picomatch(pattern, { dot: true });
-		const invert = options.has('invert');
+		const cfg = await configure(runtime, operands);
 		let anyOutput = false;
-		for (const value of values) {
-			const matched = matcher(value);
-			if (matched === invert) {
+		for (const value of cfg.values) {
+			const output = selected(value, cfg.regex, cfg.matcher, cfg.invert);
+			if (!output) {
 				continue;
 			}
 			anyOutput = true;
-			if (!options.has('quiet')) {
-				yield line(value);
+			if (!cfg.quiet) {
+				for (const text of output) {
+					yield line(text);
+				}
 			}
 		}
 		runtime.context.status = anyOutput ? 0 : 1;
@@ -245,6 +457,7 @@ function replace(runtime: BuiltinRuntime, operands: string[]) {
 	return (async function* () {
 		const { options, positional } = parseOptions('replace', operands, [
 			{ name: 'all', short: 'a', long: 'all', takesValue: false },
+			{ name: 'regex', short: 'r', long: 'regex', takesValue: false },
 		]);
 		const [pattern, replacement, ...rest] = positional;
 		if (pattern === undefined || replacement === undefined) {
@@ -265,16 +478,14 @@ function replace(runtime: BuiltinRuntime, operands: string[]) {
 		}
 
 		const all = options.has('all');
+		const regex = options.has('regex') ? compile('replace', pattern) : null;
 		let replaced = false;
 		for (const input of inputs) {
-			if (input.includes(pattern)) {
-				replaced = true;
-			}
-			yield line(
-				all
-					? input.replaceAll(pattern, replacement)
-					: input.replace(pattern, replacement)
-			);
+			const result = regex
+				? substitute(input, regex, replacement, all)
+				: plain(input, pattern, replacement, all);
+			replaced ||= result.changed;
+			yield* textToStdoutRecords(result.text, true);
 		}
 		runtime.context.status = replaced ? 0 : 1;
 	})();
@@ -413,24 +624,32 @@ function splitValue(
 	return [...pieces.slice(0, max), pieces.slice(max).join(separator)];
 }
 
+function splitMax(
+	subcommand: 'split' | 'split0',
+	options: ReadonlyMap<string, string | true>
+): number | null {
+	return options.has('max')
+		? parseIntegerOption(
+				subcommand,
+				'max',
+				String(options.get('max')),
+				(value) => value >= 0
+			)
+		: null;
+}
+
 function split(runtime: BuiltinRuntime, operands: string[]) {
 	return (async function* () {
-		const { options, positional } = parseOptions('split', operands, [
-			{ name: 'max', short: 'm', long: 'max', takesValue: true },
-			{ name: 'right', short: 'r', long: 'right', takesValue: false },
-		]);
+		const { options, positional } = parseOptions(
+			'split',
+			operands,
+			SPLIT_OPTIONS
+		);
 		const [separator, ...rest] = positional;
 		if (separator === undefined) {
 			throw new StringUsageError('string split: missing argument');
 		}
-		const max = options.has('max')
-			? parseIntegerOption(
-					'split',
-					'max',
-					String(options.get('max')),
-					(value) => value >= 0
-				)
-			: null;
+		const max = splitMax('split', options);
 
 		const values =
 			rest.length > 0 ? rest : await collectStdinLines(runtime);
@@ -446,7 +665,42 @@ function split(runtime: BuiltinRuntime, operands: string[]) {
 				anySplit = true;
 			}
 			for (const piece of pieces) {
-				yield line(piece);
+				yield field(piece);
+			}
+		}
+		runtime.context.status = anySplit ? 0 : 1;
+	})();
+}
+
+function split0(runtime: BuiltinRuntime, operands: string[]) {
+	return (async function* () {
+		const { options, positional } = parseOptions(
+			'split0',
+			operands,
+			SPLIT_OPTIONS
+		);
+		const max = splitMax('split0', options);
+		let values = positional;
+		if (values.length === 0) {
+			const bytes = await runtime.stdin.bytes({ trailingNewline: true });
+			if (bytes.length === 0) {
+				runtime.context.status = 1;
+				return;
+			}
+			values = [UTF8_DECODER.decode(bytes)];
+		}
+
+		let anySplit = false;
+		for (const value of values) {
+			const pieces = splitValue(value, '\0', max, options.has('right'));
+			if (pieces.length > 1) {
+				anySplit = true;
+			}
+			if (pieces.at(-1) === '') {
+				pieces.pop();
+			}
+			for (const piece of pieces) {
+				yield field(piece);
 			}
 		}
 		runtime.context.status = anySplit ? 0 : 1;
@@ -614,6 +868,7 @@ const SUBCOMMANDS: Record<
 	repeat,
 	replace,
 	split,
+	split0,
 	sub,
 	trim,
 	upper: changeCase('upper'),

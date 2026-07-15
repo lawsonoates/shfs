@@ -17,7 +17,7 @@ import {
 	ShellRuntimeError,
 } from '../diagnostics';
 import type { FS } from '../fs/fs';
-import { formatRecord } from '../record';
+import { type Record as ShellRecord, toPhysicalLineRecords } from '../record';
 import { collectRecordStream, toShellFailure } from './record-stream';
 import { lookupVariable, resolveIndexPositions } from './variables';
 
@@ -42,9 +42,20 @@ const NO_GLOB_MATCH_MESSAGE = 'no matches found';
 const INDEX_ATOM_WHITESPACE_REGEX = /\s/;
 const INDEX_PARSE_BOUNDARY = '__shfs_index_boundary__';
 
+async function separate(records: readonly ShellRecord[]): Promise<string[]> {
+	const lines: string[] = [];
+	const input = (async function* () {
+		yield* records;
+	})();
+	for await (const line of toPhysicalLineRecords(input)) {
+		lines.push(line.text);
+	}
+	return lines;
+}
+
 /**
  * Execute a command substitution and return its output lines.
- * Trailing empty lines are dropped, mirroring fish's trailing-newline trim.
+ * A final newline terminates a field without creating another synthetic one.
  */
 function evaluateCommandSubstitutionEffect(
 	command: string,
@@ -70,13 +81,7 @@ function evaluateCommandSubstitutionEffect(
 			),
 			toShellErrorCause
 		);
-		const lines = records.flatMap((record) =>
-			formatRecord(record).split('\n')
-		);
-		while (lines.length > 0 && lines.at(-1) === '') {
-			lines.pop();
-		}
-		return Result.ok(lines);
+		return Result.ok(await separate(records));
 	});
 }
 

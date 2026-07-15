@@ -3,10 +3,10 @@
 // Copyright (C) 2009- fish-shell contributors
 // License: GNU General Public License, version 2.
 
-// Note: regex flags (-r), capture groups, `string escape`/`unescape`/`pad`/
-// `shorten`/`collect`, NUL handling (join0/split0), visible-width handling,
-// and --fields are out of scope. This subset covers match/replace glob basics
-// plus length, sub, split, join, trim, repeat, lower, and upper.
+// Note: `string escape`/`unescape`/`pad`/`shorten`/`collect`, join0,
+// visible-width handling, and --fields are out of scope. This subset covers
+// match/replace glob and regex modes plus length, sub, split/split0, join,
+// trim, repeat, lower, and upper.
 
 import { beforeEach, expect, test } from 'bun:test';
 
@@ -116,6 +116,101 @@ test('fish string: string.fish - match -v against match-all returns 1', async ()
 	).toBe('no glob invert match');
 });
 
+// string.fish:25-31: regex mode composes with invert and quiet.
+test('fish string: string.fish - regex match composes with invert and quiet', async () => {
+	expect(
+		await run('string match -r -v "c.*" dog can cat diz; and echo "exit 0"')
+	).toBe('dog\ndiz\nexit 0');
+	expect(
+		await run(
+			'string match -q -r -v "c.*" dog can cat diz; and echo "exit 0"'
+		)
+	).toBe('exit 0');
+});
+
+// string.fish:470-477: regex mode prints the match followed by captures.
+test('fish string: string.fish - regex match emits matches and capture groups', async () => {
+	expect(await run('string match -r "cat|dog|fish" "nice dog"')).toBe('dog');
+	expect(
+		await run('string match -r "(\\d\\d?):(\\d\\d):(\\d\\d)" 2:34:56')
+	).toBe('2:34:56\n2\n34\n56');
+});
+
+// string.fish:479-483: PCRE-style \gN backreferences are accepted.
+test('fish string: string.fish - regex match supports numeric backreferences', async () => {
+	expect(
+		await run("string match -r '^(\\w{2,4})\\g1$' papa mud murmur")
+	).toBe('papa\npa\nmurmur\nmur');
+});
+
+// string.fish:548-554: participating empty capture groups are emitted.
+test('fish string: string.fish - regex match preserves empty capture groups', async () => {
+	expect(
+		await run("string match -r '^([ugoa]*)([=+-]?)([rwx]*)$' '=r'")
+	).toBe('=r\n\n=\nr');
+});
+
+// string.fish:556-559: malformed patterns are usage errors.
+test('fish string: string.fish - regex match reports compile failures', async () => {
+	const result = await runResult("string match -r '[' 'a[sd'");
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain('Regular expression compile error');
+});
+
+// string.fish:1319-1327: --regex is the long spelling and rejects a value.
+test('fish string: string.fish - regex long option rejects attached values', async () => {
+	expect(await run("string match --regex 'd.g' dog")).toBe('dog');
+	const result = await runResult('string match --regex=abc');
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain('option does not take an argument');
+});
+
+// string.fish:507-519: regex replacement supports all matches, captures,
+// dollar escaping, and replacement escapes.
+test('fish string: string.fish - regex replace expands captures and escapes', async () => {
+	expect(
+		await run(
+			"string replace -r -a '[^\\d.]+' ' ' '0 one two 3.14 four 5x'"
+		)
+	).toBe('0 3.14 5 ');
+	expect(
+		await run(
+			"string replace -r '(\\w+)\\s+(\\w+)' '$2 $1 $$' 'left right'"
+		)
+	).toBe('right left $');
+	expect(
+		await run(
+			"string replace -r '\\s*newline\\s*' '\\n' 'put a newline here'"
+		)
+	).toBe('put a\nhere');
+	expect(await run("string replace -r -a '(\\w)' '$1$1' ab")).toBe('aabb');
+});
+
+// string.fish:513-515 adapted through a line-oriented consumer: a replacement
+// newline creates two stdout lines, not one record containing a newline.
+test('fish string: string.fish - regex replacement newlines compose in pipelines', async () => {
+	expect(await run("string replace -r x '\\n' axb | string match b")).toBe(
+		'b'
+	);
+});
+
+// string.fish:522-526: no regex replacement returns status 1 while passing
+// the input through.
+test('fish string: string.fish - regex replace reports no replacement', async () => {
+	const result = await runResult('string replace -r b c a');
+	expect(result.stdout).toBe('a');
+	expect(result.exitCode).toBe(1);
+});
+
+// string.fish:1316-1317: references to unknown named groups are errors.
+test('fish string: string.fish - regex replace rejects unknown groups', async () => {
+	const result = await runResult(
+		`string replace -r o '${'$'}{bad_name}' foobar`
+	);
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain('unknown substring');
+});
+
 // ── length ──────────────────────────────────────────────────
 
 // string.fish: string length "hello, world"
@@ -208,6 +303,51 @@ test('fish string: string.fish - split on a separator', async () => {
 // string.fish: string split "" abc
 test('fish string: string.fish - split with empty separator splits characters', async () => {
 	expect(await run('string split "" abc')).toBe('a\nb\nc');
+});
+
+// string.fish:893-895: split output is explicitly separated, so trailing
+// empty fields survive command substitution instead of being trimmed as
+// inferred trailing newlines.
+test('fish string: string.fish - split preserves empty fields in command substitution', async () => {
+	expect(await run('count (string split / /)')).toBe('2');
+});
+
+// Fish's explicit split separation applies only when split is the terminal
+// command in a substitution. Once another command consumes the records, its
+// physical newline output is inferred normally by command substitution.
+test('fish string: explicit split separation expires across a pipe boundary', async () => {
+	expect(await run("count (string split / 'a\nb/c')")).toBe('2');
+	expect(await run("count (string split / 'a\nb/c' | head -n 10)")).toBe('3');
+});
+
+// string.fish:851-873,896-897: split0 consumes NUL-delimited input, ignores
+// one trailing NUL, and explicitly preserves empty fields in substitutions.
+test('fish string: string.fish - split0 preserves NUL-delimited fields', async () => {
+	expect(
+		await run("count (echo -ne 'abc\\x00def\\x00ghi\\x00' | string split0)")
+	).toBe('3');
+	expect(
+		await run("count (echo -ne '\\x00\\x00\\x00' | string split0)")
+	).toBe('3');
+	expect(
+		await run(
+			"echo -ne 'a\\x00b' | string split0; and echo Split something"
+		)
+	).toBe('a\nb\nSplit something');
+});
+
+// string.fish:883-891: explicit split0 fields and inferred echo lines compose
+// in one command substitution.
+test('fish string: string.fish - split0 composes with inferred substitution output', async () => {
+	const script = [
+		'function dualsplit',
+		'    echo alpha',
+		'    echo beta',
+		"    echo -ne 'gamma\\x00delta' | string split0",
+		'end',
+		'count (dualsplit)',
+	].join('\n');
+	expect(await run(script)).toBe('4');
 });
 
 // string.fish: string split -r -m1 / /usr/local/bin/fish

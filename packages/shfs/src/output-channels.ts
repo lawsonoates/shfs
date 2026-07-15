@@ -5,6 +5,8 @@ import type { Record as StdoutRecord } from './record';
 export interface OutputChannels<TStdout = StdoutRecord> {
 	stdout: readonly TStdout[];
 	stderr: readonly string[];
+	/** Exact stderr bytes when the producer retains byte-oriented output. */
+	stderrBytes?: Uint8Array;
 	exitCode: number;
 }
 
@@ -12,17 +14,20 @@ export interface ShellOutputInit {
 	exitCode: number;
 	stderr: Buffer;
 	stdout: Buffer;
+	stdoutText?: Buffer;
 }
 
 export class ShellOutput {
 	readonly exitCode: number;
 	readonly stderr: Buffer;
 	readonly stdout: Buffer;
+	private readonly stdoutText: Buffer;
 
 	constructor(init: ShellOutputInit) {
 		this.exitCode = init.exitCode;
 		this.stderr = init.stderr;
 		this.stdout = init.stdout;
+		this.stdoutText = init.stdoutText ?? init.stdout;
 	}
 
 	arrayBuffer(): ArrayBuffer {
@@ -42,6 +47,9 @@ export class ShellOutput {
 	}
 
 	text(encoding: BufferEncoding = 'utf8'): string {
+		if (encoding === 'utf8' || encoding === 'utf-8') {
+			return this.stdoutText.toString(encoding);
+		}
 		return this.stdout.toString(encoding);
 	}
 }

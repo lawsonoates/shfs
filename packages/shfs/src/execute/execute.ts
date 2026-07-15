@@ -19,8 +19,12 @@ import {
 	ShellRuntimeError,
 } from '../diagnostics';
 import type { FS } from '../fs/fs';
-import { formatRecord, type Record as ShellRecord } from '../record';
-import { BufferedOutputStream, type OutputStream } from '../stderr';
+import { recordsToBytes, type Record as ShellRecord } from '../record';
+import {
+	BufferedOutputStream,
+	type OutputStream,
+	type OutputStreamSnapshot,
+} from '../stderr';
 import type { Stream } from '../stream';
 import { createShellInput, type ShellInput } from './io';
 import {
@@ -38,7 +42,7 @@ import {
 	ensureNoclobberWritable,
 	getRedirectionMode,
 	isNullDevicePath,
-	writeTextToFile,
+	writeBytesToFile,
 } from './redirection';
 import {
 	type ActionStep,
@@ -101,6 +105,7 @@ interface ExecutedStepResult extends RoutedOutput {
 
 const ROOT_DIRECTORY = '/';
 const FD_TARGET_REGEX = /^&[0-9]+$/;
+const NEWLINE_BYTE = 0x0a;
 const GLOB_OPTIONS = {
 	bash: true,
 	dot: true,
@@ -678,7 +683,8 @@ export async function* runFunctionCall(
 	fs: FS,
 	context: NormalizedExecuteContext,
 	input: Stream<ShellRecord> | null = null,
-	vars?: ReadonlyMap<string, string[]>
+	vars?: ReadonlyMap<string, string[]>,
+	sharedInput?: ShellInput
 ): AsyncGenerator<ShellRecord, void> {
 	const local = new Map<string, string[]>();
 	for (const [name, values] of vars ?? []) {
@@ -690,7 +696,9 @@ export async function* runFunctionCall(
 		local.set(name, value === undefined ? [] : [value]);
 	});
 	const stdin = context.stdin;
-	context.stdin = input ? createShellInput(input) : undefined;
+	context.stdin = input
+		? (sharedInput ?? createShellInput(input))
+		: undefined;
 	context.scopes.push({ barrier: true, vars: local });
 	try {
 		// Fish semantics: the body sees the caller's $status, but a function
@@ -816,14 +824,14 @@ async function executeActionStep(params: {
 			childContext.scopes.pop();
 		}
 	}
-	const stderrLines = childContext.stderr.snapshot();
+	const stderrOutput = childContext.stderr.snapshotOutput();
 	propagateChildContext(childContext, context);
 	const routed = await routeStepOutput({
 		context,
 		fs,
 		hasNextStep: false,
 		plan,
-		stderrLines,
+		stderrOutput,
 		stdoutRecords: [],
 	});
 	return {
@@ -862,13 +870,16 @@ async function executeStreamStep(params: {
 	let stdoutRecords: ShellRecord[] = [];
 	try {
 		if (stepAssignments.length === 0 || framePushed) {
+			const sharedInput =
+				inputRecords === null ? childContext.stdin : undefined;
 			const stepOutput = CommandRegistry.executeStep({
 				step,
 				fs,
 				input:
 					inputRecords === null
-						? (childContext.stdin?.records() ?? null)
+						? (sharedInput?.records() ?? null)
 						: recordsToStream(inputRecords),
+				sharedInput,
 				context: childContext,
 				resolvedOutputRedirectPath,
 				vars: framePushed
@@ -886,14 +897,14 @@ async function executeStreamStep(params: {
 			childContext.scopes.pop();
 		}
 	}
-	const stderrLines = childContext.stderr.snapshot();
+	const stderrOutput = childContext.stderr.snapshotOutput();
 	propagateChildContext(childContext, context);
 	const routed = await routeStepOutput({
 		context,
 		fs,
 		hasNextStep,
 		plan,
-		stderrLines,
+		stderrOutput,
 		stdoutRecords,
 	});
 	return {
@@ -1162,37 +1173,65 @@ async function preflightNoclobber(
 	return true;
 }
 
-function stderrLinesToRecords(lines: readonly string[]): ShellRecord[] {
-	return lines.map((text) => ({
-		kind: 'line',
-		text,
-	}));
+function stderrOutputToRecords(output: OutputStreamSnapshot): ShellRecord[] {
+	const records: ShellRecord[] = [];
+	if (output.bytes.length > 0) {
+		records.push({ bytes: output.bytes, kind: 'bytes' });
+	}
+	if (output.needsLineSeparator) {
+		records.push({ kind: 'line', text: '' });
+	}
+	return records;
 }
 
-function recordsToText(records: readonly ShellRecord[]): string {
-	return records.map((record) => formatRecord(record)).join('\n');
+function recordsToFileBytes(records: readonly ShellRecord[]): Uint8Array {
+	return recordsToBytes(records, { trailingNewline: true });
 }
 
-function mergeChannelText(stdoutText: string, stderrText: string): string {
-	if (stdoutText === '') {
-		return stderrText;
+function concatenateBytes(
+	first: Uint8Array,
+	second: Uint8Array,
+	separator: Uint8Array = new Uint8Array()
+): Uint8Array {
+	const bytes = new Uint8Array(
+		first.length + separator.length + second.length
+	);
+	bytes.set(first);
+	bytes.set(separator, first.length);
+	bytes.set(second, first.length + separator.length);
+	return bytes;
+}
+
+function mergeChannelBytes(
+	stdoutBytes: Uint8Array,
+	stderrBytes: Uint8Array
+): Uint8Array {
+	if (stdoutBytes.length === 0) {
+		return stderrBytes;
 	}
-	if (stderrText === '') {
-		return stdoutText;
+	if (stderrBytes.length === 0) {
+		return stdoutBytes;
 	}
-	return `${stdoutText}\n${stderrText}`;
+	if (stdoutBytes.at(-1) === NEWLINE_BYTE) {
+		return concatenateBytes(stdoutBytes, stderrBytes);
+	}
+	return concatenateBytes(
+		stdoutBytes,
+		stderrBytes,
+		new Uint8Array([NEWLINE_BYTE])
+	);
 }
 
 async function writeToFileOrReport(params: {
 	append: boolean;
-	content: string;
+	content: Uint8Array;
 	context: NormalizedExecuteContext;
 	fs: FS;
 	path: string;
 }): Promise<void> {
 	const { append, content, context, fs, path } = params;
 	try {
-		await writeTextToFile(fs, path, content, { append });
+		await writeBytesToFile(fs, path, content, { append });
 	} catch (error) {
 		context.status = 1;
 		context.stderr.append(
@@ -1220,10 +1259,10 @@ async function routeStepOutput(params: {
 	fs: FS;
 	hasNextStep: boolean;
 	plan: StepRoutingPlan;
-	stderrLines: readonly string[];
+	stderrOutput: OutputStreamSnapshot;
 	stdoutRecords: readonly ShellRecord[];
 }): Promise<RoutedOutput> {
-	const { context, fs, hasNextStep, plan, stderrLines, stdoutRecords } =
+	const { context, fs, hasNextStep, plan, stderrOutput, stdoutRecords } =
 		params;
 
 	const pipeRecords: ShellRecord[] = [];
@@ -1237,13 +1276,13 @@ async function routeStepOutput(params: {
 		stderrDestination.kind === 'file' &&
 		stdoutDestination.path === stderrDestination.path;
 	if (writesToSameFile) {
-		const mergedText = mergeChannelText(
-			recordsToText(stdoutRecords),
-			stderrLines.join('\n')
+		const mergedBytes = mergeChannelBytes(
+			recordsToFileBytes(stdoutRecords),
+			stderrOutput.bytes
 		);
 		await writeToFileOrReport({
 			append: stdoutDestination.append && stderrDestination.append,
-			content: mergedText,
+			content: mergedBytes,
 			context,
 			fs,
 			path: stdoutDestination.path,
@@ -1259,7 +1298,7 @@ async function routeStepOutput(params: {
 			fs
 		);
 		await routeStderr(
-			stderrLines,
+			stderrOutput,
 			stderrDestination,
 			hasNextStep,
 			pipeRecords,
@@ -1273,6 +1312,15 @@ async function routeStepOutput(params: {
 		pipeRecords,
 		shellRecords,
 	};
+}
+
+function clearExplicitSeparation(record: ShellRecord): ShellRecord {
+	if (record.kind !== 'line' || record.separation !== 'explicit') {
+		return record;
+	}
+	const downstreamRecord = { ...record };
+	downstreamRecord.separation = undefined;
+	return downstreamRecord;
 }
 
 async function routeStdout(
@@ -1289,7 +1337,7 @@ async function routeStdout(
 	}
 
 	if (shouldPipe(destination, hasNextStep)) {
-		pipeRecords.push(...stdoutRecords);
+		pipeRecords.push(...stdoutRecords.map(clearExplicitSeparation));
 		return;
 	}
 
@@ -1301,16 +1349,13 @@ async function routeStdout(
 			shellRecords.push(...stdoutRecords);
 			return;
 		case 'shellStderr': {
-			const stdoutText = recordsToText(stdoutRecords);
-			if (stdoutText !== '') {
-				context.stderr.append(stdoutText);
-			}
+			context.stderr.appendBytes(recordsToFileBytes(stdoutRecords));
 			return;
 		}
 		case 'file':
 			await writeToFileOrReport({
 				append: destination.append,
-				content: recordsToText(stdoutRecords),
+				content: recordsToFileBytes(stdoutRecords),
 				context,
 				fs,
 				path: destination.path,
@@ -1328,7 +1373,7 @@ async function routeStdout(
 }
 
 async function routeStderr(
-	stderrLines: readonly string[],
+	stderrOutput: OutputStreamSnapshot,
 	destination: OutputDestination,
 	hasNextStep: boolean,
 	pipeRecords: ShellRecord[],
@@ -1336,31 +1381,29 @@ async function routeStderr(
 	context: NormalizedExecuteContext,
 	fs: FS
 ): Promise<void> {
-	if (stderrLines.length === 0 && destination.kind !== 'file') {
+	if (!stderrOutput.hasOutput && destination.kind !== 'file') {
 		return;
 	}
 
 	if (shouldPipe(destination, hasNextStep)) {
-		pipeRecords.push(...stderrLinesToRecords(stderrLines));
+		pipeRecords.push(...stderrOutputToRecords(stderrOutput));
 		return;
 	}
 
 	switch (destination.kind) {
 		case 'shellStdout':
-			shellRecords.push(...stderrLinesToRecords(stderrLines));
+			shellRecords.push(...stderrOutputToRecords(stderrOutput));
 			return;
 		case 'pipe':
-			shellRecords.push(...stderrLinesToRecords(stderrLines));
+			shellRecords.push(...stderrOutputToRecords(stderrOutput));
 			return;
 		case 'shellStderr':
-			if (stderrLines.length > 0) {
-				context.stderr.appendLines(stderrLines);
-			}
+			context.stderr.appendSnapshot(stderrOutput);
 			return;
 		case 'file':
 			await writeToFileOrReport({
 				append: destination.append,
-				content: stderrLines.join('\n'),
+				content: stderrOutput.bytes,
 				context,
 				fs,
 				path: destination.path,

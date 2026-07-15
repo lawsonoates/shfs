@@ -46,10 +46,20 @@ test('cat with multiple files', () => {
 	});
 });
 
-test('cat with no arguments throws error', () => {
-	expect(() => {
-		compileCat(cmd('cat', []));
-	}).toThrow('cat requires at least one file');
+test('cat with no arguments reads standard input', () => {
+	expect(compileCat(cmd('cat', []))).toEqual({
+		args: {
+			files: [],
+			numberLines: false,
+			numberNonBlank: false,
+			showAll: false,
+			showEnds: false,
+			showNonprinting: false,
+			showTabs: false,
+			squeezeBlank: false,
+		},
+		cmd: 'cat',
+	});
 });
 
 test('cat with input redirection and no file arguments', () => {
