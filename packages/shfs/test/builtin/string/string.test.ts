@@ -144,6 +144,47 @@ test('string replace expands braced numeric capture references', async () => {
 	expect(runtime.context.status).toBe(0);
 });
 
+// fish string-replace.rst: $n and ${n} accept the full numeric capture index.
+test('string replace greedily expands multi-digit capture references', async () => {
+	const pattern = '(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)';
+	const runtime = createBuiltinRuntime();
+	const records = await collect<ShellRecord>()(
+		string(runtime, {
+			operands: [
+				literal('-r'),
+				literal(pattern),
+				literal(`$10:${'$'}{10}`),
+				literal('abcdefghij'),
+			],
+			subcommand: literal('replace'),
+		})
+	);
+
+	expect(records).toEqual([{ kind: 'line', text: 'j:j' }]);
+	expect(runtime.context.status).toBe(0);
+
+	for (const reference of ['$11', `${'$'}{11}`]) {
+		const invalidRuntime = createBuiltinRuntime();
+		const invalidRecords = await collect<ShellRecord>()(
+			string(invalidRuntime, {
+				operands: [
+					literal('-r'),
+					literal(pattern),
+					literal(reference),
+					literal('abcdefghij'),
+				],
+				subcommand: literal('replace'),
+			})
+		);
+
+		expect(invalidRecords).toEqual([]);
+		expect(invalidRuntime.context.status).toBe(2);
+		expect(invalidRuntime.context.stderr.snapshot().join('\n')).toContain(
+			'unknown substring'
+		);
+	}
+});
+
 // fish string-split.rst: split0 accepts direct strings.
 test('string split0 accepts direct string operands', async () => {
 	const runtime = createBuiltinRuntime();

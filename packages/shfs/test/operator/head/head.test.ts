@@ -1,8 +1,13 @@
 import { expect, test } from 'bun:test';
 
 import { MemoryFS } from '@/fs/memory';
-import { head } from '@/operator/head/head';
-import { type ByteRecord, type FileRecord, recordsToBytes } from '@/record';
+import { head, headLines } from '@/operator/head/head';
+import {
+	type ByteRecord,
+	type FileRecord,
+	type LineRecord,
+	recordsToBytes,
+} from '@/record';
 
 const textDecoder = new TextDecoder();
 
@@ -95,4 +100,26 @@ test('head with single line file', async () => {
 	const result = await collectHeadLines(fs, createFileStream());
 
 	expect(result).toEqual(['only line']);
+});
+
+test('head line mode does not pull beyond its limit', async () => {
+	let pulls = 0;
+	const lines = async function* (): AsyncIterable<LineRecord> {
+		pulls++;
+		yield { kind: 'line', text: 'first' };
+		pulls++;
+		yield { kind: 'line', text: 'second' };
+	};
+	const selected: LineRecord[] = [];
+	for await (const line of headLines(1)(lines())) {
+		selected.push(line);
+	}
+
+	expect(selected).toEqual([{ kind: 'line', text: 'first' }]);
+	expect(pulls).toBe(1);
+
+	for await (const line of headLines(0)(lines())) {
+		selected.push(line);
+	}
+	expect(pulls).toBe(1);
 });

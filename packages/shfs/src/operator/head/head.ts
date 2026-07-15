@@ -20,13 +20,16 @@ const NEWLINE_BYTE = 0x0a;
 
 export function headLines(n: number): Transducer<LineRecord, LineRecord> {
 	return async function* (input) {
+		if (n <= 0) {
+			return;
+		}
 		let emitted = 0;
 		for await (const line of input) {
-			if (emitted >= n) {
-				break;
-			}
 			emitted++;
 			yield line;
+			if (emitted >= n) {
+				return;
+			}
 		}
 	};
 }

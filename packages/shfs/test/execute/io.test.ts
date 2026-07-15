@@ -69,3 +69,20 @@ test('readLine retains mixed and explicitly separated records', async () => {
 	expect(await input.readLine()).toBe('explicit\nvalue');
 	expect(await input.readLine()).toBeNull();
 });
+
+test('lineRecords preserve physical termination metadata', async () => {
+	const input = recordsToShellInput([
+		{ bytes: UTF8_ENCODER.encode('first\nlast'), kind: 'bytes' },
+	]);
+	const lines = input.lineRecords()[Symbol.asyncIterator]();
+
+	expect(await lines.next()).toEqual({
+		done: false,
+		value: { kind: 'line', text: 'first' },
+	});
+	expect(await lines.next()).toEqual({
+		done: false,
+		value: { kind: 'line', terminated: false, text: 'last' },
+	});
+	expect(await lines.next()).toEqual({ done: true, value: undefined });
+});

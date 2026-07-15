@@ -1,4 +1,4 @@
-import type { Record as ShellRecord } from '../record';
+import type { LineRecord, Record as ShellRecord } from '../record';
 import { formatRecord, recordsToBytes } from '../record';
 import type { OutputStream as DiagnosticOutputStream } from '../stderr';
 import type { Stream } from '../stream';
@@ -9,11 +9,13 @@ interface LineReadState {
 	decodingBytes: boolean;
 	readonly decoder: TextDecoder;
 	hasPendingLine: boolean;
+	template?: LineRecord;
 	text: string;
 }
 
 export interface ShellInput {
 	records(): Stream<ShellRecord>;
+	lineRecords(): Stream<LineRecord>;
 	lines(): Stream<string>;
 	readLine(): Promise<string | null>;
 	bytes(options?: { trailingNewline?: boolean }): Promise<Uint8Array>;
@@ -37,6 +39,10 @@ export class EmptyInput implements ShellInput {
 	}
 
 	async *lines(): Stream<string> {
+		// no lines
+	}
+
+	async *lineRecords(): Stream<LineRecord> {
 		// no lines
 	}
 
@@ -68,8 +74,14 @@ export class RecordInput implements ShellInput {
 	}
 
 	async *lines(): Stream<string> {
+		for await (const line of this.lineRecords()) {
+			yield line.text;
+		}
+	}
+
+	async *lineRecords(): Stream<LineRecord> {
 		while (true) {
-			const line = await this.readLine();
+			const line = await this.readLineRecord();
 			if (line === null) {
 				return;
 			}
@@ -78,6 +90,10 @@ export class RecordInput implements ShellInput {
 	}
 
 	async readLine(): Promise<string | null> {
+		return (await this.readLineRecord())?.text ?? null;
+	}
+
+	private async readLineRecord(): Promise<LineRecord | null> {
 		const state: LineReadState = {
 			decoder: new TextDecoder(),
 			decodingBytes: false,
@@ -111,6 +127,17 @@ export class RecordInput implements ShellInput {
 	}
 
 	private appendDecoded(state: LineReadState, text: string): void {
+		this.appendLineText(state, text);
+	}
+
+	private appendLineText(
+		state: LineReadState,
+		text: string,
+		template?: LineRecord
+	): void {
+		if (!state.hasPendingLine && text.length > 0 && template) {
+			state.template = template;
+		}
 		state.text += text;
 		state.hasPendingLine ||= text.length > 0;
 	}
@@ -118,7 +145,7 @@ export class RecordInput implements ShellInput {
 	private consumeByteRecord(
 		state: LineReadState,
 		bytes: Uint8Array
-	): string | undefined {
+	): LineRecord | undefined {
 		state.decodingBytes = true;
 		const newlineIndex = bytes.indexOf(NEWLINE_BYTE);
 		if (newlineIndex === -1) {
@@ -137,24 +164,24 @@ export class RecordInput implements ShellInput {
 		);
 		this.appendDecoded(state, state.decoder.decode());
 		this.prependByteSuffix(bytes, newlineIndex + 1);
-		return state.text;
+		return this.toLineRecord(state, true);
 	}
 
 	private consumeExplicitRecord(
 		state: LineReadState,
-		record: Extract<ShellRecord, { kind: 'line' }>
-	): string {
+		record: LineRecord
+	): LineRecord {
 		if (state.hasPendingLine) {
 			this.pendingRecords.unshift(record);
-			return state.text;
+			return this.toLineRecord(state, false);
 		}
-		return record.text;
+		return record;
 	}
 
 	private consumeRecord(
 		state: LineReadState,
 		record: ShellRecord
-	): string | undefined {
+	): LineRecord | undefined {
 		if (record.kind === 'bytes') {
 			return this.consumeByteRecord(state, record.bytes);
 		}
@@ -169,26 +196,27 @@ export class RecordInput implements ShellInput {
 	private consumeTextRecord(
 		state: LineReadState,
 		record: Exclude<ShellRecord, { kind: 'bytes' }>
-	): string | undefined {
+	): LineRecord | undefined {
 		const text =
 			record.kind === 'line' ? record.text : formatRecord(record);
+		const template = record.kind === 'line' ? record : undefined;
+		const fallback = state.hasPendingLine ? undefined : template;
 		const newlineIndex = text.indexOf('\n');
 		if (newlineIndex !== -1) {
-			state.text += text.slice(0, newlineIndex);
+			this.appendLineText(state, text.slice(0, newlineIndex), template);
 			this.prependTextSuffix(record, text.slice(newlineIndex + 1));
-			return state.text;
+			return this.toLineRecord(state, true, fallback);
 		}
 
-		state.text += text;
-		state.hasPendingLine ||= text.length > 0;
+		this.appendLineText(state, text, template);
 		return record.kind !== 'line' || record.terminated !== false
-			? state.text
+			? this.toLineRecord(state, true, fallback)
 			: undefined;
 	}
 
-	private finishLine(state: LineReadState): string | null {
+	private finishLine(state: LineReadState): LineRecord | null {
 		this.flushByteDecoder(state);
-		return state.hasPendingLine ? state.text : null;
+		return state.hasPendingLine ? this.toLineRecord(state, false) : null;
 	}
 
 	private flushByteDecoder(state: LineReadState): void {
@@ -197,6 +225,22 @@ export class RecordInput implements ShellInput {
 		}
 		this.appendDecoded(state, state.decoder.decode());
 		state.decodingBytes = false;
+	}
+
+	private toLineRecord(
+		state: LineReadState,
+		terminated: boolean,
+		fallback?: LineRecord
+	): LineRecord {
+		const line: LineRecord = {
+			...(state.template ?? fallback ?? { kind: 'line' as const }),
+			text: state.text,
+		};
+		if (!terminated) {
+			return { ...line, terminated: false };
+		}
+		line.terminated = undefined;
+		return line;
 	}
 
 	private prependByteSuffix(bytes: Uint8Array, start: number): void {

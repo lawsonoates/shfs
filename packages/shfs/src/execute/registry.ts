@@ -684,7 +684,7 @@ CommandRegistry.register('tree', {
 
 CommandRegistry.register('head', {
 	kind: 'stream',
-	handler: ({ step, fs, input, context }) => {
+	handler: ({ step, fs, input, sharedInput, context }) => {
 		return fromRecordGenerator(
 			(async function* (): Stream<ShellRecord> {
 				const inputPath = await runOrReport(
@@ -743,7 +743,10 @@ CommandRegistry.register('head', {
 					return;
 				}
 				if (input) {
-					yield* headLines(step.args.n)(toFormattedLineStream(input));
+					const lines = sharedInput
+						? sharedInput.lineRecords()
+						: toFormattedLineStream(input);
+					yield* headLines(step.args.n)(lines);
 				}
 				context.status = 0;
 			})()

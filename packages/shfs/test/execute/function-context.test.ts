@@ -4,13 +4,21 @@ import { MemoryFS } from '@/fs/memory';
 import { Shell } from '@/shell/shell';
 
 let shell!: Shell;
+let fs!: MemoryFS;
+
+const UTF8_ENCODER = new TextEncoder();
 
 beforeEach(() => {
-	shell = new Shell(new MemoryFS());
+	fs = new MemoryFS();
+	shell = new Shell(fs);
 });
 
 async function run(command: string): Promise<string> {
 	return await shell.$`${command}`.text();
+}
+
+async function runBytes(command: string): Promise<Uint8Array> {
+	return await shell.$`${command}`.bytes();
 }
 
 // shfs regression: upstream Fish has no direct function-redirection case.
@@ -38,6 +46,41 @@ test('explicit function-body pipelines do not consume inherited stdin', async ()
 	].join('\n');
 
 	expect(await run(script)).toBe('local:outer');
+});
+
+test('partial line consumers leave exact inherited stdin for later commands', async () => {
+	const expected = new Uint8Array([
+		...UTF8_ENCODER.encode('first\n'),
+		0xfe,
+		0xff,
+		0x0a,
+	]);
+	fs.setFile('/tmp/head-shared-input.bin', expected);
+	const script = [
+		'function consume',
+		'    head -n 1',
+		'    cat',
+		'end',
+		'cat /tmp/head-shared-input.bin | consume',
+	].join('\n');
+
+	expect(await runBytes(script)).toEqual(expected);
+});
+
+test('partial line consumers stream-decode split UTF-8 inherited stdin', async () => {
+	const script = [
+		'function produce',
+		"    echo -ne '\\303'",
+		"    echo -ne '\\277\\nrest\\n'",
+		'end',
+		'function consume',
+		'    head -n 1',
+		'    cat',
+		'end',
+		'produce | consume',
+	].join('\n');
+
+	expect(await runBytes(script)).toEqual(UTF8_ENCODER.encode('ÿ\nrest\n'));
 });
 
 test('function definitions persist across shell API invocations', async () => {
