@@ -1,5 +1,6 @@
 import {
 	type AssignmentIR,
+	type ExpandedWord,
 	expandedWordToString,
 	type PipelineIR,
 	type RedirectionIR,
@@ -9,6 +10,7 @@ import {
 	type StepIR,
 } from '@shfs/compiler';
 import { Result } from 'better-result';
+import picomatch from 'picomatch';
 import type { FunctionDefinition, VariableFrame } from '../builtin/types';
 import {
 	runOrReport,
@@ -99,6 +101,15 @@ interface ExecutedStepResult extends RoutedOutput {
 
 const ROOT_DIRECTORY = '/';
 const FD_TARGET_REGEX = /^&[0-9]+$/;
+const GLOB_OPTIONS = {
+	bash: true,
+	dot: true,
+	flags: 's',
+	nobrace: true,
+	noext: true,
+	nonegate: true,
+} as const;
+const SLASH_MARKER = '\0';
 
 function isScriptIR(ir: PipelineIR | ScriptIR): ir is ScriptIR {
 	return 'statements' in ir;
@@ -201,6 +212,8 @@ async function* runStatement(
 			return yield* runBeginStatement(statement, fs, context);
 		case 'if':
 			return yield* runIfStatement(statement, fs, context);
+		case 'switch':
+			return yield* runSwitchStatement(statement, fs, context);
 		case 'while':
 			return yield* runWhileStatement(statement, fs, context);
 		case 'for':
@@ -341,6 +354,111 @@ async function* runIfStatement(
 			context.status = context.status === 0 ? 1 : 0;
 		}
 		return signal;
+	} finally {
+		context.scopes.pop();
+	}
+}
+
+function switchValueEffect(
+	statement: Extract<StatementIR, { kind: 'switch' }>,
+	fs: FS,
+	context: NormalizedExecuteContext
+): ShellResult<string, ShellErrorCause> {
+	return Result.gen(async function* () {
+		const values = yield* await expandWordToValuesEffect(
+			statement.value,
+			fs,
+			context,
+			{ command: 'switch' }
+		);
+		if (values.length > 1) {
+			return yield* new ShellRuntimeError({
+				exitCode: 1,
+				message: `switch: expected at most one value, got ${values.length}`,
+			});
+		}
+		return Result.ok(values[0] ?? '');
+	});
+}
+
+async function expandCasePatterns(
+	patterns: readonly ExpandedWord[],
+	fs: FS,
+	context: NormalizedExecuteContext
+): Promise<string[] | null> {
+	const values: string[] = [];
+	for (const pattern of patterns) {
+		const expanded = await runOrReport(
+			expandWordToValuesEffect(pattern, fs, context, { command: 'case' }),
+			context
+		);
+		if (!expanded.ok) {
+			return null;
+		}
+		values.push(...expanded.value);
+	}
+	return values;
+}
+
+function matchesPattern(value: string, pattern: string): boolean {
+	if (pattern === '') {
+		return value === '';
+	}
+	const glob = pattern.replaceAll('/', SLASH_MARKER);
+	return picomatch(glob, GLOB_OPTIONS)(value.replaceAll('/', SLASH_MARKER));
+}
+
+async function* runSwitchStatement(
+	statement: Extract<StatementIR, { kind: 'switch' }>,
+	fs: FS,
+	context: NormalizedExecuteContext
+): AsyncGenerator<ShellRecord, ControlSignal> {
+	if (!(await pushAssignmentFrame(statement.assignments, fs, context))) {
+		return NORMAL_SIGNAL;
+	}
+	try {
+		const expanded = await runOrReport(
+			switchValueEffect(statement, fs, context),
+			context
+		);
+		if (!expanded.ok) {
+			return NORMAL_SIGNAL;
+		}
+
+		context.scopes.push({ vars: new Map() });
+		try {
+			for (const branch of statement.cases) {
+				const patterns = await expandCasePatterns(
+					branch.patterns,
+					fs,
+					context
+				);
+				if (
+					!patterns?.some((pattern) =>
+						matchesPattern(expanded.value, pattern)
+					)
+				) {
+					continue;
+				}
+
+				const signal = yield* runStatementList(
+					branch.body,
+					fs,
+					context
+				);
+				if (signal.kind === 'normal' && statement.negated) {
+					context.status = context.status === 0 ? 1 : 0;
+				}
+				return signal;
+			}
+
+			if (statement.negated) {
+				context.status = context.status === 0 ? 1 : 0;
+			}
+			return NORMAL_SIGNAL;
+		} finally {
+			context.scopes.pop();
+		}
 	} finally {
 		context.scopes.pop();
 	}

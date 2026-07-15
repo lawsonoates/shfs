@@ -29,6 +29,7 @@ import {
 	type SourceIR,
 	type StatementIR,
 	type StepIR,
+	type SwitchCaseIR,
 	variable,
 } from '../ir';
 import {
@@ -46,6 +47,7 @@ import {
 	type SimpleCommand,
 	Statement,
 	type StatementNode,
+	SwitchStatement,
 	WhileStatement,
 	type Word,
 	type WordPart,
@@ -113,6 +115,9 @@ class ProgramCompiler {
 	 * Compile a statement node to StatementIR.
 	 */
 	compileStatement(node: StatementNode): Result<StatementIR, CompileError> {
+		if (node instanceof SwitchStatement) {
+			return this.compileSwitchStatement(node);
+		}
 		const compiler = this;
 		return Result.gen(function* () {
 			if (node instanceof Statement) {
@@ -195,6 +200,31 @@ class ProgramCompiler {
 					'Unknown statement node'
 				)
 			);
+		});
+	}
+
+	private compileSwitchStatement(
+		node: SwitchStatement
+	): Result<StatementIR, CompileError> {
+		const compiler = this;
+		return Result.gen(function* () {
+			const cases: SwitchCaseIR[] = [];
+			for (const branch of node.cases) {
+				cases.push({
+					body: yield* compiler.compileStatements(branch.body),
+					patterns: branch.patterns.map((pattern) =>
+						compiler.expandWord(pattern)
+					),
+				});
+			}
+			return Result.ok<StatementIR>({
+				assignments: compiler.compileAssignments(node.assignments),
+				cases,
+				chainMode: node.chainMode,
+				kind: 'switch',
+				negated: node.negated,
+				value: compiler.expandWord(node.value),
+			});
 		});
 	}
 

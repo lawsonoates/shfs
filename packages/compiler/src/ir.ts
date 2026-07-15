@@ -642,6 +642,20 @@ export interface IfStatementIR {
 	elseBody: StatementIR[] | null;
 }
 
+export interface SwitchCaseIR {
+	patterns: ExpandedWord[];
+	body: StatementIR[];
+}
+
+export interface SwitchStatementIR {
+	kind: 'switch';
+	chainMode: StatementChainModeIR;
+	negated: boolean;
+	assignments: AssignmentIR[];
+	value: ExpandedWord;
+	cases: SwitchCaseIR[];
+}
+
 export interface WhileStatementIR {
 	kind: 'while';
 	chainMode: StatementChainModeIR;
@@ -694,6 +708,7 @@ export interface ReturnStatementIR {
 export type StatementIR =
 	| JobStatementIR
 	| IfStatementIR
+	| SwitchStatementIR
 	| WhileStatementIR
 	| ForStatementIR
 	| BeginStatementIR

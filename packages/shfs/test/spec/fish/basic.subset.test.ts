@@ -5,9 +5,9 @@
 
 // Note: basic.fish is a broad smoke test of fish syntax. This subset ports the
 // if/else-if/else chains, begin blocks as conditions, lazy condition
-// evaluation, and break/continue behavior. Upstream cases built on `switch`,
-// `eval`, `contains`, dynamically-invoked loop controls, and process/job
-// features are out of scope.
+// evaluation, break/continue behavior, and switch status preservation.
+// Upstream cases built on `eval`, `contains`, dynamically-invoked loop
+// controls, and process/job features are out of scope.
 
 import { beforeEach, expect, test } from 'bun:test';
 
@@ -160,6 +160,26 @@ test('fish basic: basic.fish - continue outside of a loop reports an error', asy
 	const result = await runResult('continue');
 	expect(result.exitCode).not.toBe(0);
 	expect(result.stderr).toContain('continue: Not inside of loop');
+});
+
+// basic.fish:217-223: switch itself does not reset the incoming status before
+// the selected case body starts.
+test('fish basic: basic.fish - switch preserves status before its case body', async () => {
+	const script = [
+		'false',
+		'switch one',
+		'case one',
+		'    echo $status',
+		'end',
+	].join('\n');
+	expect(await run(script)).toBe('1');
+});
+
+// basic.fish:489-490: an unterminated switch is a parse error.
+test('fish basic: basic.fish - switch requires a closing end', async () => {
+	const result = await runResult('switch one\ncase one\n echo nope');
+	expect(result.exitCode).not.toBe(0);
+	expect(result.stderr).toContain('end');
 });
 
 // basic.fish:11-17: comments on the command line and inside loop bodies.
