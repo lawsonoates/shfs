@@ -101,6 +101,13 @@ inferred from older notes.
 
 - File management actions: `cp` (`-r`, `-f`, `-i`), `mv` (`-f`, `-i`),
   `mkdir` (`-p`), `rm` (`-r`, `-f`, `-i`), `touch` (`-a`, `-m`)
+- Symlinks created through the `FS` interface:
+  - absolute, relative, dangling, chained, and intermediate-path links, with
+    deterministic loop detection
+  - `cp -r` preserves links; `mv` and `rm` operate on the link rather than its
+    target
+  - path expansion, recursive globs, `cd`, `grep -r`/`-R`, and `tree` apply
+    the covered follow/no-follow behavior
 - Listing and reading: `ls` (`-a`, `-l`), `cat` (numbering/ends/tabs/squeeze
   display flags), `head` / `tail` (`-n`, files or stdin); plain file replay
   and stdin line selection preserve exact bytes and final-line termination,
@@ -108,7 +115,10 @@ inferred from older notes.
 - Recursive file discovery with `find`:
   - starting paths or default current directory
   - deterministic recursive traversal over the virtual filesystem
-  - predicates: `-name`, `-iname`, `-path`, `-type` (`f`, `d`)
+  - symlink traversal modes: `-H`, `-L`, and `-P`
+  - predicates: `-name`, `-iname`, `-path`, `-ipath`, `-wholename`,
+    `-iwholename`, `-regex`, `-iregex`, `-type` (`f`, `d`, `l`), `-xtype`,
+    `-empty`, `-true`, and `-false`
   - traversal controls: `-maxdepth`, `-mindepth`, `-depth`
   - default `-print` action
   - deterministic errors for invalid predicates and arguments
@@ -168,6 +178,10 @@ inferred from older notes.
   `functions`, `alias`, `abbr`, `status`, `time`
 - Additional fish builtins: `argparse`, `contains`, `math`, `path`, `printf`,
   `random`, `realpath`, `set_color`, `ulimit`, `umask`, `version`, `psub`
+- Link creation and introspection commands such as `ln` and `readlink`;
+  symlinks are created through the host `FS` interface
+- Symlink predicates `test -L` / `test -h` and symlink-target rendering in
+  `ls -l`
 - `read` flags and multi-variable forms (`-l`/`-g`, `-n`, `-z`, `-d`,
   `--list`, prompts, multiple names)
 - `string` subcommands and flags beyond the documented set: `escape`,
@@ -178,8 +192,6 @@ inferred from older notes.
 
 ### Environment and host behavior
 
-- Symlink support and symlink-focused commands/behavior
-  - this remains out of scope even when a glob would otherwise match/traverse symlinks
 - Permission model beyond basic virtual FS behavior
 - The `env` command (command-scoped assignment uses the fish
   `name=value cmd` form instead)
