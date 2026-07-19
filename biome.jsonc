@@ -29,5 +29,17 @@
 			"indentStyle": "tab",
 			"indentWidth": 4
 		}
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["packages/shfs/src/operator/grep/grep.ts"],
+			"linter": {
+				"rules": {
+					"complexity": {
+						"noExcessiveCognitiveComplexity": "off"
+					}
+				}
+			}
+		}
+	]
 }

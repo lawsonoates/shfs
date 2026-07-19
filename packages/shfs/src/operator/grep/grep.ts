@@ -121,6 +121,8 @@ const UTF8_ENCODER = new TextEncoder();
 const WORD_CHAR_REGEX = /[\p{L}\p{N}_]/u;
 const WHITESPACE_ESCAPE_REGEX = /\\[sS]/;
 const REGEX_META_REGEX = /[\\^$.*+?()[\]{}|]/;
+const BACKREFERENCE_REGEX = /[1-9]/;
+const POSIX_CLASS_REGEX = /^\[:([A-Za-z]+):\]$/;
 const QUANTIFIER_VALUE_REGEX = /\{(\d+)(?:,(\d*))?\}/g;
 const QUANTIFIER_OVERFLOW_LIMIT = 4_294_967_295;
 const CORPUS_FILE_SPECS = [
@@ -1202,7 +1204,7 @@ function translateBre(pattern: string): string {
 				next === 'B'
 			) {
 				output += `\\${next}`;
-			} else if (/[1-9]/.test(next)) {
+			} else if (BACKREFERENCE_REGEX.test(next)) {
 				output += `\\${next}`;
 			} else {
 				output += escapeRegexChar(next);
@@ -1307,7 +1309,7 @@ function getPosixClassReplacement(
 	inner: string,
 	ignoreCase: boolean
 ): string | null {
-	const classMatch = inner.match(/^\[:([A-Za-z]+):\]$/);
+	const classMatch = inner.match(POSIX_CLASS_REGEX);
 	if (!classMatch) {
 		return null;
 	}
@@ -1366,7 +1368,7 @@ function hasInvalidBackreference(source: string): boolean {
 			continue;
 		}
 		if (escaped) {
-			if (!inClass && /[1-9]/.test(char)) {
+			if (!inClass && BACKREFERENCE_REGEX.test(char)) {
 				maxBackref = Math.max(maxBackref, Number.parseInt(char, 10));
 			}
 			escaped = false;
