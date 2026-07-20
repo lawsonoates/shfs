@@ -1,6 +1,12 @@
 import type { Stream } from '../stream';
 
 export interface FS {
+	/**
+	 * Absolute directory consumers treat as the user's working root (like
+	 * $HOME). '/' for plain filesystems; code mode requires a dedicated
+	 * directory below '/' so paths agree between the shell and the sandbox.
+	 */
+	readonly home: string;
 	/** Metadata for `path`, following symlinks. Detect links with readLink, not this. */
 	stat(path: string): Promise<FsInfo>;
 	/** Whether `path` exists. Returns false for absent paths; does not throw for absence. */

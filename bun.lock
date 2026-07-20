@@ -29,6 +29,24 @@
         "typescript": "^5",
       },
     },
+    "examples/codemode": {
+      "name": "codemode",
+      "dependencies": {
+        "@openrouter/ai-sdk-provider": "^1.5.4",
+        "@secure-exec/core": "^0.3.3",
+        "ai": "^6.0.27",
+        "shfs": "workspace:*",
+        "zod": "^4.3.5",
+      },
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+      },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
+    },
     "examples/turso-agent-fs": {
       "name": "turso-agent-fs",
       "dependencies": {
@@ -64,6 +82,7 @@
       "name": "shfs",
       "version": "0.3.5",
       "devDependencies": {
+        "@secure-exec/core": "^0.3.3",
         "@shfs/compiler": "workspace:*",
         "@tsconfig/bun": "catalog:",
         "@types/bun": "catalog:",
@@ -75,8 +94,12 @@
         "typescript": "^5.0.0",
       },
       "peerDependencies": {
+        "@secure-exec/core": "^0.3.3",
         "typescript": "^5",
       },
+      "optionalPeers": [
+        "@secure-exec/core",
+      ],
     },
     "packages/web": {
       "name": "@shfs/web",
@@ -411,6 +434,8 @@
 
     "@quansync/fs": ["@quansync/fs@1.0.0", "", { "dependencies": { "quansync": "^1.0.0" } }, "sha512-4TJ3DFtlf1L5LDMaM6CanJ/0lckGNtJcMjQ1NAV6zDmA0tEHKZtxNKin8EgPaVX1YzljbxckyT2tJrpQKAtngQ=="],
 
+    "@rivetkit/bare-ts": ["@rivetkit/bare-ts@0.6.2", "", {}, "sha512-3qndQUQXLdwafMEqfhz24hUtDPcsf1Bu3q52Kb8MqeH8JUh3h6R4HYW3ZJXiQsLcyYyFM68PuIwlLRlg1xDEpg=="],
+
     "@rolldown/binding-android-arm64": ["@rolldown/binding-android-arm64@1.0.0-rc.9", "", { "os": "android", "cpu": "arm64" }, "sha512-lcJL0bN5hpgJfSIz/8PIf02irmyL43P+j1pTCfbD1DbLkmGRuFIA4DD3B3ZOvGqG0XiVvRznbKtN0COQVaKUTg=="],
 
     "@rolldown/binding-darwin-arm64": ["@rolldown/binding-darwin-arm64@1.0.0-rc.9", "", { "os": "darwin", "cpu": "arm64" }, "sha512-J7Zk3kLYFsLtuH6U+F4pS2sYVzac0qkjcO5QxHS7OS7yZu2LRs+IXo+uvJ/mvpyUljDJ3LROZPoQfgBIpCMhdQ=="],
@@ -446,6 +471,18 @@
     "@rollup/rollup-linux-x64-gnu": ["@rollup/rollup-linux-x64-gnu@4.60.0", "", { "os": "linux", "cpu": "x64" }, "sha512-EtylprDtQPdS5rXvAayrNDYoJhIz1/vzN2fEubo3yLE7tfAw+948dO0g4M0vkTVFhKojnF+n6C8bDNe+gDRdTg=="],
 
     "@sec-ant/readable-stream": ["@sec-ant/readable-stream@0.4.1", "", {}, "sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg=="],
+
+    "@secure-exec/core": ["@secure-exec/core@0.3.3", "", { "dependencies": { "@rivetkit/bare-ts": "^0.6.2", "@secure-exec/sidecar": "0.3.3", "zod": "^4.1.11" } }, "sha512-atqGtAW+uFzbk6wx2n4GcVN6SLWJ3Pf6sYQ61vVyOF+od2wI5MiWJXEk/wvsKi9MRYe1A+NdiwuaqUDVIvZyXQ=="],
+
+    "@secure-exec/sidecar": ["@secure-exec/sidecar@0.3.3", "", { "optionalDependencies": { "@secure-exec/sidecar-darwin-arm64": "0.3.3", "@secure-exec/sidecar-darwin-x64": "0.3.3", "@secure-exec/sidecar-linux-arm64-gnu": "0.3.3", "@secure-exec/sidecar-linux-x64-gnu": "0.3.3" } }, "sha512-0HgjSks96FgzRD7HoApCX8wIh2W2cUHIWeKO7Qw+LwSlzVcqHvhLbeHmJdvujEpTrST0yyLwg40km5PqYzJoOw=="],
+
+    "@secure-exec/sidecar-darwin-arm64": ["@secure-exec/sidecar-darwin-arm64@0.3.3", "", { "os": "darwin", "cpu": "arm64" }, "sha512-9z8hx9N+Al96FV+d5XOWWIrdkCslaWrteaYboVeMsa18cqOxOhyBr/nrvhqNSaFcSa8xL2pZbPTnY9lKDWV+2Q=="],
+
+    "@secure-exec/sidecar-darwin-x64": ["@secure-exec/sidecar-darwin-x64@0.3.3", "", { "os": "darwin", "cpu": "x64" }, "sha512-KX2GJ0wLSxSDfE+8DSRP4y/tpSMnFtqMty8SQsTKQLi3ml91GqESYA8TREmV2JfbRyxwWSx+Ep96gnv9vjlHZw=="],
+
+    "@secure-exec/sidecar-linux-arm64-gnu": ["@secure-exec/sidecar-linux-arm64-gnu@0.3.3", "", { "os": "linux", "cpu": "arm64" }, "sha512-ZjeGXxX/c6YfFpgt1sfUubV8umdsooS+jFg+A+ODfJnuF6F6dq/t+GJN4vl/BFZm18gmvdE4IE52iJoOqYar8A=="],
+
+    "@secure-exec/sidecar-linux-x64-gnu": ["@secure-exec/sidecar-linux-x64-gnu@0.3.3", "", { "os": "linux", "cpu": "x64" }, "sha512-HGrMqJRO36ZltG4EeaozGpY4MNSxA9S4DZXCN91Vfy4kmh1eCzZl95YPFDOAvEgdGy0gesgt+BEWvPKyh7U/ag=="],
 
     "@shfs/compiler": ["@shfs/compiler@workspace:packages/compiler"],
 
@@ -650,6 +687,8 @@
     "chalk": ["chalk@4.1.2", "", { "dependencies": { "ansi-styles": "^4.1.0", "supports-color": "^7.1.0" } }, "sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA=="],
 
     "citty": ["citty@0.2.1", "", {}, "sha512-kEV95lFBhQgtogAPlQfJJ0WGVSokvLr/UEoFPiKKOXF7pl98HfUVUD0ejsuTCld/9xH9vogSywZ5KqHzXrZpqg=="],
+
+    "codemode": ["codemode@workspace:examples/codemode"],
 
     "color-convert": ["color-convert@2.0.1", "", { "dependencies": { "color-name": "~1.1.4" } }, "sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ=="],
 

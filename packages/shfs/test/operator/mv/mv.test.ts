@@ -7,6 +7,7 @@ import type { Stream } from '@/stream';
 import { normalizePath } from '@/util/path';
 
 class RecordingFS implements FS {
+	readonly home = '/';
 	private readonly files = new Set<string>();
 	private readonly directories = new Set<string>(['/']);
 	readonly renameCalls: Array<{ src: string; dest: string }> = [];

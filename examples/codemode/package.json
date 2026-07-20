@@ -1,0 +1,24 @@
+{
+	"dependencies": {
+		"@openrouter/ai-sdk-provider": "^1.5.4",
+		"@secure-exec/core": "^0.3.3",
+		"ai": "^6.0.27",
+		"shfs": "workspace:*",
+		"zod": "^4.3.5"
+	},
+	"devDependencies": {
+		"@tsconfig/bun": "catalog:",
+		"@types/bun": "catalog:",
+		"@typescript/native-preview": "catalog:"
+	},
+	"scripts": {
+		"typecheck": "tsgo -b --noEmit"
+	},
+	"module": "index.ts",
+	"name": "codemode",
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"private": true,
+	"type": "module"
+}

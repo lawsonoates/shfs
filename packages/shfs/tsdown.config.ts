@@ -4,6 +4,7 @@ export default defineConfig({
 	entry: {
 		index: 'src/index.ts',
 		fs: 'src/fs/index.ts',
+		'code-mode': 'src/code-mode/index.ts',
 		'util/path': 'src/util/path.ts',
 	},
 	format: ['esm'],
